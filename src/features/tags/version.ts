@@ -128,3 +128,57 @@ export function findPreviousTag(selected: string, all: string[]): string {
   }
   return bestTag;
 }
+
+const WHITESPACE_RE = /\s/;
+const FORBIDDEN_TAG_CHARS = "~^:?*[\\";
+
+/**
+ * Why `name` can't be a new tag, or null when it can: the practical subset of
+ * `git check-ref-format` a typed tag trips, checked on the trimmed name the
+ * create sends, reporting the first rule violated. The backend's
+ * `validate_tag_name` stays the authority; this only lets the field say so early.
+ */
+export function validateTagName(name: string): string | null {
+  const n = name.trim();
+  if (!n) return "Enter a tag name";
+  if (WHITESPACE_RE.test(n)) return "Tag names can't contain spaces";
+  if (n.startsWith("-")) return `Tag names can't start with "-"`;
+  // A trailing "." is a whole-name rule; a leading "." and a trailing ".lock"
+  // apply to every "/"-separated part. The one-level rule is skipped: a tag
+  // always sits under refs/tags/.
+  if (n.endsWith(".")) return `Tag names can't end with "."`;
+  if (n.startsWith("/")) return `Tag names can't start with "/"`;
+  if (n.endsWith("/")) return `Tag names can't end with "/"`;
+  if (n.includes("//")) return `Tag names can't contain "//"`;
+  const parts = n.split("/");
+  for (const part of parts) {
+    const subject =
+      parts.length === 1 ? "Tag names" : `The tag name part "${part}"`;
+    if (part.startsWith(".")) return `${subject} can't start with "."`;
+    if (part.endsWith(".lock")) return `${subject} can't end with ".lock"`;
+  }
+  if (n.includes("..")) return `Tag names can't contain ".."`;
+  // A lone "@" is deliberately VALID: git's anti-"@" rule matches the entire
+  // refname, never refs/tags/<name> — mirrors validate_tag_name (ops.rs), probe-verified.
+  if (n.includes("@{")) return `Tag names can't contain "@{"`;
+  for (const ch of n) {
+    const code = ch.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f) {
+      return "Tag names can't contain control characters";
+    }
+    if (FORBIDDEN_TAG_CHARS.includes(ch)) {
+      return `Tag names can't contain "${ch}"`;
+    }
+  }
+  return null;
+}
+
+/** Whether a trimmed tag name is one the release would create: typed, not an
+ *  existing tag, and valid. */
+export function isNewTagName(trimmed: string, existing: string[]): boolean {
+  return (
+    !!trimmed &&
+    !existing.includes(trimmed) &&
+    validateTagName(trimmed) === null
+  );
+}

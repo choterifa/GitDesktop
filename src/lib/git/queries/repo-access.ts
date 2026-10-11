@@ -72,13 +72,18 @@ export function useRepoWriteAccess(
   lens: RemoteLens | undefined,
   enabled: boolean,
 ) {
-  return useQuery({
+  // Signed out the probe can't answer — every caller waits for sign-in.
+  const signedIn = Boolean(useForgeStatus(repo).data?.authenticated);
+  const query = useQuery({
     queryKey: ["repo", repo, "write-access", lens ?? "origin"] as const,
     queryFn: () => api.forgeRepoWriteAccess(repo, lens),
-    enabled,
+    enabled: enabled && signedIn,
     staleTime: 5 * 60_000,
     retry: false,
   });
+  // Signed out, cached access is another account's truth — masked; the sign-out
+  // cache reset itself is the account-change-reset-residuals backlog item.
+  return signedIn ? query : { ...query, data: undefined };
 }
 
 /** The compact reasons appended to a disabled MENU ITEM's label: a disabled item
@@ -140,15 +145,19 @@ export function useBotAvatarUrl(name: string | null) {
 /** Batch-resolves commit-author `email → GitHub avatar` for the recent-commits window
  *  and primes the commit-avatar module, so History rows for authors with no GitHub
  *  no-reply and no Gravatar upgrade from initials. GitHub-only (gated on the detected
- *  provider, so a GitLab/Bitbucket repo never fires the commits API). 15min staleTime —
+ *  provider, so a GitLab/Bitbucket repo never fires the commits API, and on sign-in,
+ *  since a signed-out status still names a github.com repo). 15min staleTime —
  *  the window shifts as commits land. Best-effort: `retry: false`, and the backend
  *  returns `[]` on empty-repo/offline. */
 export function useCommitAuthorAvatarIndex(repo: string) {
-  const provider = useForgeStatus(repo).data?.provider;
+  const forge = useForgeStatus(repo).data;
   const query = useQuery({
     queryKey: ["commit-author-avatars", repo] as const,
     queryFn: () => api.ghCommitAuthorAvatars(repo),
-    enabled: repo !== "" && provider === "github",
+    enabled:
+      repo !== "" &&
+      forge?.provider === "github" &&
+      Boolean(forge.authenticated),
     staleTime: 15 * 60 * 1000,
     retry: false,
   });

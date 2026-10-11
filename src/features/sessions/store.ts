@@ -13,6 +13,7 @@ import { presentError } from "@/lib/error-summary";
 import { normPath } from "@/lib/git/path";
 import { repoIdentity } from "@/lib/git/repo-identity";
 import {
+  type BranchCleanup,
   commitWorktreeAll,
   createWorktree,
   listWorktrees,
@@ -534,6 +535,17 @@ async function runTurn(
   }
 }
 
+/** A discard that leaves the session's branch behind says so; only the spared
+ *  outcomes have a note. */
+const KEPT_BRANCH_NOTES: Partial<
+  Record<BranchCleanup, (branch: string) => string>
+> = {
+  sparedMoved: (branch) =>
+    `Session discarded. Its branch ${branch} gained new commits, so it was kept.`,
+  sparedUnreadable: (branch) =>
+    `Session discarded. Its branch ${branch} was kept.`,
+};
+
 /**
  * Concurrent, multi-turn agent sessions: each runs full-auto in its own
  * throwaway worktree, streaming independently. Start a session → run turns
@@ -564,7 +576,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       const live: Record<string, Set<string>> = {};
       for (const repo of repos) {
         try {
-          await pruneWorktrees(repo);
+          // A busy prune mustn't drop the repo: the list read takes no lock and
+          // itself skips entries whose folder is gone.
+          await pruneWorktrees(repo).catch(() => undefined);
           const list = await listWorktrees(repo);
           live[repo] = new Set(list.map((w) => normPath(w.path)));
         } catch {
@@ -873,9 +887,16 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       await stopTestContainer(s.worktreePath).catch(() => undefined);
     }
     try {
-      await removeWorktree(s.repoPath, s.worktreePath, s.branch, true);
+      const { branchCleanup } = await removeWorktree(
+        s.repoPath,
+        s.worktreePath,
+        s.branch,
+        true,
+      );
       persist(removeTranscript(id));
       removeSession(get, set, id);
+      const keptNote = KEPT_BRANCH_NOTES[branchCleanup];
+      if (keptNote) toast.info(keptNote(s.branch));
     } catch (e) {
       toastError(e);
       set({ busyId: null });

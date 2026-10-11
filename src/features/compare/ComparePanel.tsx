@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CompareBranchCombobox } from "@/features/compare/CompareBranchCombobox";
 import { CommitContextMenuItems } from "@/features/history/CommitContextMenu";
 import {
+  CHERRY_PICK_ALREADY_APPLIED,
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
@@ -39,6 +40,8 @@ import {
 import {
   CreateRefFromCommitDialog,
   createRefFromCommitFormOpts,
+  MergeParentDialog,
+  type MergePickTarget,
 } from "@/features/history/HistoryDialogs";
 import { useCommitCommentsGate } from "@/features/pulls/CommitComments";
 import { CreatePrDialog } from "@/features/pulls/CreatePrDialog";
@@ -186,7 +189,12 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
   const [menuTarget, setMenuTarget] = useState<{
     hash: string;
     onCurrentBranch: boolean;
+    isMerge: boolean;
   } | null>(null);
+  // A merge commit's revert or cherry-pick, awaiting its mainline parent.
+  const [mergePick, setMergePick] = useState<
+    (MergePickTarget & { repo: string }) | null
+  >(null);
   const [branchHash, setBranchHash] = useState<string | null>(null);
   const [tagHash, setTagHash] = useState<string | null>(null);
   const shownBranchHash = useRetained(branchHash);
@@ -259,7 +267,12 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
     toast.success(checkoutCommitSuccessToast(hash));
   }
 
-  async function doRevertCommit(hash: string) {
+  // A merge commit routes to the mainline-parent dialog instead of the confirm.
+  async function doRevertCommit(hash: string, isMerge: boolean) {
+    if (isMerge) {
+      setMergePick({ hash, op: "revert", repo: repoPath });
+      return;
+    }
     const revertIn = repoPath;
     if (!(await useConfirm.getState().ask(revertCommitConfirm(hash)))) return;
     if (refuseIfSwitched(revertIn, "nothing was reverted")) return;
@@ -268,13 +281,17 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       return;
     }
     try {
-      await revertCommit.mutateAsync(hash);
+      await revertCommit.mutateAsync({ hash });
     } catch (e) {
       onError(e);
     }
   }
 
-  async function doCherryPick(hash: string) {
+  async function doCherryPick(hash: string, isMerge: boolean) {
+    if (isMerge) {
+      setMergePick({ hash, op: "cherry-pick", repo: repoPath });
+      return;
+    }
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
@@ -286,7 +303,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
     }
     let applied: boolean;
     try {
-      applied = await cherryPick.mutateAsync(hash);
+      applied = await cherryPick.mutateAsync({ hash });
     } catch (e) {
       onError(e);
       return;
@@ -294,9 +311,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
     if (applied) {
       toast.success(`Cherry-picked ${hash.slice(0, 7)}`);
     } else {
-      toast.info(
-        "Nothing to cherry-pick — these changes are already on this branch.",
-      );
+      toast.info(CHERRY_PICK_ALREADY_APPLIED);
     }
   }
 
@@ -314,12 +329,15 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       .closest("[data-row]")
       ?.getAttribute("data-row");
     if (!hash) return suppress();
-    const onCurrentBranch = ahead.some((c) => c.hash === hash);
-    if (!onCurrentBranch && !behind.some((c) => c.hash === hash)) {
-      return suppress();
-    }
+    const aheadCommit = ahead.find((c) => c.hash === hash);
+    const commit = aheadCommit ?? behind.find((c) => c.hash === hash);
+    if (!commit) return suppress();
     selectCompareCommit(hash);
-    setMenuTarget({ hash, onCurrentBranch });
+    setMenuTarget({
+      hash,
+      onCurrentBranch: aheadCommit !== undefined,
+      isMerge: commit.isMerge,
+    });
   }
 
   if (status.isPending || branches.isPending)
@@ -537,8 +555,10 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
               hash={menuTarget.hash}
               actions={{
                 checkout: doCheckoutCommit,
-                revert: menuTarget.onCurrentBranch ? doRevertCommit : undefined,
-                cherryPick: doCherryPick,
+                revert: menuTarget.onCurrentBranch
+                  ? (hash) => doRevertCommit(hash, menuTarget.isMerge)
+                  : undefined,
+                cherryPick: (hash) => doCherryPick(hash, menuTarget.isMerge),
                 createBranch: (hash) => {
                   branchForm.reset({ name: "" });
                   setBranchHash(hash);
@@ -573,6 +593,13 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
         fieldLabel="Tag name"
         placeholder="v1.0.0"
         submitLabel="Create tag"
+      />
+
+      <MergeParentDialog
+        repoPath={repoPath}
+        target={mergePick}
+        openedIn={mergePick?.repo ?? null}
+        onClose={() => setMergePick(null)}
       />
     </div>
   );

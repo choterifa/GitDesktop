@@ -77,9 +77,12 @@ import { useRetained } from "@/lib/use-retained";
 import { cn } from "@/lib/utils";
 import { CommitContextMenuItems } from "./CommitContextMenu";
 import {
+  CHERRY_PICK_ALREADY_APPLIED,
+  CHERRY_PICK_ALREADY_APPLIED_SHORT,
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
+  RANGE_MERGE_ITEM_REASON,
   revertCommitConfirm,
   UNDO_ROOT_COMMIT_CONFIRM,
 } from "./commit-confirms";
@@ -89,6 +92,8 @@ import {
   CreateRefFromCommitDialog,
   createRefFromCommitFormOpts,
   DeleteTagDialog,
+  MergeParentDialog,
+  type MergePickTarget,
   ResetCommitDialog,
 } from "./HistoryDialogs";
 import { SquashDialog } from "./RewriteDialogs";
@@ -153,9 +158,14 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   // Hashes to copy, oldest-first, and the chosen destination branch.
   const [pickOnto, setPickOnto] = useState<{
     hashes: string[];
+    isMerge: boolean;
     repo: string;
   } | null>(null);
   const [pickOntoBranch, setPickOntoBranch] = useState("");
+  // A merge commit's revert or cherry-pick, awaiting its mainline parent.
+  const [mergePick, setMergePick] = useState<
+    (MergePickTarget & { repo: string }) | null
+  >(null);
   const [filterText, setFilterText] = useState("");
   // "Search all history" mode: server-side message grep across every commit,
   // not just the loaded pages. Kept separate from the operational log so the
@@ -353,7 +363,12 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
     toast.success(checkoutCommitSuccessToast(hash));
   }
 
-  async function doRevertCommit(hash: string) {
+  // A merge commit routes to the mainline-parent dialog instead of the confirm.
+  async function doRevertCommit(hash: string, isMerge: boolean) {
+    if (isMerge) {
+      setMergePick({ hash, op: "revert", repo: repoPath });
+      return;
+    }
     const revertIn = repoPath;
     if (!(await useConfirm.getState().ask(revertCommitConfirm(hash)))) return;
     if (refuseIfSwitched(revertIn, "nothing was reverted")) return;
@@ -361,11 +376,19 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       toast.info(PROMOTION_BLOCKS_CHECKOUT);
       return;
     }
-    void revertCommit.mutateAsync(hash).catch(onError);
+    void revertCommit.mutateAsync({ hash }).catch(onError);
   }
 
   // `alreadyApplied` is the one thing the two menus word differently.
-  async function doCherryPick(hash: string, alreadyApplied: string) {
+  async function doCherryPick(
+    hash: string,
+    alreadyApplied: string,
+    isMerge: boolean,
+  ) {
+    if (isMerge) {
+      setMergePick({ hash, op: "cherry-pick", alreadyApplied, repo: repoPath });
+      return;
+    }
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
@@ -377,7 +400,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
     }
     let applied: boolean;
     try {
-      applied = await cherryPick.mutateAsync(hash);
+      applied = await cherryPick.mutateAsync({ hash });
     } catch (e) {
       onError(e);
       return;
@@ -675,10 +698,20 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   const editCommits = commits.slice(0, Math.max(editLen, 0));
   const editBase = commits[Math.max(editLen, 0)]?.hash ?? "";
 
-  function openCherryPickOnto(hash: string) {
-    setPickOnto({ hashes: effectiveSelection(hash), repo: repoPath });
+  function openCherryPickOnto(commit: CommitSummary) {
+    const hashes = effectiveSelection(commit.hash);
+    // Only a lone merge asks for its mainline, read off the row itself; a batch
+    // holding one is gated off.
+    const isMerge =
+      hashes.length === 1 && hashes[0] === commit.hash && commit.isMerge;
+    setPickOnto({ hashes, isMerge, repo: repoPath });
     setPickOntoBranch(targetBranches[0]?.name ?? "");
   }
+  // One mainline can't speak for every merge in a batch, so a multi-selection
+  // holding a merge can't be picked as one.
+  const selectionHasMerge = commits.some(
+    (c) => c.isMerge && selected.has(c.hash),
+  );
 
   // One shared context menu for the whole list (capture phase, so it records the
   // right-clicked row before the menu opens) instead of a portal per commit.
@@ -709,11 +742,12 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           hash={commit.hash}
           actions={{
             checkout: doCheckoutCommit,
-            revert: doRevertCommit,
+            revert: (hash) => doRevertCommit(hash, commit.isMerge),
             cherryPick: (hash) =>
               doCherryPick(
                 hash,
-                "Nothing to cherry-pick — already on this branch.",
+                CHERRY_PICK_ALREADY_APPLIED_SHORT,
+                commit.isMerge,
               ),
             createBranch: (hash) => {
               branchForm.reset({ name: "" });
@@ -735,11 +769,13 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       return (
         <>
           <ContextMenuItem
-            disabled={!canPickOnto}
-            onClick={() => openCherryPickOnto(commit.hash)}
+            disabled={!canPickOnto || selectionHasMerge}
+            onClick={() => openCherryPickOnto(commit)}
           >
             Cherry-pick {selected.size} commits to branch…
-            {pickOntoDisabledHint}
+            {canPickOnto && selectionHasMerge
+              ? ` (${RANGE_MERGE_ITEM_REASON})`
+              : pickOntoDisabledHint}
           </ContextMenuItem>
           <ContextMenuItem disabled={!canSquash} onClick={openSquash}>
             Squash {selected.size} commits…
@@ -789,7 +825,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
         <ContextMenuItem onClick={() => doCheckoutCommit(commit.hash)}>
           Checkout commit
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => doRevertCommit(commit.hash)}>
+        <ContextMenuItem
+          onClick={() => doRevertCommit(commit.hash, commit.isMerge)}
+        >
           Revert changes in commit
         </ContextMenuItem>
         <ContextMenuSeparator />
@@ -815,7 +853,8 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           onClick={() =>
             doCherryPick(
               commit.hash,
-              "Nothing to cherry-pick — these changes are already on this branch.",
+              CHERRY_PICK_ALREADY_APPLIED,
+              commit.isMerge,
             )
           }
         >
@@ -823,7 +862,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!canPickOnto}
-          onClick={() => openCherryPickOnto(commit.hash)}
+          onClick={() => openCherryPickOnto(commit)}
         >
           Cherry-pick to branch…
           {pickOntoDisabledHint}
@@ -1083,6 +1122,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       <CherryPickOntoDialog
         repoPath={repoPath}
         hashes={pickOnto?.hashes ?? null}
+        isMerge={pickOnto?.isMerge ?? false}
         openedIn={pickOnto?.repo ?? null}
         branch={pickOntoBranch}
         onBranchChange={setPickOntoBranch}
@@ -1090,6 +1130,13 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
         currentBranch={currentBranch}
         onClose={() => setPickOnto(null)}
         onDone={() => setSelected(new Set())}
+      />
+
+      <MergeParentDialog
+        repoPath={repoPath}
+        target={mergePick}
+        openedIn={mergePick?.repo ?? null}
+        onClose={() => setMergePick(null)}
       />
     </>
   );

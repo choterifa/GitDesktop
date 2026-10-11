@@ -553,6 +553,27 @@ function hasStandaloneWord(text: string, word: string): boolean {
   return false;
 }
 
+/** Kinds whose message is a Rust-written sentence (forge/http.rs, forge/jira.rs):
+ *  a transport phrase only counts on the headline, since a phrase under an app
+ *  sentence is detail and the sentence may be the fact the user needs. gh and
+ *  glab stay whole-message: their CLIs pad and wrap one diagnostic over lines. */
+const FIRST_LINE_NETWORK_KINDS: ReadonlySet<AppError["kind"]> = new Set([
+  "bitbucket",
+  "jira",
+]);
+
+/** The masked, lower-cased text the transport phrases are matched against. */
+function transportScanText(
+  kind: AppError["kind"],
+  message: string,
+  masked: string,
+): string {
+  if (kind === "glab") return collapseSpaces(masked);
+  if (FIRST_LINE_NETWORK_KINDS.has(kind))
+    return maskTransportIdentifiers(firstMeaningfulLine(message)).toLowerCase();
+  return masked;
+}
+
 /** The calm "couldn't reach" line for a network kind whose raw text names a
  *  transport failure, or null. Mirrors Rust's precedence: an answered 401/403
  *  is a credential verdict and a rate limit is its own story, whatever words
@@ -582,8 +603,7 @@ function networkSummary(
     ...(kind === "glab" ? GLAB_OUTAGE_PHRASES : []),
     ...RUST_TRANSPORT_PHRASES,
   ];
-  // glab pads and wraps all phrases; other kinds keep the raw spacing.
-  const scan = kind === "glab" ? collapseSpaces(text) : text;
+  const scan = transportScanText(kind, message, text);
   const transport =
     phrases.some((p) => hasStandaloneWord(scan, p)) ||
     (kind === "gh" && GH_OUTAGE_STATUS.test(text));
@@ -604,13 +624,18 @@ const TRANSPORT_GATE_PHRASES = [
 
 /** Scope hints respect networkSummary's verdict, the "Couldn't reach " prefix,
  *  Rust ": <phrase>" suffixes, anchored ": eof", and the masked
- *  TRANSPORT_GATE_PHRASES scan. */
+ *  TRANSPORT_GATE_PHRASES scan. FIRST_LINE_NETWORK_KINDS read those arms from
+ *  the headline alone, the same rule networkSummary applies to them. */
 export function isTransportError(error: unknown): boolean {
-  const message = errorMessage(error).trim();
+  const full = errorMessage(error).trim();
+  const message =
+    isAppError(error) && FIRST_LINE_NETWORK_KINDS.has(error.kind)
+      ? firstMeaningfulLine(full)
+      : full;
   const lower = message.toLowerCase();
   const scan = maskTransportIdentifiers(message).toLowerCase();
   return (
-    (isAppError(error) && networkSummary(error.kind, message) !== null) ||
+    (isAppError(error) && networkSummary(error.kind, full) !== null) ||
     message.startsWith("Couldn't reach ") ||
     RUST_TRANSPORT_PHRASES.some((phrase) => message.endsWith(`: ${phrase}`)) ||
     // URL and host tokens cannot contain the space-separated EOF suffix.

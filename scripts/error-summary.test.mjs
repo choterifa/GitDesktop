@@ -1374,3 +1374,63 @@ test("a composed presentation of a raw refusal stays raw in Details, under its h
   assert.equal(bare.summary, "Reset failed");
   assert.equal(bare.fullText, RESET_REFUSAL);
 });
+
+test("a plain-string error summarizes to its first line and keeps the raw text", () => {
+  const raw =
+    "Provider returned 401: invalid API key for this model endpoint, check the key\n  at request (client.js:1)\n  at retry (client.js:2)";
+  const p = presentError(raw);
+  assert.equal(p.label, null);
+  assert.equal(
+    p.summary,
+    "Provider returned 401: invalid API key for this model endpoint, check the key",
+  );
+  assert.equal(p.fullText, raw);
+  assert.equal(p.long, true);
+});
+
+test("a busy error's summary names what holds the repository", () => {
+  // The pinned wire shape (busy_serializes_to_the_pinned_wire_shape, error.rs).
+  const sentence =
+    "A worktree removal is still running — try again when it finishes.";
+  const p = presentError({
+    kind: "busy",
+    message: sentence,
+    holder: "a worktree removal",
+  });
+  assert.equal(p.label, "Operation in progress");
+  assert.equal(p.summary, sentence);
+  assert.equal(p.long, false);
+});
+
+/** `created_repo_response`'s disclosure (forge/bitbucket.rs), verbatim with
+ *  `{url}` filled in, over a transport cause in http.rs's message shape. */
+const BB_CREATED_HEADLINE =
+  "The repository WAS created at https://bitbucket.org/ws/repo — add it as a remote and push manually, or delete it there and retry.";
+const BB_TRANSPORT_LINE =
+  "could not read Bitbucket response: error decoding response body: connection failed";
+const BB_CREATED_DISCLOSURE = `${BB_CREATED_HEADLINE}\n${BB_TRANSPORT_LINE}`;
+
+test("a Bitbucket app sentence on line one outranks a transport phrase below it", () => {
+  const p = presentError(appError("bitbucket", BB_CREATED_DISCLOSURE));
+  assert.equal(p.summary, BB_CREATED_HEADLINE);
+  assert.equal(p.fullText, BB_CREATED_DISCLOSURE);
+  assert.equal(p.long, true);
+});
+
+test("isTransportError reads a Bitbucket disclosure by its headline", () => {
+  assert.equal(
+    isTransportError(appError("bitbucket", BB_CREATED_DISCLOSURE)),
+    false,
+  );
+  assert.equal(
+    isTransportError(appError("bitbucket", BB_TRANSPORT_LINE)),
+    true,
+  );
+});
+
+test("a bare Bitbucket transport failure still reads as unreachable", () => {
+  assert.equal(
+    presentError(appError("bitbucket", BB_TRANSPORT_LINE)).summary,
+    reach("Bitbucket"),
+  );
+});
