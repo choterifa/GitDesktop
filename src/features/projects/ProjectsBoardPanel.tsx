@@ -24,6 +24,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
+import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
 import { usePanelPortalContainer } from "@/components/panel-portal";
 import { SelectClipText } from "@/components/select-clip-text";
 import { Button } from "@/components/ui/button";
@@ -88,7 +89,12 @@ import {
   planBulkFieldWrite,
   scopeToIssueFieldWritable,
 } from "@/lib/git/project-field-routing";
-import type { BoardMoveBucket, BoardWriteKind } from "@/lib/git/queries";
+import type {
+  BoardMoveBucket,
+  BoardWriteKind,
+  PendingProjectWrite,
+  PendingProjectWriteKind,
+} from "@/lib/git/queries";
 import {
   forgeReady,
   useAddDraftItem,
@@ -112,6 +118,7 @@ import {
   useGhScopes,
   useMoveBoardCard,
   usePendingBoardWrites,
+  usePendingProjectWrites,
   useProjectFields,
   useProjectItems,
   useProjectViews,
@@ -670,6 +677,37 @@ const NO_COLLAPSED: ReadonlySet<string> = new Set<string>();
  *  writes to one card settle in an order nothing promises. Worded by what IS
  *  pending: a lone one-item field write is a cell edit, not a bulk change. */
 const BULK_PENDING_REASON = "Applying the last bulk change…";
+/** Whether a write of one of `kinds` is pending in `writes`, and whether every
+ *  such write is parked offline. A project or view hold reads this rather than its
+ *  mutation's observer: the observer describes only its latest call, and the panel
+ *  outlives repository switches, so another repo's call would hide this one's. */
+function projectWriteHold(
+  writes: readonly PendingProjectWrite[],
+  ...kinds: PendingProjectWriteKind[]
+): { pending: boolean; paused: boolean } {
+  const matches = writes.filter(
+    (w) => w.kind !== null && kinds.includes(w.kind),
+  );
+  return {
+    pending: matches.length > 0,
+    paused: matches.length > 0 && matches.every((w) => w.isPaused),
+  };
+}
+/** The toolbar's line for each project or view write still on its way. */
+const PROJECT_WRITE_LINE: Record<PendingProjectWriteKind, string> = {
+  "project-create": "Creating a project…",
+  "project-edit": "Saving the project details…",
+  "project-close": "Closing the project…",
+  "project-reopen": "Reopening the project…",
+  "project-delete": "Deleting the project…",
+  "view-create": "Creating a view…",
+  "view-duplicate": "Duplicating a view…",
+  "view-rename": "Renaming a view…",
+  "view-layout": "Saving the layout…",
+  "view-fields": "Saving the view's fields…",
+  "view-edit": "Saving a view…",
+  "view-delete": "Deleting a view…",
+};
 const FIELD_PENDING_REASON = "Still saving your last field change…";
 /** Why a table cell holds while a write's re-read is on its way — the slot's own
  *  "Updating…" phase, said as a reason. */
@@ -2275,6 +2313,12 @@ export function ProjectsBoardPanel({
   // a subscription had to be alive to record. One read feeds all of them; the
   // counts are just this list, filtered.
   const pendingWrites = usePendingBoardWrites(repoPath);
+  // The project and view writes, read apart: they narrate in the toolbar but never
+  // join the board-write count, which holds pagination and settles board reads.
+  const pendingProjectWrites = usePendingProjectWrites(
+    repoPath,
+    projectId ?? undefined,
+  );
   const movePending = pendingWrites.some((w) => w.kind === "move");
   const cardWritePending = pendingWrites.some(
     (w) => w.kind !== null && CARD_WRITE_KINDS.has(w.kind),
@@ -2290,12 +2334,15 @@ export function ProjectsBoardPanel({
   const bulkPendingWrites = pendingWrites.filter(
     (w) => w.kind !== null && BULK_WRITE_KINDS.has(w.kind),
   );
-  const bulkPendingReason =
+  // Parked only when every one is: a write still running is what the copy names.
+  const bulkPendingReason = pendingWriteReason(
+    bulkPendingWrites.length > 0 && bulkPendingWrites.every((w) => w.isPaused),
     bulkPendingWrites.length === 1 &&
-    bulkPendingWrites[0].kind === "bulk-fields" &&
-    bulkPendingWrites[0].count === 1
+      bulkPendingWrites[0].kind === "bulk-fields" &&
+      bulkPendingWrites[0].count === 1
       ? FIELD_PENDING_REASON
-      : BULK_PENDING_REASON;
+      : BULK_PENDING_REASON,
+  );
   // The one bulk kind the CURSOR has to follow, and so the only one the chase
   // waits on: a bulk move re-buckets its cards into another column, where the
   // other three either leave them in place or take them off the board entirely.
@@ -3200,14 +3247,45 @@ export function ProjectsBoardPanel({
   const saveViewLayout = useUpdateProjectView();
   const deleteView = useDeleteProjectView();
   const duplicateView = useDuplicateProjectView();
-  // Deleting a project or a view holds offline rather than park: a parked delete
-  // lands for everyone whenever the connection returns.
+  // Destructive and create writes (deletes, close, the creates, the board's
+  // confirmed card verbs) hold offline rather than park: a parked one lands for
+  // everyone whenever the connection returns.
   const offlineHold = useOfflineHold();
   /** The project or view dialog on screen. Kept through the close — only
    *  `lifecycleOpen` drops — so a dialog's title and seeds hold still while it
    *  animates out. */
   const [lifecycle, setLifecycle] = useState<LifecycleDialog | null>(null);
   const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  // Every project and view hold, matched to this repo (and, past a create, the
+  // project on screen) by each write's own variables.
+  const newProjectWrite = projectWriteHold(
+    pendingProjectWrites,
+    "project-create",
+  );
+  const editProjectWrite = projectWriteHold(
+    pendingProjectWrites,
+    "project-edit",
+  );
+  const closeWrite = projectWriteHold(
+    pendingProjectWrites,
+    "project-close",
+    "project-reopen",
+  );
+  const deleteProjectWrite = projectWriteHold(
+    pendingProjectWrites,
+    "project-delete",
+  );
+  const viewNameWrite = projectWriteHold(
+    pendingProjectWrites,
+    lifecycle?.kind === "rename-view" ? "view-rename" : "view-create",
+  );
+  const viewFieldsWrite = projectWriteHold(pendingProjectWrites, "view-fields");
+  const duplicateViewWrite = projectWriteHold(
+    pendingProjectWrites,
+    "view-duplicate",
+  );
+  const deleteViewWrite = projectWriteHold(pendingProjectWrites, "view-delete");
+  const layoutWrite = projectWriteHold(pendingProjectWrites, "view-layout");
   /** Which run of a lifecycle dialog is current, the contract
    *  {@link dialogSessionRef} keeps for the board's own dialogs: a write that
    *  outlives its dialog may close only the run that fired it. */
@@ -3267,6 +3345,9 @@ export function ProjectsBoardPanel({
     const ownerId = projects.data?.ownerId;
     // Belt-and-braces: the dialog's Create is held with OWNER_UNKNOWN_FOOTER_REASON then.
     if (!ownerId) return;
+    // A create holds offline rather than park. No await stands between this and
+    // the write, so it refuses ahead of the pin below, which a refusal mustn't leave.
+    if (refuseWhileOffline()) return;
     const session = lifecycleSessionRef.current;
     const generation = pickGenerationRef.current;
     const repo = repoPath;
@@ -3348,22 +3429,26 @@ export function ProjectsBoardPanel({
   // offer rather than the write still going.
   const closeReopenHeld = (() => {
     switch (true) {
-      case closeProject.isPending:
-        return pendingItemReason(closeProject.isPaused, "saving…");
+      case closeWrite.pending:
+        return pendingItemReason(closeWrite.paused, "saving…");
       case projectScopeReadOnly(scopes.data):
         return "needs the project scope";
       case project?.closed === true && !project.viewerCanReopen:
         return "no permission to reopen";
       case project?.closed === false && !project.viewerCanClose:
         return "no permission to close";
+      // Reopen asks nothing, so its row holds offline the way close's confirm
+      // does: either flip changes the project for everyone.
+      case project?.closed === true && offlineHold !== undefined:
+        return OFFLINE_ITEM_REASON;
       default:
         return undefined;
     }
   })();
   const deleteProjectHeld =
     statusWriteHeld ??
-    (deleteProject.isPending
-      ? pendingItemReason(deleteProject.isPaused, "deleting…")
+    (deleteProjectWrite.pending
+      ? pendingItemReason(deleteProjectWrite.paused, "deleting…")
       : undefined) ??
     (offlineHold ? OFFLINE_ITEM_REASON : undefined);
   // Close asks first, so it carries the ellipsis; a held row drops it for the
@@ -3386,9 +3471,10 @@ export function ProjectsBoardPanel({
           title: `Close ${target.title}?`,
           body: "It keeps its items, views and fields, and you can still work on it here. It moves to the Closed group of the project list until you reopen it.",
           confirmLabel: "Close project",
+          holdOffline: true,
         });
-        if (!ok) return;
-      }
+        if (!ok || refuseWhileOffline()) return;
+      } else if (refuseWhileOffline()) return;
       // Pinned BEFORE the optimistic patch: the catalog files a closed project
       // under Closed, and a board shown only as the fallback would otherwise jump
       // to whichever project leads the reordered list.
@@ -3471,9 +3557,10 @@ export function ProjectsBoardPanel({
           "Saving this view…",
         )
       : undefined) ??
-    (duplicateView.isPending
-      ? pendingWriteReason(duplicateView.isPaused, "Duplicating a view…")
-      : undefined);
+    (duplicateViewWrite.pending
+      ? pendingWriteReason(duplicateViewWrite.paused, "Duplicating a view…")
+      : undefined) ??
+    offlineHold;
   const viewFieldsReason = viewActionReason(true) ?? viewsRefreshing;
   const lastView =
     views.data !== undefined &&
@@ -3482,15 +3569,15 @@ export function ProjectsBoardPanel({
   const deleteViewReason =
     viewActionReason(true) ??
     (lastView ? LAST_VIEW_REASON : undefined) ??
-    (deleteView.isPending
-      ? pendingWriteReason(deleteView.isPaused, "Deleting a view…")
+    (deleteViewWrite.pending
+      ? pendingWriteReason(deleteViewWrite.paused, "Deleting a view…")
       : undefined) ??
     offlineHold;
   const saveLayoutReason =
     viewActionReason(true) ??
     unknownLayoutHeld ??
-    (saveViewLayout.isPending
-      ? pendingWriteReason(saveViewLayout.isPaused, "Saving the layout…")
+    (layoutWrite.pending
+      ? pendingWriteReason(layoutWrite.paused, "Saving the layout…")
       : undefined);
 
   function openNewView() {
@@ -3519,6 +3606,7 @@ export function ProjectsBoardPanel({
     const generation = pickGenerationRef.current;
     const repo = repoPath;
     if (run?.kind === "new-view") {
+      if (refuseWhileOffline()) return;
       let created: ProjectViewDef;
       try {
         created = await createView.mutateAsync({
@@ -3582,6 +3670,8 @@ export function ProjectsBoardPanel({
       const board = projectId;
       const repo = repoPath;
       const generation = pickGenerationRef.current;
+      // A duplicate is a create: it holds offline rather than park.
+      if (refuseWhileOffline()) return;
       let created: ProjectViewDef;
       try {
         created = await duplicateView.mutateAsync({
@@ -4219,8 +4309,9 @@ export function ProjectsBoardPanel({
       title: "Convert this draft to an issue?",
       body: `Creates a real issue in ${target} from the draft's title and notes, and swaps the ${noun} over to it. The draft itself is gone once it lands.`,
       confirmLabel: "Convert",
+      holdOffline: true,
     });
-    if (!ok) return;
+    if (!ok || refuseWhileOffline()) return;
     try {
       const { number, url } = await convertDraft.mutateAsync({
         repo: repoPath,
@@ -4252,16 +4343,18 @@ export function ProjectsBoardPanel({
         title: `Archive this ${noun}?`,
         body: ARCHIVE_BODY[showArchived ? "shown" : "hidden"](noun, surface),
         confirmLabel: "Archive",
+        holdOffline: true,
       },
       remove: {
         title: `Remove this ${noun} from the project?`,
         body: REMOVE_BODY[item.content.kind](noun),
         confirmLabel: "Remove",
         confirmVariant: "destructive" as const,
+        holdOffline: true,
       },
     }[action];
     const ok = await useConfirm.getState().ask(prompt);
-    if (!ok) return;
+    if (!ok || refuseWhileOffline()) return;
     // Armed BEFORE the write, not after it. The write's own `onMutate` patches the
     // card out within a microtask, so the cursor has to follow it THERE — waiting
     // for the round trip would leave the keyboard parked on a card that is already
@@ -4488,12 +4581,14 @@ export function ProjectsBoardPanel({
               surface,
             ),
             confirmLabel: "Archive",
+            holdOffline: true,
           }
         : {
             title: `Remove ${cardCount(n, noun)} from the project?`,
             body: bulkRemoveBody(cards, noun),
             confirmLabel: "Remove",
             confirmVariant: "destructive" as const,
+            holdOffline: true,
           };
     // BEFORE the prompt, never after it. The confirm dialog takes focus as it
     // opens and restores it to whatever held focus beforehand — which is the bar
@@ -4504,7 +4599,7 @@ export function ProjectsBoardPanel({
     // drop a keyboard user on <body> as the dialog closed onto a dead button.
     handOffBarFocus();
     const ok = await useConfirm.getState().ask(prompt);
-    if (!ok) return;
+    if (!ok || refuseWhileOffline()) return;
     // Re-read the GATE after the prompt, not the card set: the user confirmed
     // those N cards, and re-deriving the set would silently write a different one.
     // The board can go held under an open prompt (another write starts, a page
@@ -5553,6 +5648,15 @@ export function ProjectsBoardPanel({
       });
     }
   }
+  // Every project and view write earns a line: a dialog can close over one, and
+  // a parked one has nothing else on screen saying it is still waiting.
+  for (const write of pendingProjectWrites) {
+    if (write.kind !== null)
+      pendingLines.push({
+        key: write.mutationId,
+        label: PROJECT_WRITE_LINE[write.kind],
+      });
+  }
 
   // The toolbar slot's words: a lone write names itself, several are counted, and
   // once every write has settled the slot stays up through the re-read that
@@ -5774,6 +5878,7 @@ export function ProjectsBoardPanel({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-52">
               <DropdownMenuItem
+                className={MENU_HELD_ROW_CLASS}
                 disabled={newProjectHeld !== undefined}
                 onClick={openNewProject}
               >
@@ -5783,6 +5888,7 @@ export function ProjectsBoardPanel({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                className={MENU_HELD_ROW_CLASS}
                 disabled={statusWriteHeld !== undefined}
                 onClick={openEditProject}
               >
@@ -5791,6 +5897,7 @@ export function ProjectsBoardPanel({
                   : `Edit details (${statusWriteHeld})`}
               </DropdownMenuItem>
               <DropdownMenuItem
+                className={MENU_HELD_ROW_CLASS}
                 disabled={closeReopenHeld !== undefined}
                 onClick={() => void toggleProjectClosed()}
               >
@@ -5800,6 +5907,7 @@ export function ProjectsBoardPanel({
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
+                className={MENU_HELD_ROW_CLASS}
                 disabled={deleteProjectHeld !== undefined}
                 onClick={() => void removeProject()}
               >
@@ -6624,7 +6732,9 @@ export function ProjectsBoardPanel({
           was opened on from `lifecycle`, which outlives the close. */}
       <NewProjectDialog
         open={lifecycleOpen && lifecycle?.kind === "new-project"}
-        pending={createProject.isPending}
+        pending={newProjectWrite.pending}
+        paused={newProjectWrite.paused}
+        offlineHold={offlineHold}
         target={{
           repository: projects.data?.repositoryId
             ? (projects.data.repositoryNameWithOwner ?? null)
@@ -6641,7 +6751,8 @@ export function ProjectsBoardPanel({
       />
       <EditProjectDialog
         open={lifecycleOpen && lifecycle?.kind === "edit-project"}
-        pending={editProjectDetails.isPending}
+        pending={editProjectWrite.pending}
+        paused={editProjectWrite.paused}
         seedTitle={lifecycle?.kind === "edit-project" ? lifecycle.title : ""}
         seedDescription={
           lifecycle?.kind === "edit-project" ? lifecycle.description : ""
@@ -6657,11 +6768,9 @@ export function ProjectsBoardPanel({
           lifecycleOpen &&
           (lifecycle?.kind === "new-view" || lifecycle?.kind === "rename-view")
         }
-        pending={
-          lifecycle?.kind === "rename-view"
-            ? renameView.isPending
-            : createView.isPending
-        }
+        pending={viewNameWrite.pending}
+        paused={viewNameWrite.paused}
+        offlineHold={offlineHold}
         seedName={lifecycle?.kind === "rename-view" ? lifecycle.view.name : ""}
         onOpenChange={(o) => {
           if (!o) closeLifecycle();
@@ -6670,7 +6779,8 @@ export function ProjectsBoardPanel({
       />
       <ViewFieldsDialog
         open={lifecycleOpen && lifecycle?.kind === "view-fields"}
-        pending={setViewFields.isPending}
+        pending={viewFieldsWrite.pending}
+        paused={viewFieldsWrite.paused}
         viewName={
           lifecycle?.kind === "view-fields"
             ? lifecycle.view.name || UNTITLED_VIEW

@@ -25,10 +25,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  pendingIssueWrite,
   useAddSubIssue,
   useIssueDependencies,
   useIssueList,
   useIssueRelations,
+  usePendingIssueWrites,
   useRemoveSubIssue,
   useSetIssueDependency,
 } from "@/lib/git/queries";
@@ -38,6 +40,7 @@ import type {
   RelatedIssue,
   RemoteLens,
 } from "@/lib/git/types";
+import { pendingWriteReason } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -52,9 +55,38 @@ export function StateIcon({ state }: { state: string }) {
   );
 }
 
+/** A pending rail write's visible note, worded by the caller for whether it is
+ *  saving or parked offline; nothing while no write is pending. */
+export function PendingWriteNote({ reason }: { reason: string | undefined }) {
+  if (reason === undefined) return null;
+  return (
+    <p role="status" className="text-[11px] text-muted-foreground">
+      {reason}
+    </p>
+  );
+}
+
+/** A row's own pending remove: the hold's reason, and whether the write is
+ *  parked offline rather than running. */
+export type RowPending = { reason: string; paused: boolean };
+
+/** A pending write's {@link RowPending}, worded `inFlight` while it runs. */
+export function rowPending(
+  pending: { paused: boolean } | undefined,
+  inFlight: string,
+): RowPending | undefined {
+  return pending
+    ? {
+        reason: pendingWriteReason(pending.paused, inFlight),
+        paused: pending.paused,
+      }
+    : undefined;
+}
+
 /** A clickable related-issue row with an always-visible remove button. Callers
- *  that pass `pending` get it disabled with a spinner while their unlink is in
- *  flight, so a slow one can't double-fire. */
+ *  that pass `pending` get it held while their unlink is in flight or parked, so
+ *  a slow one can't double-fire; it spins only while the write runs, since a
+ *  parked one isn't working. */
 export function RelatedRow({
   issue,
   onOpen,
@@ -65,7 +97,8 @@ export function RelatedRow({
   issue: RelatedIssue;
   onOpen: (n: number) => void;
   onRemove: () => void;
-  pending?: boolean;
+  /** Set while this row's own remove is pending. */
+  pending?: RowPending;
   /** Set when this row's remove can't be used right now — the viewer lacks the
    *  access it needs (sub-issues are write, dependency and related-issue links
    *  are triage), or the surface is still loading the entity. The button stays
@@ -88,38 +121,36 @@ export function RelatedRow({
         variant="ghost"
         size="icon-xs"
         aria-label={`Remove #${issue.number}`}
-        disabled={pending || !!removeDisabledReason}
-        reason={removeDisabledReason}
+        disabled={pending !== undefined || !!removeDisabledReason}
+        reason={removeDisabledReason ?? pending?.reason}
+        // Full opacity only for the running spinner.
         className={cn(
           "text-muted-foreground",
-          // Full opacity only for the in-flight spinner, on both disabled
-          // paths: a reason-less pending remove is natively disabled, a
-          // permission-blocked one is aria-disabled.
-          pending && "disabled:opacity-100 aria-disabled:opacity-100",
+          pending && !pending.paused && "aria-disabled:opacity-100",
         )}
         onClick={onRemove}
       >
-        {pending ? <Spinner /> : <XIcon />}
+        {pending && !pending.paused ? <Spinner /> : <XIcon />}
       </DisabledReasonButton>
     </div>
   );
 }
 
-/** A labelled dependency list (Blocked by / Blocking). `isRemoving` reports which
- *  row's unlink is in flight so its remove button can show pending + disable. */
+/** A labelled dependency list (Blocked by / Blocking). `removing` reports a row's
+ *  pending unlink, if any, so its remove button can show pending + hold. */
 function RelationList({
   label,
   items,
   onOpen,
   onRemove,
-  isRemoving,
+  removing,
   removeDisabledReason,
 }: {
   label: string;
   items: RelatedIssue[];
   onOpen: (n: number) => void;
   onRemove: (target: number) => void;
-  isRemoving: (target: number) => boolean;
+  removing: (target: number) => RowPending | undefined;
   /** Set when the viewer may not edit dependencies: each row's remove stays
    *  visible but disabled, with this text as its hint. */
   removeDisabledReason?: string;
@@ -133,7 +164,7 @@ function RelationList({
           issue={it}
           onOpen={onOpen}
           onRemove={() => onRemove(it.number)}
-          pending={isRemoving(it.number)}
+          pending={removing(it.number)}
           removeDisabledReason={removeDisabledReason}
         />
       ))}
@@ -170,7 +201,11 @@ export function IssuePicker({
       items={candidates}
       itemToStringLabel={(i: IssueInfo) => `#${i.number} ${i.title}`}
       value={null}
-      onValueChange={(item: IssueInfo | null) => item && onPick(item.number)}
+      // The input disables while pending, but a popup already open could still
+      // pick; a held pick would start a second write.
+      onValueChange={(item: IssueInfo | null) =>
+        item && !pending && onPick(item.number)
+      }
       openOnInputClick
     >
       <ComboboxInput
@@ -224,6 +259,26 @@ export function IssueSubIssues({
   const selectIssue = useUiStore((s) => s.selectIssue);
   const [mode, setMode] = useState<null | "existing">(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // From the cache, not the observers: this section remounts per issue, and a
+  // write still pending on the issue switched back to must still show.
+  const pendingWrites = usePendingIssueWrites(repoPath);
+  const addPending = pendingIssueWrite(
+    pendingWrites,
+    "add-sub-issue",
+    (v) => v.parentId === issueId,
+  );
+  const addReason = addPending
+    ? pendingWriteReason(addPending.paused, "Adding the sub-issue…")
+    : undefined;
+  const removing = (subId: string) =>
+    rowPending(
+      pendingIssueWrite(
+        pendingWrites,
+        "remove-sub-issue",
+        (v) => v.parentId === issueId && v.subId === subId,
+      ),
+      "Removing this sub-issue…",
+    );
 
   const onError = (e: unknown) => toastError(e);
   const data = relations.data;
@@ -335,10 +390,11 @@ export function IssueSubIssues({
                 .mutateAsync({ parentId: issueId, subId: s.id })
                 .catch(onError)
             }
-            pending={removeSub.isPending && removeSub.variables?.subId === s.id}
+            pending={removing(s.id)}
             removeDisabledReason={disabledReason}
           />
         ))}
+        <PendingWriteNote reason={addReason} />
 
         {subIssues.length === 0 && mode === null && (
           <p className="text-[11px] text-muted-foreground">
@@ -352,7 +408,7 @@ export function IssueSubIssues({
               <IssuePicker
                 repoPath={repoPath}
                 exclude={exclude}
-                pending={addSub.isPending}
+                pending={addReason !== undefined}
                 onPick={(n) => void pickExisting(n)}
                 lens={lens}
               />
@@ -397,6 +453,40 @@ export function IssueRelationships({
   const setDep = useSetIssueDependency(repoPath, lens);
   const selectIssue = useUiStore((s) => s.selectIssue);
   const [addRelation, setAddRelation] = useState<IssueRelation | null>(null);
+  // From the cache, so a write still pending survives this section's remount.
+  const pendingWrites = usePendingIssueWrites(repoPath);
+  const dependencyPending = (
+    match: (v: {
+      relation: IssueRelation;
+      target: number;
+      add: boolean;
+    }) => boolean,
+    inFlight: string,
+  ) =>
+    rowPending(
+      pendingIssueWrite(
+        pendingWrites,
+        "dependency",
+        (v) => v.number === number && match(v),
+      ),
+      inFlight,
+    );
+  const addReason = dependencyPending(
+    (v) => v.add,
+    "Adding the relationship…",
+  )?.reason;
+  const removing = (relation: IssueRelation) => (target: number) =>
+    dependencyPending(
+      (v) => !v.add && v.relation === relation && v.target === target,
+      "Removing this relationship…",
+    );
+  // Any dependency write on this issue holds the picker, as before.
+  const pickerPending =
+    pendingIssueWrite(
+      pendingWrites,
+      "dependency",
+      (v) => v.number === number,
+    ) !== undefined;
 
   const onError = (e: unknown) => toastError(e);
   const depsLoaded = dependencies.data !== undefined;
@@ -475,12 +565,7 @@ export function IssueRelationships({
           items={blockedBy}
           onOpen={open}
           onRemove={(t) => removeDependency("blocked_by", t)}
-          isRemoving={(t) =>
-            setDep.isPending &&
-            setDep.variables?.add === false &&
-            setDep.variables.relation === "blocked_by" &&
-            setDep.variables.target === t
-          }
+          removing={removing("blocked_by")}
           removeDisabledReason={disabledReason}
         />
       )}
@@ -490,15 +575,11 @@ export function IssueRelationships({
           items={blocking}
           onOpen={open}
           onRemove={(t) => removeDependency("blocking", t)}
-          isRemoving={(t) =>
-            setDep.isPending &&
-            setDep.variables?.add === false &&
-            setDep.variables.relation === "blocking" &&
-            setDep.variables.target === t
-          }
+          removing={removing("blocking")}
           removeDisabledReason={disabledReason}
         />
       )}
+      <PendingWriteNote reason={addReason} />
       {depsLoaded &&
         blockedBy.length === 0 &&
         blocking.length === 0 &&
@@ -522,7 +603,7 @@ export function IssueRelationships({
                     ? excludeBlockedBy
                     : excludeBlocking
                 }
-                pending={setDep.isPending}
+                pending={pickerPending}
                 onPick={(t) => void addDependency(addRelation, t)}
                 lens={lens}
               />
