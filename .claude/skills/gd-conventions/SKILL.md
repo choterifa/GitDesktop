@@ -522,38 +522,75 @@ one grep away on the named symbol. Grows via Conventions-sync.
   chains would republish it through the barrel. Guards: `queries-internal-import`
   (callers outside), `queries-internal-reexport` (re-exports anywhere inside),
   `queries-barrel-internal-reference` (the barrel may not name it at all).
-- **Mutation identity pinning** — a `useRepoMutation` whose mutationFn or
-  callbacks close over repo/lens AND whose host survives a repo switch passes
-  `identity: ["<op>", repo, lens]`: react-query re-pushes hook options onto an
-  in-flight mutation on every render, so without the key a switch retargets the
-  create and its callbacks to the NEW repo; a changed key hash detaches the
-  mutation with its options frozen instead. Callers must consume the promise
-  (`mutateAsync`), since the observer's `isPending`/`data` go idle at the
-  switch. Exemplar: `useCreateIssue`; a plain `useMutation` spells the same pin
-  `mutationKey:`. Guard: `mutation-identity-pinning` ratchets the cache-seeding
-  sites and the create-family ones it can see by NAME, following delegation one
-  level inside a module. It scans the git-queries package, `lib/jira/queries.ts`
-  and the local PR/issue query modules (both local wrappers key unconditionally,
+- **Mutation identity pinning** — every mutation is constructed through
+  `useMutation` from `@/lib/started-mutation`, never react-query's own (guard:
+  `raw-react-query-mutation`, with `started-mutation-present` pinning the
+  helper's path). It snapshots each mutation's options into the context
+  react-query builds once per execution, so a mutation's mutationFn and option
+  callbacks are the ones in effect when it started (the observer's options at
+  the `mutate` call; a per-call `mutate(v, { … })` callback is fixed at the call
+  anyway), however its host re-renders before it settles: a write parked
+  offline lands on, refreshes and patches the repo/PR/lens/link it started on.
+  `scope` and `gcTime` are not snapshotted (query-core reads them off the live
+  options), so a `scope.id` derived from render state would follow a switch.
+  The helper's `meta` key (`STARTED_KEY`) is reserved (wrapping throws on
+  any other options carrying it), and client mutation defaults are banned,
+  since its trampolines shadow them: the `mutation-defaults` guard fails
+  any use of the client's defaults API and any `defaultOptions` beyond a
+  `queries`-only literal. Every `getMutationCache()` call leads straight into a
+  member that makes no mutation (`getAll`, `find`, `findAll`, `subscribe`,
+  `hasListeners` or `clear`), never `build(…)`, which makes one the helper never
+  saw (guard: `mutation-cache-access`; its one exemption is the reference
+  `useMutationCacheSnapshot` holds in `queries/internal.ts`, pinned to its exact
+  statement). The snapshot can't reach a mutation not yet started: a
+  handler that calls `mutate` after an await, or from a confirm whose state
+  outlives a switch, builds from the observer's CURRENT options, so it must
+  record the repo when it starts (a dialog: when it opens) and refuse through
+  `refuseIfSwitched` (`@/lib/stores/notifications`, beside `landedIn`) at the
+  point the write would start, passing its outcome and, once the prompt is gone,
+  a `when` lead (the reference is `doResetToUpstream` in SyncControls.tsx). Copy
+  that can't take that shape (a partial-state error, or a "Didn't <verb> …" line
+  kept in step with a twin) reads `landedIn` once and builds its message from
+  that one result's `live` and `away`. A view whose repo can be a worktree
+  rather than the open one compares its own prop instead (ConflictFileView's
+  `refuseIfMoved`). A `useRepoMutation` whose mutationFn or callbacks close over
+  repo/lens AND whose host survives a repo switch passes `identity: ["<op>",
+  repo, lens]`, which scopes the HOLD: a changed key hash detaches the pending
+  mutation at the switch, so the new repo's controls don't read the old repo's
+  write as busy. Callers must consume the promise (`mutateAsync`), since the
+  observer's `isPending`/`data` go idle at the switch. Exemplar:
+  `useCreateIssue`; a plain `useMutation` spells the same pin `mutationKey:`.
+  Guard: `mutation-identity-pinning` ratchets the cache-seeding sites and the
+  create-family ones it can see by NAME, following delegation one level inside a
+  module. It scans the git-queries package, `lib/jira/queries.ts` and the local
+  PR/issue query modules (both local wrappers key unconditionally,
   `["local-pr" | "local-issue", op, repo]`; a wrapper keyed through an optional
   parameter would oblige its delegating call to pass one) — a repo-scoped create
   written anywhere else is unratcheted, and the wider class stays a review
-  concern. The `Add…`/`Submit…`/`Publish…`/`Fork…` creates stay unpinned BY
+  concern. The creates `useAddRemote`, `useAddCollaborator`, `useAddSubmodule`,
+  `useAddUserWorktree`, `useAddDiscussionComment`, `useAddIssueSpentTime`,
+  `useAddMrSpentTime`, `useSubmitReview` and `useForkRepo` stay unpinned BY
   DECISION: their callers read `isPending` as a re-entry guard, which a pin
   idles, so the isPending → local-flag migration comes first. A cache WRITE
   (`setQueryData`/`setQueriesData`) in `onSuccess`/`onError`/`onSettled` keys
-  from the callback's own parameters, never hook scope: `onMutate` runs once at
-  mutate time, the settle callbacks off the CURRENT render's options, so build
-  the key in `onMutate`, return it in the context, read it back
-  (`useSetRepoStar` is the reference). The carve-out is a pinned
-  `useRepoMutation` seed: it has no `onMutate` to key from, so its identity pin
-  is what detaches it on a switch (`useCreateIssue`, writing through
-  `insertCreatedIssue`, is the live instance). Context-keying needs no pin
-  of its own, so `isPending` stays live — but the pin rule above is separate and
-  still applies: an EXPORTED repo-scoped hook whose `onSuccess` seeds the cache
-  keeps its mutation key however the seed is keyed. Guard:
-  `settle-cache-write-identity`, over the same modules; a write through a
-  helper, a callback passed by name, and `useOptimisticCacheMutation`'s
-  `reconcile` stay review concerns (the check's message lists the rest).
+  from the callback's own parameters, never hook scope. The snapshot already
+  runs the settle callbacks in effect at the start, so this is defense in depth:
+  `onMutate` runs once at mutate time and its result rides the mutation's own
+  state, which would still name the right entity if a settle ever ran through
+  other callbacks than the ones `onMutate` ran with (no path does: react-query
+  re-executes a mutation outside its original execution only after hydration,
+  building it from mutation defaults rather than a render's options, and nothing
+  here hydrates). Build the key in `onMutate`, return it in the context, read it
+  back (`useSetRepoStar` is the reference). The carve-out is a pinned
+  `useRepoMutation` seed: it has no `onMutate` to key from, so it relies on the
+  snapshot (`useCreateIssue`, writing through `insertCreatedIssue`, is the live
+  instance). Context-keying needs no pin of its own, so `isPending`
+  stays live — but the pin rule above is separate and still applies: an EXPORTED
+  repo-scoped hook whose `onSuccess` seeds the cache keeps its mutation key
+  however the seed is keyed. Guard: `settle-cache-write-identity`, over the
+  same modules; a write through a helper, a callback passed by name, and
+  `useOptimisticCacheMutation`'s `reconcile` stay review concerns (the check's
+  message lists the rest).
 - **Pending-write holds** read the mutation cache through
   `useMutationCacheSnapshot` (`queries/internal.ts`) with a caller-memoized
   `select` (`useCallback` over stable deps: primitives or module-level

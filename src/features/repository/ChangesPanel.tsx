@@ -73,6 +73,7 @@ import {
 } from "@/lib/settings/queries";
 import { useConfirm } from "@/lib/stores/confirm";
 import { useConflictResolve } from "@/lib/stores/conflict-resolve";
+import { refuseIfSwitched } from "@/lib/stores/notifications";
 import { useUiStore } from "@/lib/stores/ui";
 import { ignoreToast, toastError } from "@/lib/toast";
 import { useRetained } from "@/lib/use-retained";
@@ -111,8 +112,8 @@ const SIDES_READ_CHUNK = 4;
 /** Whether a stage of `conflicted` may go ahead: true when no file still holds
  *  markers, else the user's answer to ONE prompt. Reads fresh from disk, since a
  *  cached read can predate the markers; a failed read asks rather than staging
- *  silently or refusing. Resolves false without asking if the active repo
- *  changed during the reads. Never rejects. */
+ *  silently or refusing. Refuses (resolving false, with a notice) without
+ *  asking if the active repo changed during the reads. Never rejects. */
 async function confirmMarkerStage(
   repoPath: string,
   conflicted: FileEntry[],
@@ -135,7 +136,14 @@ async function confirmMarkerStage(
     return markNeedsConfirm(read.value) ? [{ name, unchecked: false }] : [];
   });
   if (flags.length === 0) return true;
-  if (useUiStore.getState().repoPath !== repoPath) return false;
+  if (
+    refuseIfSwitched(
+      repoPath,
+      "nothing was staged",
+      "before the marker check finished",
+    )
+  )
+    return false;
   return useConfirm.getState().ask(markerStagePrompt(flags, bulk));
 }
 
@@ -176,10 +184,12 @@ const FILTER_LABELS: Record<FilterKind, string> = {
 };
 
 /** Target of a discard/stash confirm dialog: specific files (one row or a
- *  multi-selection) or the whole working tree. Null = no dialog open. */
+ *  multi-selection) or the whole working tree, with the repo it opened in (the
+ *  panel outlives a repo switch, and a confirm answered after one refuses).
+ *  Null = no dialog open. */
 type ChangeActionScope =
-  | { kind: "files"; entries: FileEntry[] }
-  | { kind: "all" }
+  | { kind: "files"; entries: FileEntry[]; repo: string }
+  | { kind: "all"; repo: string }
   | null;
 
 /** A flattened row in the virtualized changes list: a section header, a file, or
@@ -851,7 +861,7 @@ export function ChangesPanel({
   /** Every stage route's one `git add` (no await unless a target is conflicted);
    *  a file still holding markers asks first, and a decline stages NOTHING. Only
    *  the captured targets and repo are used past the prompt, and a repo switch
-   *  meanwhile drops the stage, since the mutation would retarget. Resolves
+   *  meanwhile refuses the stage, since the mutation would retarget. Resolves
    *  whether it staged. */
   async function stageGuarded(targets: FileEntry[]): Promise<boolean> {
     const pathspecs = targets.map((e) => literalPathspec(e.path));
@@ -879,7 +889,15 @@ export function ChangesPanel({
         conflicted,
         targets.length > 1,
       );
-      if (!ok || useUiStore.getState().repoPath !== firedOn) return false;
+      if (
+        !ok ||
+        refuseIfSwitched(
+          firedOn,
+          "nothing was staged",
+          "before the stage started",
+        )
+      )
+        return false;
       staging = stage.mutateAsync(pathspecs);
     } finally {
       checkingRef.current = false;
@@ -1140,12 +1158,20 @@ export function ChangesPanel({
 
   function requestDiscardSelected() {
     if (selectionCount > 0)
-      setDiscardScope({ kind: "files", entries: selectedEntries });
+      setDiscardScope({
+        kind: "files",
+        entries: selectedEntries,
+        repo: repoPath,
+      });
   }
 
   function requestStashSelected() {
     if (selectionCount > 0)
-      setStashScope({ kind: "files", entries: selectedEntries });
+      setStashScope({
+        kind: "files",
+        entries: selectedEntries,
+        repo: repoPath,
+      });
   }
 
   // Bulk ignore: add a `/path` line per selected file (any kind). The Rust side
@@ -1209,6 +1235,10 @@ export function ChangesPanel({
 
   async function confirmDiscard() {
     if (!discardScope) return;
+    if (refuseIfSwitched(discardScope.repo, "nothing was discarded")) {
+      setDiscardScope(null);
+      return;
+    }
     const finish = () => {
       setDiscardScope(null);
       setSelectedKeys(new Set());
@@ -1244,6 +1274,10 @@ export function ChangesPanel({
 
   async function confirmStash() {
     if (!stashScope) return;
+    if (refuseIfSwitched(stashScope.repo, "nothing was stashed")) {
+      setStashScope(null);
+      return;
+    }
     const finish = () => {
       setStashScope(null);
       setSelectedKeys(new Set());
@@ -1694,8 +1728,10 @@ export function ChangesPanel({
                 stageableSelectionCount={stageableSelected.length}
                 selectedTrackedCount={selectedTracked.length}
                 actions={{
-                  discardAll: () => setDiscardScope({ kind: "all" }),
-                  stashAll: () => setStashScope({ kind: "all" }),
+                  discardAll: () =>
+                    setDiscardScope({ kind: "all", repo: repoPath }),
+                  stashAll: () =>
+                    setStashScope({ kind: "all", repo: repoPath }),
                   stageSelected: () => void stageSelected(),
                   unstageSelected: () => void unstageSelected(),
                   discardSelected: requestDiscardSelected,
@@ -1705,9 +1741,17 @@ export function ChangesPanel({
                   toggle: handleToggle,
                   resolveWithAi: (path) => startResolveOne(path, repoPath),
                   discardFile: (entry) =>
-                    setDiscardScope({ kind: "files", entries: [entry] }),
+                    setDiscardScope({
+                      kind: "files",
+                      entries: [entry],
+                      repo: repoPath,
+                    }),
                   stashFile: (entry) =>
-                    setStashScope({ kind: "files", entries: [entry] }),
+                    setStashScope({
+                      kind: "files",
+                      entries: [entry],
+                      repo: repoPath,
+                    }),
                   viewHistory: setHistoryPath,
                   blame: setBlamePath,
                   ignore: (pattern, label) => void ignoreOne(pattern, label),

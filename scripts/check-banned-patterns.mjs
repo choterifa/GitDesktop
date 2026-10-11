@@ -858,9 +858,8 @@ const MUTATION_MODULES_SCANNED = {
 };
 
 // The mutation-identity family. Anchors are deliberately structural rather than
-// textual: react-query re-pushes a hook's options onto its PENDING mutation on
-// every render, so the defect is a repo-scoped call carrying no mutation key —
-// a shape, not a spelling.
+// textual: the defect is a repo-scoped call carrying no mutation key, so its
+// pending write holds the next repo's controls busy — a shape, not a spelling.
 /** Any `function use…` declaration, exported or not. The generic list is matched
  *  separately (see `paramListOpen`): `function useRepoMutation<TArgs, TData>(` puts
  *  a `<` where a `(` would be, and an anchor demanding the paren swallows the whole
@@ -869,9 +868,9 @@ const HOOK_DECL_RE = /\b(export\s+)?function\s+(use[A-Za-z0-9_$]*)\s*(?=[<(])/g;
 const MUTATION_CALL_RE = /\buse(?:Repo)?Mutation\s*\(/g;
 /** `identity:` is useRepoMutation's spelling of `mutationKey:`; either pins. */
 const MUTATION_KEYED_RE = /\b(?:identity|mutationKey)\s*:/;
-/** A `repo` parameter in the hook's own signature — the closure that a mid-flight
- *  switch redirects. A hook taking repo through its VARIABLES instead is the other
- *  valid remedy (see useMoveBoardCard) and correctly never matches. */
+/** A `repo` parameter in the hook's own signature — the closure a pin names. A
+ *  hook taking repo through its VARIABLES instead is the other valid remedy (see
+ *  useMoveBoardCard) and correctly never matches. */
 const REPO_PARAM_RE = /(?:^|[,{(\s])repo\s*[:,)]/;
 const CREATE_HOOK_RE = /Create/;
 /** Widest gap (normalized chars) still read as one callback for the seed arm.
@@ -880,8 +879,8 @@ const CREATE_HOOK_RE = /Create/;
  *  (Within the window an unrelated pair can also over-match, which is merely a
  *  named file and line with the allowlist as its remedy.) */
 const SEED_WINDOW = 400;
-/** The GAP-5 shape: a response seeded into a hook-scope key on success, which a
- *  retarget writes into the newly-live repo's cache with nothing to roll it back. */
+/** The GAP-5 shape: a response seeded into a hook-scope key on success, whose
+ *  pending write a pin keeps from holding the newly-live repo's controls. */
 const ONSUCCESS_SEED_RE = new RegExp(
   `\\bonSuccess\\s*:[\\s\\S]{0,${SEED_WINDOW}}?\\bsetQueryData\\b`,
 );
@@ -1065,9 +1064,8 @@ const unpinnedMutationIdentity = ({ text, starts }) => {
 };
 
 // The settle-cache-write family. query-core runs `onMutate` once, at mutate time,
-// but calls `onSuccess`/`onError`/`onSettled` off whatever options a mounted
-// observer last re-pushed onto the pending mutation — so a key those callbacks
-// build from hook scope is the CURRENT render's, not the one the write fired under.
+// and keeps its result on the mutation's state, so a key returned there is the one
+// the write fired under whichever options the settle callbacks run from.
 /** A settle callback as a property (`onSuccess:`) or a method (`onSuccess(…) {`);
  *  a member CALL (`opts.onSuccess(…)`) is excluded by the lookbehind. */
 const SETTLE_CALLBACK_RE =
@@ -1382,6 +1380,551 @@ const settleCacheWriteFromHookScope = ({ text, starts }) => {
       if (readsHookScope(key))
         hits.add(lineAt(starts, callback.start + write.index));
     }
+  }
+  return [...hits];
+};
+
+// The raw-mutation family. Every mutation is built through src/lib/started-mutation.ts,
+// whose `useMutation` runs each mutation's mutationFn and callbacks from the options
+// in effect when it started (the observer's at the `mutate` call); a VALUE binding
+// of react-query's own constructors anywhere else is a construction that skips it.
+// Threat model: these scans target accidental use, not deliberate evasion.
+const STARTED_MUTATION = "src/lib/started-mutation.ts";
+/** react-query's ways to make a mutation without the helper, by exported name:
+ *  the hook and its observer, the cache and mutation classes (`new
+ *  MutationCache().build(…)`), and hydration, which rebuilds dehydrated
+ *  mutations from the client's defaults rather than any render's options. */
+const RAW_MUTATION_NAMES = new Set([
+  "useMutation",
+  "MutationObserver",
+  "MutationCache",
+  "Mutation",
+  "hydrate",
+  "HydrationBoundary",
+]);
+/** One escape at a sticky position: `\x` + 2 hex, `\u{…}`, `\u` + 4 hex, a line
+ *  continuation (in the joined view, a backslash before a space), or any other
+ *  escaped character. */
+const ESCAPE_STICKY =
+  /\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|( )|([\s\S]))/y;
+const SIMPLE_ESCAPES = {
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+  0: "\0",
+};
+/** A character an identifier can hold past its first. */
+const ID_CHAR_RE = /^[\p{ID_Continue}$\p{Join_Control}]$/u;
+
+/** The value one escape at `i` spells, or null when it spells nothing readable
+ *  (an out-of-range code point); `length` is how much source it covers. */
+function escapeAt(text, i) {
+  ESCAPE_STICKY.lastIndex = i;
+  const m = ESCAPE_STICKY.exec(text);
+  if (!m) return null;
+  const hex = m[1] ?? m[2] ?? m[3];
+  if (hex !== undefined) {
+    const code = Number.parseInt(hex, 16);
+    return code <= 0x10ffff
+      ? { value: String.fromCodePoint(code), length: m[0].length, hex: true }
+      : null;
+  }
+  if (m[4] !== undefined) return { value: "", length: 2, hex: false };
+  return {
+    value: SIMPLE_ESCAPES[m[5]] ?? m[5],
+    length: 2,
+    hex: false,
+  };
+}
+
+/** The value a string literal's raw body spells, cooked as JS reads it: every
+ *  escape decoded, a backslash before any other character dropped, and a line
+ *  continuation dropped with its backslash. */
+export function cookStringBody(body) {
+  let out = "";
+  for (let i = 0; i < body.length; ) {
+    const e = body[i] === "\\" ? escapeAt(body, i) : null;
+    if (e) {
+      out += e.value;
+      i += e.length;
+    } else {
+      out += body[i];
+      i++;
+    }
+  }
+  return out;
+}
+
+/** `text` with escapes cooked in place wherever that keeps its lexical shape:
+ *  inside a string or template literal every escape, unless it spells a quote
+ *  or a backslash (which would re-lex the literal); outside one only an escape
+ *  spelling a name character. So an escaped name or quoted member reads as
+ *  written, and string and bracket tracking over the result still reads what
+ *  the source reads. `at[i]` is the source offset decoded index `i` came from. */
+export function cookSource(text) {
+  let out = "";
+  const at = [];
+  let quote = null;
+  for (let i = 0; i < text.length; ) {
+    if (text[i] === "\\") {
+      const e = escapeAt(text, i);
+      const length = e ? e.length : 1;
+      const decode =
+        e !== null &&
+        (quote === null
+          ? e.hex && ID_CHAR_RE.test(e.value)
+          : !/["'`\\]/.test(e.value));
+      const piece = decode ? e.value : text.slice(i, i + length);
+      for (let k = 0; k < piece.length; k++) {
+        out += piece[k];
+        at.push(decode ? i : i + k);
+      }
+      i += length;
+      continue;
+    }
+    const c = text[i];
+    if (quote === null) {
+      if (c === '"' || c === "'" || c === "`") quote = c;
+    } else if (c === quote) quote = null;
+    out += c;
+    at.push(i);
+    i++;
+  }
+  return { text: out, at };
+}
+
+/** Whether a string literal's raw body names react-query or the core it
+ *  re-exports, at any subpath: cooked, with backslashes read as separators and
+ *  case folded (both resolve on Windows), normalized, then matched as a path
+ *  segment anywhere, so a route through `node_modules` counts too. */
+const reachesReactQuery = (body) =>
+  /(?:^|\/)@tanstack\/(?:react-query|query-core)(?:\/|$)/.test(
+    normalizeSpecifier(
+      cookStringBody(body).replaceAll("\\", "/").toLowerCase(),
+    ),
+  );
+/** A string or template literal, its quote in group 1 and raw body in group 2. */
+const STRING_LITERAL_RE = /(["'`])((?:\\[\s\S]|(?!\1)[^\\])*)\1/g;
+/** An import statement's clause plus its specifier, with or without whitespace
+ *  around the clause (`import{x}from"y"`). `import(` and `import.meta` are other
+ *  arms'. */
+const IMPORT_FROM_RE =
+  /\bimport\b(?!\s*[(.])\s*([^;]*?)\s*\bfrom\s*(["'`])((?:\\[\s\S]|(?!\2)[^\\])*)\2/g;
+/** An export statement's clause plus its specifier, bounded like
+ *  REEXPORT_SPECIFIER_RE so a semicolon-less declaration can't pair with a later
+ *  statement's `from`. */
+const EXPORT_FROM_RE =
+  /\bexport\b((?:(?!\b(?:import|export)\b)[^;])*?)\bfrom\s*(["'`])((?:\\[\s\S]|(?!\2)[^\\])*)\2/g;
+/** A call whose argument names a module: `import(…)`, `require(…)` (TS
+ *  `import x = require(…)` included), and Vite's `import.meta.glob(…)` with its
+ *  optional type argument. No space before the paren, as the formatter writes a
+ *  call and Vite's own glob pattern reads one, so prose ("will require (…)")
+ *  never matches. */
+const MODULE_CALL_RE =
+  /(?<![\w$.])(import|require|import\.meta\.glob(?:Eager)?(?:<\w+>)?)\(/g;
+/** A template's static head that stays inside the app: `./` or the `@/` alias. */
+const LOCAL_TEMPLATE_HEAD_RE = /^(?:\.\/|@\/)/;
+/** `import type …` / `export type { … }`: erased, so it binds no value. A bare
+ *  `type` default binding (`import type from`, `import type, {`) is not one. */
+const TYPE_ONLY_CLAUSE_RE = /^type(?:\s*[{*]|\s+[\p{ID_Start}$_])/u;
+/** A default binding leading a clause (`rq` in `import rq, { … }`). */
+const DEFAULT_BINDING_RE =
+  /^[\p{ID_Start}$_][\p{ID_Continue}$\p{Join_Control}]*\s*(?:,|$)/u;
+
+/** The top-level comma-separated pieces of `text`, trimmed; commas inside
+ *  strings and brackets don't split. Null when a bracket or string never closes. */
+function topLevelPieces(text) {
+  const pieces = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") i = stringEnd(text, i);
+    else if (c === "{" || c === "(" || c === "[") i = literalEnd(text, i);
+    else if (c === ",") {
+      pieces.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+    if (i === -1) return null;
+  }
+  pieces.push(text.slice(start).trim());
+  return pieces;
+}
+
+/** Whether a `{ … }` clause reads a raw constructor, or the module's default, as
+ *  a VALUE: an inline `type` entry is erased, the name before `as` is the export
+ *  read, and a string-named one (`"useMutation" as x`) is cooked first. A
+ *  `default` entry is a default import or re-export, and a CommonJS build's
+ *  default is the whole module. */
+function bindsRawConstructor(braces) {
+  return braces.split(",").some((raw) => {
+    const entry = raw.trim();
+    if (!entry || /^type\s/.test(entry)) return false;
+    // `as` needs whitespace before it, or a string name's closing quote.
+    const name = entry.split(/(?<=["'`]|\s)as\s+/)[0].trim();
+    const quoted = /^(["'`])([\s\S]*)\1$/.exec(name);
+    const exported = quoted ? cookStringBody(quoted[2]) : name;
+    return exported === "default" || RAW_MUTATION_NAMES.has(exported);
+  });
+}
+
+/** Whether a module call's argument text reaches react-query. A single plain
+ *  string literal (parentheses unwrapped) is read for its exact package. Any
+ *  other argument fails when it mentions `tanstack`, and otherwise when the file
+ *  holds a react-query string outside its import and export specifiers, unless
+ *  it is a template whose static head is local (`./`, `@/`): a concatenation, a
+ *  `${}` or a variable can assemble the specifier unseen. A glob fails on any
+ *  pattern that reaches the package or mentions `node_modules` or `tanstack`,
+ *  literal or not, since a wildcard can stand for the package segment. */
+function moduleCallReaches(kind, args, fileReaches) {
+  if (/glob/.test(kind)) {
+    for (const m of args.matchAll(STRING_LITERAL_RE))
+      if (
+        reachesReactQuery(m[2]) ||
+        /node_modules|tanstack/i.test(cookStringBody(m[2]))
+      )
+        return true;
+    return false;
+  }
+  const pieces = topLevelPieces(args);
+  if (pieces === null) return true;
+  let first = pieces[0];
+  while (first.startsWith("(") && literalEnd(first, 0) === first.length - 1)
+    first = first.slice(1, -1).trim();
+  const literal = /^(["'`])((?:\\[\s\S]|(?!\1)[^\\])*)\1$/.exec(first);
+  // A plain literal is judged by its exact package alone, so another TanStack
+  // package (react-virtual, react-form) or a local path naming it passes.
+  if (literal && !(literal[1] === "`" && literal[2].includes("${")))
+    return reachesReactQuery(literal[2]);
+  if (/tanstack/i.test(cookStringBody(first))) return true;
+  if (
+    literal &&
+    LOCAL_TEMPLATE_HEAD_RE.test(
+      cookStringBody(literal[2].slice(0, literal[2].indexOf("${"))),
+    )
+  )
+    return false;
+  return fileReaches();
+}
+
+/** What may precede a method definition's name: a member's start (`{` `;` `,`
+ *  `}`), a generator star, or a modifier. */
+const METHOD_HEAD_RE =
+  /(?:^|[{;,}*]|(?<![\w$])(?:async|static|public|private|protected|override|get|set))\s*$/;
+
+/** Whether a module-call match is a method named `import`/`require` instead: its
+ *  parameter list is followed by a body, or by a return type with the name at a
+ *  member's start. A call in a ternary (`? import(…) :`) is not one. */
+function isMethodDefinition(text, match, close) {
+  const next = /^\s*([{:])/.exec(text.slice(close + 1, close + 40));
+  if (!next) return false;
+  return (
+    next[1] === "{" ||
+    METHOD_HEAD_RE.test(text.slice(Math.max(0, match.index - 40), match.index))
+  );
+}
+
+/** Scanner: react-query's mutation constructors bound as a value — imported named
+ *  or aliased, re-exported (`export *` included), or reached through a module
+ *  call (`import()`, `require()`, `import.meta.glob()`). A namespace or default
+ *  import of either package fails whatever it is used for (a `{ default }`
+ *  entry included): a namespace can be spread, destructured or passed on, so no
+ *  use of one can be proven safe. Type-only imports bind no value and pass. */
+const rawReactQueryMutation = (fileView) => {
+  const { text, at } = cookSource(fileView.text);
+  const hit = (index) => lineAt(fileView.starts, at[index]);
+  const hits = new Set();
+  // Where each import and export specifier's opening quote sits: those strings
+  // are judged by their own arms, so they don't make a file "hold" a reach.
+  const specifierAt = new Set();
+  for (const re of [IMPORT_FROM_RE, EXPORT_FROM_RE])
+    for (const m of text.matchAll(re))
+      specifierAt.add(m.index + m[0].length - m[3].length - 2);
+  let reaches;
+  const fileReaches = () => {
+    reaches ??= [...text.matchAll(STRING_LITERAL_RE)].some(
+      (m) => !specifierAt.has(m.index) && reachesReactQuery(m[2]),
+    );
+    return reaches;
+  };
+  for (const m of text.matchAll(IMPORT_FROM_RE)) {
+    if (!reachesReactQuery(m[3])) continue;
+    const clause = m[1].trim();
+    if (TYPE_ONLY_CLAUSE_RE.test(clause)) continue;
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (
+      /\*\s*as\b/.test(clause) ||
+      DEFAULT_BINDING_RE.test(clause) ||
+      (braces && bindsRawConstructor(braces[1]))
+    )
+      hits.add(hit(m.index));
+  }
+  for (const m of text.matchAll(EXPORT_FROM_RE)) {
+    if (!reachesReactQuery(m[3])) continue;
+    const clause = m[1].trim();
+    if (TYPE_ONLY_CLAUSE_RE.test(clause)) continue;
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (clause.startsWith("*") || (braces && bindsRawConstructor(braces[1])))
+      hits.add(hit(m.index));
+  }
+  for (const m of text.matchAll(MODULE_CALL_RE)) {
+    const open = m.index + m[0].length - 1;
+    const close = literalEnd(text, open);
+    if (
+      close !== -1 &&
+      !/glob/.test(m[1]) &&
+      isMethodDefinition(text, m, close)
+    )
+      continue;
+    if (
+      close === -1 ||
+      moduleCallReaches(m[1], text.slice(open + 1, close), fileReaches)
+    )
+      hits.add(hit(m.index));
+  }
+  return [...hits];
+};
+
+// The client's mutation cache, reached only to read it: a held, quoted, bound or
+// otherwise indirect reach can hand `build(…)` a mutation the helper never saw.
+const MUTATION_CACHE_RE =
+  /(?<![\p{ID_Continue}$])getMutationCache(?![\p{ID_Continue}$])/gu;
+/** What may follow a `getMutationCache` mention: its call, then a public read
+ *  member's call, type arguments allowed (`find<TData, …>(…)`). `clear` empties
+ *  the cache without making a mutation; `remove` and `resumePausedMutations` are
+ *  query-core internals and stay out. */
+const MUTATION_CACHE_READ_RE =
+  /^\s*\(\s*\)\s*\??\.\s*(?:getAll|find|findAll|subscribe|clear|hasListeners)\s*(?:<[^()]*>)?\s*\(/;
+/** The one held reference the app needs: `useMutationCacheSnapshot` keeps the
+ *  cache to subscribe to it and hand it to its callers' read-only selects. The
+ *  exemption is this exact statement, once, in this file; any other mention
+ *  there still fails, so a new reach can't hide behind the old one. */
+const CACHE_HOLDER = {
+  file: "src/lib/git/queries/internal.ts",
+  lead: "const cache = useQueryClient().",
+  statement: "const cache = useQueryClient().getMutationCache();",
+};
+
+/** Scanner: every `getMutationCache` mention not proven a read, but for
+ *  CACHE_HOLDER's statement in its own file. */
+const mutationCacheAccess = (fileView, file) => {
+  const { text, at } = cookSource(fileView.text);
+  const hits = new Set();
+  let held = false;
+  for (const m of text.matchAll(MUTATION_CACHE_RE)) {
+    const after = m.index + m[0].length;
+    if (MUTATION_CACHE_READ_RE.test(text.slice(after, after + 120))) continue;
+    const start = m.index - CACHE_HOLDER.lead.length;
+    if (
+      file === CACHE_HOLDER.file &&
+      !held &&
+      text.slice(start, start + CACHE_HOLDER.statement.length) ===
+        CACHE_HOLDER.statement
+    ) {
+      held = true;
+      continue;
+    }
+    hits.add(lineAt(fileView.starts, at[m.index]));
+  }
+  return [...hits];
+};
+
+/** Script extensions the walk never reads (it reads lowercase `.ts`/`.tsx`
+ *  alone), so a file under src/ ending in one escapes every check here: any
+ *  script extension in any case, and `.ts`/`.tsx` spelled in another case. */
+const UNSCANNED_SCRIPT_RE = /\.(?:[cm]?js|jsx|[cm]ts)$/i;
+const MIXED_CASE_TS_RE = /\.tsx?$/i;
+/** Justified exceptions, each a src/ path with its reason in a comment. */
+const UNSCANNED_SCRIPT_ALLOWLIST = [];
+
+/** The paths in `paths` a check here would never read, minus `allowlist`. */
+export function unscannedScripts(
+  paths,
+  allowlist = UNSCANNED_SCRIPT_ALLOWLIST,
+) {
+  return paths.filter(
+    (p) =>
+      (UNSCANNED_SCRIPT_RE.test(p) ||
+        (MIXED_CASE_TS_RE.test(p) && !/\.tsx?$/.test(p))) &&
+      !allowlist.includes(p),
+  );
+}
+
+// Mutation defaults. started-mutation installs its trampolines on every
+// construction, and react-query spreads a construction's own options over the
+// client's defaults, so a default mutationFn or callback would be shadowed. The
+// check is an allowlist of shapes, not a list of bad spellings: what it cannot
+// prove harmless fails.
+/** The client methods that read or write mutation defaults, hand out the live
+ *  defaults object, or merge them into a construction (`defaultMutationOptions`,
+ *  which a subclass or patch could override outright): any mention fails. */
+const CLIENT_DEFAULTS_API_RE =
+  /(?<![\w$])(?:(?:set|get)(?:DefaultOptions|MutationDefaults)|defaultMutationOptions)(?![\w$])/g;
+/** Every `defaultOptions` mention, quoted or not. */
+const DEFAULT_OPTIONS_TOKEN_RE = /(?<![\w$])defaultOptions(?![\w$])/g;
+/** Member modifiers that may sit before a key without making it a value. */
+const MEMBER_MODIFIER_RE =
+  /(?<![\w$])(?:readonly|declare|public|private|protected|static|override|abstract|accessor)\s*$/;
+
+/** Index of the bracket closing the one opened at `open` (`{`, `(`, `[` or `<`
+ *  for a type argument list), skipping string and template literals and nested
+ *  brackets of every kind; -1 when it never closes. `=>` is not a closer. */
+function literalEnd(text, open) {
+  const closer = { "{": "}", "(": ")", "[": "]", "<": ">" };
+  const stack = [closer[text[open]]];
+  for (let i = open + 1; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") {
+      i = stringEnd(text, i);
+      if (i === -1) return -1;
+    } else if (c === "{" || c === "(" || c === "[") {
+      stack.push(closer[c]);
+    } else if (c === stack.at(-1) && !(c === ">" && text[i - 1] === "=")) {
+      stack.pop();
+      if (stack.length === 0) return i;
+    } else if (c === "}" || c === ")" || c === "]") {
+      return -1;
+    }
+  }
+  return -1;
+}
+
+/** Index of the quote closing the string or template literal opened at `open`,
+ *  honoring backslash escapes; -1 when it never closes. */
+function stringEnd(text, open) {
+  const quote = text[open];
+  for (let i = open + 1; i < text.length; i++) {
+    if (text[i] === "\\") i++;
+    else if (text[i] === quote) return i;
+  }
+  return -1;
+}
+
+/** The top-level entries of the object literal opened at `open`, trimmed, or
+ *  null when it never closes. Commas inside strings and brackets don't split. */
+function topLevelEntries(text, open) {
+  const end = literalEnd(text, open);
+  if (end === -1) return null;
+  const pieces = topLevelPieces(text.slice(open + 1, end));
+  return pieces === null ? null : pieces.filter((e) => e !== "");
+}
+
+/** Where a type annotation starting at `from` ends: the index of the first
+ *  top-level `;`, `,`, `)`, `}` or assignment `=`, with nested brackets, type
+ *  arguments and strings skipped; -1 when nothing ends it. */
+function annotationEnd(text, from) {
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") i = stringEnd(text, i);
+    else if (c === "{" || c === "(" || c === "[" || c === "<")
+      i = literalEnd(text, i);
+    else if (c === "=" && text[i + 1] !== ">" && text[i + 1] !== "=") return i;
+    else if (c === ";" || c === "," || c === ")" || c === "}") return i;
+    if (i === -1) return -1;
+  }
+  return -1;
+}
+
+/** Whether the annotation starting at `from` holds no value: it ends at one of
+ *  `enders` with no assignment `=` first, and holds no `/`, which only a value
+ *  (a regex literal or a division) could, since a regex's `)` or `;` would read
+ *  as the annotation's end. */
+function typeOnlyAnnotation(text, from, enders) {
+  const end = annotationEnd(text, from);
+  return (
+    end !== -1 &&
+    enders.includes(text[end]) &&
+    !text.slice(from, end).includes("/")
+  );
+}
+
+/** Whether a defaults literal ending just before `from` closes its entry: the
+ *  next token, past any `as T` / `satisfies T`, is `,` `}` `;` or `)`. Anything
+ *  else reads the literal (`.constructor(…)`, `['queries']`) or assigns after it. */
+function literalEndsEntry(text, from) {
+  let i = from;
+  for (;;) {
+    while (/\s/.test(text[i] ?? "")) i++;
+    const cast = /^(?:as|satisfies)(?![\w$])/.exec(text.slice(i, i + 10));
+    if (!cast) break;
+    const end = annotationEnd(text, i + cast[0].length);
+    if (end === -1 || text[end] === "=") return false;
+    i = end;
+  }
+  return [",", "}", ";", ")"].includes(text[i]);
+}
+
+/** Whether the `defaultOptions` mention at `index` is provably harmless: a type
+ *  member or parameter annotation with no value (`defaultOptions?: T` ending at
+ *  `;` `,` `)` or `}`, or `defaultOptions: T` ending a member with `;` or a
+ *  parameter list with `)`), or an object-entry key (bare, quoted, or a quoted
+ *  computed key) whose value is a literal holding only a bare `queries` entry
+ *  and closing its entry. Member modifiers before the key are skipped. */
+function harmlessDefaultOptions(text, index) {
+  let after = index + "defaultOptions".length;
+  let keyStart = index;
+  const quote = text[index - 1];
+  const quoted = quote === '"' || quote === "'" || quote === "`";
+  if (quoted) {
+    if (text[after] !== quote) return false;
+    after++;
+    keyStart = index - 1;
+    if (text[index - 2] === "[") {
+      if (text[after] !== "]") return false;
+      after++;
+      keyStart = index - 2;
+    }
+  }
+  // A key opens a member, a parameter or an object entry.
+  let head = text.slice(0, keyStart).trimEnd();
+  for (
+    let m = MEMBER_MODIFIER_RE.exec(head);
+    m;
+    m = MEMBER_MODIFIER_RE.exec(head)
+  )
+    head = head.slice(0, m.index).trimEnd();
+  if (!["{", ";", "(", ","].includes(head.at(-1))) return false;
+  const rest = text.slice(after);
+  const optional = !quoted && /^\s*\?\s*:/.exec(rest);
+  if (optional)
+    return typeOnlyAnnotation(text, after + optional[0].length, [
+      ";",
+      ",",
+      ")",
+      "}",
+    ]);
+  const colon = /^\s*:\s*/.exec(rest);
+  if (!colon) return false;
+  const valueAt = after + colon[0].length;
+  if (text[valueAt] === "{") {
+    const entries = topLevelEntries(text, valueAt);
+    return (
+      entries !== null &&
+      entries.every((e) => /^queries(?:\s*:|$)/.test(e)) &&
+      literalEndsEntry(text, literalEnd(text, valueAt) + 1)
+    );
+  }
+  if (quoted) return false;
+  return typeOnlyAnnotation(text, valueAt, [";", ")"]);
+}
+
+/** Scanner: any mention of the client's defaults API, and any `defaultOptions`
+ *  mention not proven harmless (see harmlessDefaultOptions). So a shorthand, a
+ *  binding, an assignment, a member read or write, a getter or method, a
+ *  parameter default, a class field initializer, a defaults literal with any
+ *  entry but `queries` (`mutations`, a spread, a quoted or computed key) or read
+ *  after it closes, and a value that is not a literal all fail. A parameter
+ *  annotation followed by another parameter can't be told from an object entry,
+ *  so it fails too. */
+const mutationDefaults = (fileView) => {
+  const { text, at } = cookSource(fileView.text);
+  const hit = (index) => lineAt(fileView.starts, at[index]);
+  const hits = new Set();
+  for (const m of text.matchAll(CLIENT_DEFAULTS_API_RE)) hits.add(hit(m.index));
+  for (const m of text.matchAll(DEFAULT_OPTIONS_TOKEN_RE)) {
+    if (!harmlessDefaultOptions(text, m.index)) hits.add(hit(m.index));
   }
   return [...hits];
 };
@@ -1917,34 +2460,92 @@ export const CHECKS = [
   },
   {
     name: "mutation-identity-pinning",
-    // Deliberately narrower than its convention: it ratchets a create landing in
-    // the wrong repo and a response seeded into the wrong repo's cache, the
-    // retargets that don't self-heal; a retargeted invalidation refetches its way
-    // back, so the rest stay a review concern. The `Add…`/`Submit…`/`Publish…`/
-    // `Fork…` creates stay outside BY DECISION: a pin idles the `isPending` their
-    // callers read as a re-entry guard, so the local-flag migration comes first.
+    // Deliberately narrower than its convention. Every mutation already runs the
+    // mutationFn and callbacks in effect when it started (raw-react-query-mutation
+    // below), so a pin's remaining job is hold scoping: a pinned mutation
+    // detaches at a switch, so the new repo's controls don't read the old repo's
+    // pending write as busy. This ratchets the creates and cache seeds; the rest
+    // stay a review concern. The unpinned `Add…`/`Submit…`/`Fork…` creates
+    // (useAddRemote, useSubmitReview, useForkRepo and their siblings) stay
+    // outside BY DECISION: a pin idles the `isPending` their callers read as a
+    // re-entry guard, so the local-flag migration comes first.
     appliesTo: (file) => isMutationModule(file),
     scan: unpinnedMutationIdentity,
     allowlist: [],
     expectScanned: MUTATION_MODULES_SCANNED,
     message:
-      "a repo-scoped create or cache-seeding mutation must pin its identity (gd-conventions, 'Mutation identity pinning') — react-query re-pushes a hook's options onto its PENDING mutation on every render, so without a mutation key a repo switch mid-flight retargets the call, its callbacks and its cache writes to the newly-live repo; pass `identity: [\"<op>\", repo, …]` on useRepoMutation or `mutationKey: [\"<op>\", repo, …]` on a plain useMutation, naming exactly the hook-scope values the call closes over, and make sure every caller takes its continuation from `await mutateAsync` (a detached mutation's observer goes idle, so `isPending`/`data`/`error` reads stop tracking it) — or add an allowlist entry with rationale. This scan does NOT see seven shapes inside its own boundary, so review them by hand: a create whose NAME lacks 'Create' (the `Add…`/`Submit…`/`Publish…`/`Fork…` spellings — useAddRemote, useSubmitReview, useForkRepo and their siblings are all live, left unpinned by decision while their callers guard re-entry on `isPending`), a mutation built through a wrapper in another MODULE, one built through a helper not named `use…`, a cache-seeding wrapper reached only from non-create hooks, a conditionally-keyed wrapper whose delegating call DOES pass the identity argument but passes something undefined or keyless in it (the call-site check counts arguments, it cannot evaluate them), a hook declared as `export const useX = (repo) => …` (the declaration anchor requires the `function` keyword), and one whose return type is an inline object literal (`): { … } {` — the body scan would take the return type as the body). The last three are zero-instance in the scanned modules today (both local-entity wrappers key unconditionally), so adding any of them means teaching this scanner first",
+      "a repo-scoped create or cache-seeding mutation must pin its identity (gd-conventions, 'Mutation identity pinning') — every mutation already runs the mutationFn and callbacks in effect when it started (@/lib/started-mutation), so the pin's job is hold scoping: a changed mutation key detaches the pending write at a repo switch, so the newly-live repo's controls don't read the old repo's write as busy; pass `identity: [\"<op>\", repo, …]` on useRepoMutation or `mutationKey: [\"<op>\", repo, …]` on a plain useMutation, naming exactly the hook-scope values the call closes over, and make sure every caller takes its continuation from `await mutateAsync` (a detached mutation's observer goes idle, so `isPending`/`data`/`error` reads stop tracking it) — or add an allowlist entry with rationale. This scan does NOT see seven shapes inside its own boundary, so review them by hand: a create whose NAME lacks 'Create' (the `Add…`/`Submit…`/`Fork…` spellings — useAddRemote, useSubmitReview, useForkRepo and their siblings are all live, left unpinned by decision while their callers guard re-entry on `isPending`), a mutation built through a wrapper in another MODULE, one built through a helper not named `use…`, a cache-seeding wrapper reached only from non-create hooks, a conditionally-keyed wrapper whose delegating call DOES pass the identity argument but passes something undefined or keyless in it (the call-site check counts arguments, it cannot evaluate them), a hook declared as `export const useX = (repo) => …` (the declaration anchor requires the `function` keyword), and one whose return type is an inline object literal (`): { … } {` — the body scan would take the return type as the body). The last three are zero-instance in the scanned modules today (both local-entity wrappers key unconditionally), so adding any of them means teaching this scanner first",
   },
   {
     name: "settle-cache-write-identity",
     // Same modules as mutation-identity-pinning, every hook regardless of name: a
-    // settle callback's cache WRITE keyed from hook scope lands, after a switch,
-    // the old entity's snapshot or seed on the new entity's key, stamped fresh —
-    // nothing refetches it away. Settle-time invalidations stay out of scope for
-    // the self-healing reason the previous check gives. This rule is separate from
-    // the pin rule: an EXPORTED repo-scoped hook whose onSuccess seeds the cache
-    // still needs its mutation key there, however its seed is keyed.
+    // settle callback's cache WRITE keyed from the onMutate context rides the
+    // mutation's own state, so it names the entity the write fired under even for
+    // a mutation resumed without its execution context (defense in depth: nothing
+    // resumes one today). A stale seed is stamped fresh and nothing refetches it
+    // away; settle-time invalidations refetch their way back, so they stay out of
+    // scope.
+    // This rule is separate from the pin rule: an EXPORTED repo-scoped hook whose
+    // onSuccess seeds the cache still needs its mutation key there, however its
+    // seed is keyed.
     appliesTo: (file) => isMutationModule(file),
     scan: settleCacheWriteFromHookScope,
     allowlist: [],
     expectScanned: MUTATION_MODULES_SCANNED,
     message:
-      "a setQueryData/setQueriesData inside an onSuccess/onError/onSettled callback (property or method) must take its KEY from the callback's own parameters (`ctx.key`, `context.repo`, `args.number`), never from hook scope (a bare `repo`/`lens`/`link`, a value parameter of any enclosing function, a name declared in its body, or a callback local that was ever declared, assigned or looped from those) — react-query calls the settle callbacks off the options the CURRENT render re-pushed onto the pending mutation, so after a repo or entity switch a hook-scope key names the new target, while `onMutate` runs once at mutate time: build the key there, return it in the context, and read it back in the settle callback (useSetRepoStar is the reference). Context-keying is what THIS check asks for; it does not replace mutation-identity-pinning, which still requires a mutation key on an exported repo-scoped hook whose onSuccess seeds the cache. This scan does NOT see six shapes, so review them by hand: a cache write through a helper the callback calls (the Jira `landRealStatus` shape — pass it context values, not hook scope; `useCreateIssue`'s `insertCreatedIssue` is the exception, a pinned `useRepoMutation` seed safe only through its identity pin), a callback defined outside the options object and passed by name (`onSuccess,`) or spread in, `useOptimisticCacheMutation`'s `reconcile` argument (it runs from internal.ts's onSettled, another module), a key reaching the write through a compound assignment or a mutation of a local (`key.push(repo)`, `key += …`), a hook declared neither as `function use…` nor as `const use… =` (only the bare `repo`/`lens`/`link` names are seen there), and a parameter whose own annotation is a function type (skipped as a key BUILDER, so a function-typed value used as a key reads clean). It also over-reads one shape: per-call `.mutate(v, { onSuccess })` and `.mutateAsync(v, { onSuccess })` callbacks are fixed at mutate time and would flag although correct — moot here, since no scanned mutation module calls either",
+      "a setQueryData/setQueriesData inside an onSuccess/onError/onSettled callback (property or method) must take its KEY from the callback's own parameters (`ctx.key`, `context.repo`, `args.number`), never from hook scope (a bare `repo`/`lens`/`link`, a value parameter of any enclosing function, a name declared in its body, or a callback local that was ever declared, assigned or looped from those) — @/lib/started-mutation already runs the settle callbacks in effect when the write started, so this is defense in depth: a key returned from `onMutate` rides the mutation's own state, which would still name the right entity if a settle ever ran through other callbacks than the ones `onMutate` ran with (no path does: react-query re-executes a mutation outside its original execution only after hydration, building it from mutation defaults rather than a render's options, and nothing here hydrates); build the key there, return it in the context, and read it back in the settle callback (useSetRepoStar is the reference). Context-keying is what THIS check asks for; it does not replace mutation-identity-pinning, which still requires a mutation key on an exported repo-scoped hook whose onSuccess seeds the cache. This scan does NOT see six shapes, so review them by hand: a cache write through a helper the callback calls (the Jira `landRealStatus` shape — pass it context values, not hook scope; `useCreateIssue`'s `insertCreatedIssue` is the exception, a pinned `useRepoMutation` seed with no `onMutate` to key from), a callback defined outside the options object and passed by name (`onSuccess,`) or spread in, `useOptimisticCacheMutation`'s `reconcile` argument (it runs from internal.ts's onSettled, another module), a key reaching the write through a compound assignment or a mutation of a local (`key.push(repo)`, `key += …`), a hook declared neither as `function use…` nor as `const use… =` (only the bare `repo`/`lens`/`link` names are seen there), and a parameter whose own annotation is a function type (skipped as a key BUILDER, so a function-typed value used as a key reads clean). It also over-reads one shape: per-call `.mutate(v, { onSuccess })` and `.mutateAsync(v, { onSuccess })` callbacks are fixed at mutate time and would flag although correct — moot here, since no scanned mutation module calls either",
+  },
+  {
+    name: "raw-react-query-mutation",
+    // Repo-wide but for the helper, which IS the one construction: RepositoryView
+    // is one instance across repo switches, so any mutation host can outlive the
+    // repo, PR, lens or link its write started on.
+    appliesTo: (file) => file !== STARTED_MUTATION,
+    scan: rawReactQueryMutation,
+    allowlist: [],
+    // Floor near the real count (753): an appliesTo typo that left the scan
+    // nearly inert would otherwise still print OK.
+    expectScanned: {
+      atLeast: 500,
+      hint: `every .ts/.tsx under src/ except ${STARTED_MUTATION}`,
+    },
+    message:
+      "construct every mutation with `useMutation` from @/lib/started-mutation (gd-conventions, 'Mutation identity pinning') — react-query's own constructor lets a mounted observer re-rendered with new options replace its PENDING mutation's options, so after a repo, PR, lens or link switch the write runs the new render's mutationFn and callbacks: a write parked offline lands on whichever repo is open at reconnect, and its refresh and cache patches follow it; the helper runs each mutation's mutationFn and callbacks from the options in effect when it started (the observer's at the `mutate` call). This flags, outside the helper: react-query's `useMutation`, `MutationObserver`, `MutationCache`, `Mutation`, `hydrate` or `HydrationBoundary` (from @tanstack/react-query or @tanstack/query-core, through any path or subpath; specifiers are cooked as JS strings, case-folded and read with `\\` as `/`) bound as a value, whether imported named or aliased (escaped names decoded first), re-exported (`export *` included), or reached through `import()`, `require()` (TS `import x = require()` too) or `import.meta.glob()` (written with no space before the paren, as the formatter writes a call; a method named `import` or `require` is not one); ANY namespace or default import of either package, a `{ default }` entry included, since a namespace can be spread, destructured or passed on with no member name to see; a plain string literal module argument naming either package exactly (another TanStack package passes); any other module argument that mentions `tanstack`, or, unless it is a template with a local `./` or `@/` head, whose file holds a react-query string outside its import and export specifiers; and a glob pattern that mentions `node_modules` or `tanstack`. The client's mutation cache is mutation-cache-access's. Type-only imports, `useMutationState`, `useIsMutating` and the DOM's `MutationObserver` stay legal. Threat model: these scans target accidental use, not deliberate evasion, so spellings only an evader would write are named under Not seen rather than chased. Not seen: an import or re-export alias spelled as a reserved word or a string holding `;`, `,` or `}` (`export { useMutation as import }`); a semicolon-less import chain (the formatter adds the semicolons CI checks); `setOptions` on a mutation reached from the cache or `useMutationState`, which replaces rather than constructs; a construction inside another package; a package name split mid-word (`\"@tan\" + \"stack/…\"`, `.join(\"/\")`) in a file holding no other react-query string; indirect require (`createRequire(import.meta.url)`, `module.require`, `globalThis.require`, `require?.(…)`), which the Tauri webview doesn't provide anyway; a `./` template head that climbs out through its substitution; and the shared comment stripper's lexing gaps (a `/*` inside a multi-line template literal, a regex literal, a backslash-continued string or JSX text blanks the scan up to the next `*/`, and a `//` in JSX text, a regex or a template tail blanks the rest of its line). Fails closed (false positives): `typeof import(\"@tanstack/react-query\")` and an inline `import(\"@tanstack/react-query\").Type` in a type position, a type-only `import type rq = require(…)`, and a non-literal module call in a file that also holds a react-query string outside its specifiers",
+  },
+  {
+    name: "started-mutation-present",
+    // Pure existence pin, no pattern of its own: raw-react-query-mutation exempts
+    // the helper BY PATH, so a rename must re-point STARTED_MUTATION in the same
+    // change rather than leave the exemption naming a file that isn't there.
+    appliesTo: (file) => file === STARTED_MUTATION,
+    scan: () => [],
+    allowlist: [],
+    expectScanned: { exactly: 1, hint: STARTED_MUTATION },
+    message:
+      "src/lib/started-mutation.ts is the one module allowed to construct a mutation from react-query directly — if it moved or was renamed, re-point STARTED_MUTATION (and the networkmode guard's EXEMPT row) together, because raw-react-query-mutation exempts it by path",
+  },
+  {
+    name: "mutation-cache-access",
+    // Repo-wide: any module can reach the client's cache. The one held
+    // reference the app needs is CACHE_HOLDER's exact statement, exempted in
+    // the scan itself rather than by a file-level row, which would mask any
+    // second reach in that file.
+    appliesTo: () => true,
+    scan: mutationCacheAccess,
+    allowlist: [],
+    expectScanned: { atLeast: 500, hint: "every .ts/.tsx under src/" },
+    message:
+      "the client's mutation cache is reached only to read it (gd-conventions, 'Mutation identity pinning') — `MutationCache.build(…)` makes a mutation @/lib/started-mutation never saw, so every `getMutationCache` mention must be its call followed directly by a `.getAll`, `.find`, `.findAll`, `.subscribe` or `.clear` call (`?.` and type arguments too, `find<TData, …>(…)`; `hasListeners` reads as well, while query-core's internal `remove` and `resumePausedMutations` don't). A held reference, or `getMutationCache` itself reached quoted, optionally (`?.()`), asserted, generically (`<…>()`), bound, parenthesized or through the prototype, fails, and so does anything else. The app's one held reference, `useMutationCacheSnapshot`'s statement in src/lib/git/queries/internal.ts (CACHE_HOLDER), is exempted as that exact statement, once, so any other mention in that file still fails. Threat model: these scans target accidental use, not deliberate evasion, so spellings only an evader would write are named under Not seen rather than chased. Not seen: a cache reference handed in from elsewhere (a select callback's parameter), a member assembled at runtime (`qc[\"getMutation\" + \"Cache\"]()`), and the shared comment stripper's lexing gaps (a `/*` inside a multi-line template literal, a regex literal, a backslash-continued string or JSX text blanks the scan up to the next `*/`, and a `//` in JSX text, a regex or a template tail blanks the rest of its line). Fails closed (false positives): a mention that isn't a call, such as `ReturnType<QueryClient[\"getMutationCache\"]>`, `typeof queryClient.getMutationCache`, or a string or JSX naming it",
+  },
+  {
+    name: "mutation-defaults",
+    // Repo-wide: a client can be configured, or reconfigured, from any module.
+    appliesTo: () => true,
+    scan: mutationDefaults,
+    allowlist: [],
+    expectScanned: { atLeast: 500, hint: "every .ts/.tsx under src/" },
+    message:
+      "react-query mutation defaults are banned (gd-conventions, 'Mutation identity pinning') — @/lib/started-mutation installs mutationFn/onMutate/onSuccess/onError/onSettled trampolines on every construction, and react-query spreads a construction's own options over the client's defaults, so a default mutationFn or callback would be shadowed without a sound. The check passes only what it can prove harmless. Any mention of `setDefaultOptions`, `getDefaultOptions`, `setMutationDefaults`, `getMutationDefaults` or `defaultMutationOptions` fails, quoted, optional, escaped or bound alike (`getDefaultOptions()` hands out the live defaults object, and `defaultMutationOptions` is query-core's merge point, which a subclass or patch could override). Every `defaultOptions` mention fails unless it is a type position with no value (`defaultOptions?: T` ending at `;` `,` `)` or `}`, or `defaultOptions: T` ending a member with `;` or a parameter list with `)`, member modifiers skipped, with no `=` and no `/` in the annotation) or an object-entry key whose value is a literal holding only a bare `queries` entry and closing its entry (`,` `}` `;` or `)` next, past any `as T` / `satisfies T`). So shorthands, bindings, assignments, member reads and writes, getters, methods, parameter defaults, class-field initializers, non-literal values, a literal read after it closes (`.constructor(…)`, `['queries']`) and any other entry (`mutations`, a spread, a quoted or computed key) fail. Put the behavior in the construction, or teach the helper to merge the defaults first. Threat model: these scans target accidental use, not deliberate evasion, so spellings only an evader would write are named under Not seen rather than chased. Not seen: keys or members assembled at runtime (`qc[\"set\" + name]`), reach through `Object.values` / `Object.entries`, prototype pollution, and the shared comment stripper's lexing gaps (a `/*` inside a multi-line template literal, a regex literal, a backslash-continued string or JSX text blanks the scan up to the next `*/`, and a `//` in JSX text, a regex or a template tail blanks the rest of its line). Fails closed (false positives, an allowlist entry with rationale is the remedy): an annotated parameter followed by another parameter, which can't be told from an object entry; an interface member ending without `;`; JSX `defaultOptions={…}`; type-level references (`QueryClientConfig['defaultOptions']`, a `Pick`/`Omit` of it); a nested `defaultOptions` key inside `queries`; a `/` inside a string within an annotation (`Foo<\"a/b\">`); and a getter, method or quoted `queries` entry",
   },
 ];
 
@@ -1973,6 +2574,21 @@ function walk(dir, out = []) {
   return out;
 }
 
+/** Every file under `dir`, as repo-relative POSIX paths, whatever its extension. */
+function walkAll(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walkAll(full, out);
+    else out.push(relative(ROOT, full).split("\\").join("/"));
+  }
+  return out;
+}
+
+// src-script-extensions' own stale condition: an allowlist row naming no file.
+const STALE_SCRIPT_FIX =
+  "stale allowlist entry — no such file under src/ any more; remove the entry " +
+  "(an exception left behind pre-authorizes whatever lands at that path next)";
+
 const STALE_FIX =
   "stale allowlist entry — nothing in this file trips the check any more " +
   "(fixed, renamed, deleted, or excluded by appliesTo); remove the entry " +
@@ -1989,7 +2605,8 @@ export function runCheck(check, files, views) {
   const violations = [];
   const seen = new Set();
   for (const file of scanned) {
-    const lines = check.scan(views.get(file)).sort((a, b) => a - b);
+    // The path rides along for a scan that pins an exemption to one file.
+    const lines = check.scan(views.get(file), file).sort((a, b) => a - b);
     if (lines.length === 0) continue;
     if (check.allowlist.includes(file)) {
       seen.add(file);
@@ -2042,6 +2659,30 @@ function main() {
       for (const f of stale) process.stderr.write(`  ${f}\n`);
       process.stderr.write(`  → ${STALE_FIX}\n`);
     }
+  }
+
+  // EXTENSIONS stays complete: a script under src/ the walk above can't read
+  // escapes every check here, so its presence fails, and so does an allowlist
+  // row naming no such file.
+  const everything = walkAll(SRC);
+  const unscanned = unscannedScripts(everything);
+  const staleScripts = UNSCANNED_SCRIPT_ALLOWLIST.filter(
+    (p) => !everything.includes(p),
+  );
+  if (unscanned.length > 0 || staleScripts.length > 0) {
+    failed = true;
+    for (const f of unscanned)
+      process.stderr.write(
+        `src-script-extensions: ${f} is never scanned (the checks read .ts/.tsx only) — convert it to TypeScript, or add it to UNSCANNED_SCRIPT_ALLOWLIST with rationale\n`,
+      );
+    for (const f of staleScripts)
+      process.stderr.write(
+        `src-script-extensions: ${f}\n  → ${STALE_SCRIPT_FIX}\n`,
+      );
+  } else {
+    process.stdout.write(
+      `src-script-extensions: OK (${everything.length} files checked)\n`,
+    );
   }
 
   // Not `process.exit`: it can truncate a pending pipe write, losing the very

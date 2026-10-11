@@ -2,11 +2,11 @@ import {
   type MutationCache,
   type QueryKey,
   queryOptions,
-  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation } from "@/lib/started-mutation";
 import { isAppError } from "@/lib/tauri/invoke";
 import * as api from "../api";
 import type {
@@ -684,9 +684,10 @@ const commitCommentsKey = (repo: string, sha: string, lens: RemoteLens) =>
 export function useCreateCommitComment(repo: string, lens: RemoteLens) {
   const queryClient = useQueryClient();
   return useMutation({
-    // Pinned: the call, the optimistic patch, its rollback and the invalidation all
-    // close over `repo`/`lens`, and the comment hosts survive a repo switch — without
-    // the key a switch retargets the pending create and writes the row elsewhere.
+    // Pinned: the call, the optimistic patch, its rollback and the invalidation
+    // all close over `repo`/`lens`, and the comment hosts survive a repo switch —
+    // without the key the newly-live repo's controls would read the pending
+    // create as busy.
     mutationKey: ["create-commit-comment", repo, lens],
     mutationFn: (args: {
       sha: string;
@@ -813,10 +814,10 @@ export function useDeleteCommitComment(repo: string, lens: RemoteLens) {
 export function useCreateReviewThread(repo: string, lens: RemoteLens) {
   const queryClient = useQueryClient();
   return useMutation({
-    // Pinned: the call, the optimistic patch, its rollback and the invalidation all
-    // close over `repo`/`lens`, and the composer's host survives a repo switch —
-    // without the key a switch retargets the pending create and writes the thread
-    // elsewhere.
+    // Pinned: the call, the optimistic patch, its rollback and the invalidation
+    // all close over `repo`/`lens`, and the composer's host survives a repo
+    // switch — without the key the newly-live repo's controls would read the
+    // pending create as busy.
     mutationKey: ["create-review-thread", repo, lens],
     mutationFn: (args: {
       number: number;
@@ -899,9 +900,8 @@ export function useSubmitReview(repo: string, lens: RemoteLens) {
   );
 }
 
-// The PR rides the variables and the key pins `repo`: the thread lists' host survives
-// PR and repo switches, so a closed-over identity would resume a paused reply or
-// resolve against another PR's thread and reconcile the wrong threads key.
+// The PR rides the variables, which `pendingThreadWritesFor` matches the thread
+// holds on, and the key pins `repo`, so a hold never crosses repos.
 export function useThreadReply(repo: string) {
   const queryClient = useQueryClient();
   return useMutation({

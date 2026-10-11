@@ -38,6 +38,7 @@ import {
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
+import { refuseIfSwitched } from "@/lib/stores/notifications";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { isAppError } from "@/lib/tauri/invoke";
 import { toastError, toastErrorWithNote } from "@/lib/toast";
@@ -50,20 +51,24 @@ const onError = (e: unknown) => toastError(e);
 // their write runs, and the host (one panel across repo switches) may reopen one
 // on another subject or repo before the settle: a settle closes only while the
 // dialog still shows its subject in the repo it fired in, both read off live
-// props. A selection clear has its own rule, at its site; the create-from-commit
-// dialogs settle by open session in their host.
+// props. Each of these three takes `openedIn`, the repo its host opened it in,
+// and refuses (closing) when answered after a switch. A selection clear has its
+// own rule, at its site; the create-from-commit dialogs settle by open session in
+// their host.
 
 /** Confirm-and-delete a tag, optionally on origin too. Owns its mutation; the
  *  parent keeps the open + "delete on origin" state (reset on each open). */
 export function DeleteTagDialog({
   repoPath,
   name,
+  openedIn,
   remote,
   onRemoteChange,
   onClose,
 }: {
   repoPath: string;
   name: string | null;
+  openedIn: string | null;
   remote: boolean;
   onRemoteChange: (v: boolean) => void;
   onClose: () => void;
@@ -77,7 +82,11 @@ export function DeleteTagDialog({
   const liveName = useLatestRef(name);
   const liveRepo = useLatestRef(repoPath);
   async function run() {
-    if (!name) return;
+    if (!name || !openedIn) return;
+    if (refuseIfSwitched(openedIn, "nothing was deleted")) {
+      onClose();
+      return;
+    }
     if (remote && refuseWhileOffline()) return;
     const startedFor = name;
     const startedIn = repoPath;
@@ -149,10 +158,12 @@ export function DeleteTagDialog({
 export function ResetCommitDialog({
   repoPath,
   hash,
+  openedIn,
   onClose,
 }: {
   repoPath: string;
   hash: string | null;
+  openedIn: string | null;
   onClose: () => void;
 }) {
   const resetMutation = useResetToCommit(repoPath);
@@ -160,7 +171,11 @@ export function ResetCommitDialog({
   const liveHash = useLatestRef(hash);
   const liveRepo = useLatestRef(repoPath);
   async function run() {
-    if (!hash) return;
+    if (!hash || !openedIn) return;
+    if (refuseIfSwitched(openedIn, "nothing was reset")) {
+      onClose();
+      return;
+    }
     if (promotionBlocksCheckout(repoPath)) {
       toast.info(PROMOTION_BLOCKS_CHECKOUT);
       return;
@@ -221,6 +236,7 @@ export function ResetCommitDialog({
 export function CherryPickOntoDialog({
   repoPath,
   hashes,
+  openedIn,
   branch,
   onBranchChange,
   branches,
@@ -230,6 +246,7 @@ export function CherryPickOntoDialog({
 }: {
   repoPath: string;
   hashes: string[] | null;
+  openedIn: string | null;
   branch: string;
   onBranchChange: (b: string) => void;
   branches: { name: string }[];
@@ -244,7 +261,11 @@ export function CherryPickOntoDialog({
   const liveHashes = useLatestRef(hashes);
   const liveRepo = useLatestRef(repoPath);
   async function run() {
-    if (!hashes || !branch) return;
+    if (!hashes || !branch || !openedIn) return;
+    if (refuseIfSwitched(openedIn, "nothing was cherry-picked")) {
+      onClose();
+      return;
+    }
     // It switches to the destination branch, so it moves HEAD.
     if (promotionBlocksCheckout(repoPath)) {
       toast.info(PROMOTION_BLOCKS_CHECKOUT);
