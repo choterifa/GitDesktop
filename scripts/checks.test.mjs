@@ -75,12 +75,16 @@ import {
 import {
   checkBareBranchRevs,
   checkCompareEndpoints,
+  checkMergeIgnoredGuard,
   checkRefspecTemplates,
   checkSecretArgv,
   checkShortRefNames,
   checkStderrOnlyGitError,
   checkSyncCommands,
   enclosingFn,
+  lexRust,
+  MERGE_GUARD_ALLOWLIST,
+  MERGE_GUARD_NOTE,
   splitStaleEntries,
   staleAllowlistEntries,
 } from "./check-rust-invariants.mjs";
@@ -3631,6 +3635,1015 @@ test("stripComments blanks comments but not comment-shaped strings", () => {
 });
 
 // -------------------------------------------------------- check-rust-invariants
+
+function mergeGuardHits(src, file = "fixture.rs", allowlist = undefined) {
+  const hits = [];
+  checkMergeIgnoredGuard(file, src, src.split("\n"), hits, allowlist);
+  return hits;
+}
+
+test("merge guard flags merge and pull argv, including incrementally built argv", () => {
+  for (const argv of [
+    '&["merge", target]',
+    'vec!["merge"]',
+    'vec!["merge".to_string()]',
+    '&["pull", flag]',
+    '& [ "merge", target]',
+    'vec ! [ "pull", flag]',
+  ]) {
+    const hits = mergeGuardHits(
+      "async fn unsafe_merge() {\n let args = " +
+        argv +
+        ';\n args.push("--ff-only");\n args.push("--no-overwrite-ignore");\n}',
+    );
+    assert.equal(hits.length, 1, argv);
+    assert.equal(hits[0].fn, "unsafe_merge");
+    assert.equal(hits[0].allowlisted, false);
+  }
+});
+
+test("merge guard allowlists only the named non-argv const item", () => {
+  const src =
+    'const MERGE_METHODS: [&str; 3] = ["merge", "rebase_merge", "ff"];';
+  const allowed = mergeGuardHits(src, "forge/gitlab.rs");
+  assert.equal(allowed.length, 1);
+  assert.equal(allowed[0].fn, "MERGE_METHODS");
+  assert.equal(allowed[0].allowlisted, true);
+  const elsewhere = mergeGuardHits(src);
+  assert.equal(elsewhere.length, 1);
+  assert.equal(elsewhere[0].allowlisted, false);
+  // An item row is not a function row: a same-named fn gets no pass from it.
+  const fnHits = mergeGuardHits(
+    'fn MERGE_METHODS() { run(&["merge", sha]); }',
+    "forge/gitlab.rs",
+  );
+  assert.equal(fnHits.length, 1);
+  assert.equal(fnHits[0].allowlisted, false);
+});
+
+test("merge guard accepts a checked function and both literal exemptions", () => {
+  for (const src of [
+    'async fn guarded() { ignored_files_in_the_way(repo, sha, timeout).await?; run(&["merge", sha]); }',
+    'fn abort() { run(&["merge", "--abort"]); }',
+    'fn ff() { run(&["merge", "--ff-only", "--no-overwrite-ignore", sha]); }',
+  ]) {
+    assert.deepEqual(mergeGuardHits(src), []);
+  }
+});
+
+test("merge guard requires its own executable guard call", () => {
+  for (const body of [
+    "// ignored_files_in_the_way(repo, sha, timeout)\n",
+    'let prose = "ignored_files_in_the_way(repo, sha, timeout)";',
+    "fn nested() { ignored_files_in_the_way(repo, sha, timeout); }",
+    "let x = 0; fn inline_nested() { ignored_files_in_the_way(repo, sha, timeout); }",
+  ]) {
+    const src =
+      "fn earlier() { ignored_files_in_the_way(repo, sha, timeout); }\nfn unsafe_merge() {\n" +
+      body +
+      '\nrun(&["merge", sha]);\n}\nfn later() { ignored_files_in_the_way(repo, sha, timeout); }';
+    assert.equal(mergeGuardHits(src).length, 1, body);
+  }
+});
+
+test("merge guard ignores test modules and literals but scans production after tests", () => {
+  const src = [
+    '#[cfg(test)] mod tests { fn fixture() { run(&["merge", sha]); } }',
+    'fn prose() { let raw = r#"&["merge", sha]"#; }',
+    'fn production() { run(&["merge", sha]); }',
+  ].join("\n");
+  const hits = mergeGuardHits(src);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fn, "production");
+});
+
+test("merge guard allowlists only the named fresh-checkout function", () => {
+  const src = 'async fn verify_pin_and_merge() { run(&["merge", sha]); }';
+  const hits = mergeGuardHits(src, "git/branches.rs");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].allowlisted, true);
+  assert.equal(mergeGuardHits(src, "fixture.rs")[0].allowlisted, false);
+});
+
+test("merge guard reports stale rows after removal or a guard", () => {
+  const entry = MERGE_GUARD_ALLOWLIST.find(
+    (row) => row.fn === "verify_pin_and_merge",
+  );
+  for (const src of [
+    "fn verify_pin_and_merge() {}",
+    'fn verify_pin_and_merge() { ignored_files_in_the_way(repo, sha, timeout); run(&["merge", sha]); }',
+  ]) {
+    assert.deepEqual(
+      staleAllowlistEntries([entry], mergeGuardHits(src, entry.file)),
+      [entry],
+    );
+  }
+});
+
+test("merge guard recognizes argv wrappers, config pairs and Command", () => {
+  for (const argv of [
+    '&["-c", "a=b", "-c", setting, "merge", sha]',
+    'vec![String::from("merge"), sha]',
+    'vec!["pull".into(), flag]',
+    '&["merge".to_string(), sha]',
+    'Command::new("git").args(["merge", sha])',
+    'Command::new("git").arg("merge").arg(sha)',
+    'Command::new("git").arg("-c").arg(setting).arg("pull")',
+    '["pull", flag]',
+  ]) {
+    const src = "fn unsafe_merge() { let args = " + argv + "; }";
+    const hits = mergeGuardHits(src);
+    assert.equal(hits.length, 1, argv);
+    assert.equal(hits[0].fn, "unsafe_merge", argv);
+  }
+});
+
+test("merge guard recognizes typed arrays and array parameters", () => {
+  const src = [
+    "fn unsafe_merge(bytes: [u8; 4]) {",
+    '  let args: [&str; 2] = ["merge", sha];',
+    "}",
+  ].join("\n");
+  const hits = mergeGuardHits(src);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fn, "unsafe_merge");
+});
+
+test("merge guard checks const and static argv at their uses and definition", () => {
+  for (const item of ["const", "static", "static mut", "pub const"]) {
+    for (const value of ['["merge", "ff"]', '&["merge", "ff"]']) {
+      // Unused, or public (its users may live in another file): the definition
+      // itself is the site.
+      const src = item + " METHODS: [&str; 2] = " + value + ";";
+      const hits = mergeGuardHits(src);
+      assert.equal(hits.length, 1, src);
+      assert.equal(hits[0].fn, "METHODS", src);
+    }
+  }
+  const used = [
+    'const FF: &[&str] = &["merge", "--no-edit"];',
+    "fn unsafe_merge() { run(FF); }",
+    "fn guarded() { ignored_files_in_the_way(repo, sha, timeout); run(FF); }",
+  ].join("\n");
+  const hits = mergeGuardHits(used);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fn, "unsafe_merge");
+  const associated = [
+    "struct Merge;",
+    "impl Merge {",
+    '    const ARGS: &\'static [&\'static str] = &["merge", "--no-edit"];',
+    "    fn run(&self) { git(Self::ARGS); }",
+    "}",
+  ].join("\n");
+  const assocHits = mergeGuardHits(associated);
+  assert.equal(assocHits.length, 1);
+  assert.equal(assocHits[0].fn, "run");
+  // A non-argv const stays silent.
+  assert.deepEqual(
+    mergeGuardHits('const KINDS: [&str; 2] = ["log", "merge"];'),
+    [],
+  );
+});
+
+test("merge guard requires the builder caller to check", () => {
+  const src = [
+    "async fn merge_pinned() { plain_merge_argv(repo, plain, flag).await; }",
+    "async fn merge_pinned_autostash() {",
+    "  ignored_files_in_the_way(repo, sha, timeout).await?;",
+    "  plain_merge_argv(repo, plain, flag).await;",
+    "}",
+  ].join("\n");
+  const hits = mergeGuardHits(src, "git/pull_guard.rs");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fn, "merge_pinned");
+  assert.equal(hits[0].allowlisted, false);
+  const swapped = src
+    .replace("fn merge_pinned()", "fn merge_pinned_autostash()")
+    .replace("fn merge_pinned_autostash() {\n", "fn merge_pinned() {\n");
+  const swappedHits = mergeGuardHits(swapped, "git/pull_guard.rs");
+  assert.equal(swappedHits.length, 1);
+  assert.equal(swappedHits[0].fn, "merge_pinned_autostash");
+});
+
+test("merge guard ignores builder prose and declarations", () => {
+  const src = [
+    "fn plain_merge_argv() {}",
+    "fn prose() {",
+    "  // plain_merge_argv(repo, plain, flag)",
+    '  let text = "plain_merge_argv(repo, plain, flag)";',
+    "}",
+  ].join("\n");
+  assert.deepEqual(mergeGuardHits(src), []);
+});
+
+test("merge guard limits fast-forward exemptions and skips control ops", () => {
+  assert.equal(
+    mergeGuardHits(
+      'fn pull() { run(&["pull", "--ff-only", ' +
+        '"--no-overwrite-ignore"]); }',
+    ).length,
+    1,
+  );
+  for (const flag of ["--abort", "--continue", "--quit"]) {
+    for (const argv of [
+      '&["merge", "' + flag + '"]',
+      'Command::new("git").arg("merge").arg("' + flag + '")',
+    ]) {
+      assert.deepEqual(
+        mergeGuardHits("fn control() { let args = " + argv + "; }"),
+        [],
+      );
+    }
+  }
+  assert.deepEqual(
+    mergeGuardHits(
+      'fn ff() { run(&["-c", "a=b", "merge", "--ff-only", ' +
+        '"--no-overwrite-ignore"]); }',
+    ),
+    [],
+  );
+});
+
+test("merge guard counts a guard anywhere in its own function", () => {
+  const src = [
+    "fn guarded(bytes: [u8; 4]) {",
+    '  run(&["merge", sha]);',
+    "  if check { ignored_files_in_the_way(repo, sha, timeout); }",
+    "}",
+  ].join("\n");
+  assert.deepEqual(mergeGuardHits(src), []);
+});
+
+/** One unguarded function around `body`, for the must-fail spellings. */
+const unguarded = (body) => "fn unsafe_merge() {\n" + body + "\n}";
+
+test("lexRust keeps offsets and lines while blanking comments and literals", () => {
+  const src = [
+    'let a = "x /* y"; /* outer /* inner */ still */ let b = 1;',
+    "fn f<'a>(s: &'a str) -> char { '\"' } // tail",
+    String.raw`let r = r#"he said "hi" // no"#; let c = b'\''; let d = "\"/*";`,
+  ].join("\n");
+  const { code, masked } = lexRust(src);
+  assert.equal(code.length, src.length);
+  assert.equal(masked.length, src.length);
+  assert.deepEqual(
+    code.split("\n").map((l) => l.trimEnd()),
+    [
+      'let a = "x /* y"; ' +
+        " ".repeat("/* outer /* inner */ still */".length) +
+        " let b = 1;",
+      "fn f<'a>(s: &'a str) -> char { '\"' }",
+      String.raw`let r = r#"he said "hi" // no"#; let c = b'\''; let d = "\"/*";`,
+    ],
+  );
+  assert.ok(!/["']/.test(masked), masked);
+  assert.ok(masked.includes("let b = 1;"));
+  assert.ok(masked.includes("let d ="));
+  assert.equal(lexRust(src).unterminated, -1);
+});
+
+test("merge guard fails closed on a literal or comment that never closes", () => {
+  for (const opener of [
+    'let s = "never closed;',
+    'let s = r#"never closed";',
+    "/* outer /* inner */ never closed",
+  ]) {
+    const src =
+      "fn a() {}\nfn b() {\n  " + opener + '\n  run(&["merge", sha]);\n}';
+    const hits = mergeGuardHits(src);
+    assert.equal(hits.length, 1, opener);
+    assert.equal(hits[0].fn, "<unreadable>", opener);
+    // A stray quote pairs with the next one, so the run-off may start later.
+    assert.ok(hits[0].line >= 3, opener);
+    assert.equal(hits[0].allowlisted, false, opener);
+  }
+});
+
+test("merge guard sees past comment-shaped text inside Rust strings", () => {
+  for (const [label, before] of [
+    [
+      "gd/session/* on a multi-line string's continuation line",
+      [
+        '#[tool(description = "Refuses an agent-session branch \\',
+        '                       (gd/session/*). Requires --allow-git-write.")]',
+        "fn create_branch() {}",
+      ].join("\n"),
+    ],
+    [
+      "// on a multi-line string's continuation line",
+      [
+        "fn describe() {",
+        '    let text = "first line',
+        '        see https://example.com // not a comment";',
+        "}",
+      ].join("\n"),
+    ],
+  ]) {
+    const src = before + '\nfn unsafe_merge() { run(&["merge", sha]); }';
+    const hits = mergeGuardHits(src);
+    assert.equal(hits.length, 1, label);
+    assert.equal(hits[0].fn, "unsafe_merge", label);
+  }
+});
+
+test("merge guard counts no guard that only a comment spells", () => {
+  for (const [label, src] of [
+    [
+      "lifetime before a trailing comment",
+      [
+        "async fn unsafe_merge(state: State<'_, AppState>) { // ignored_files_in_the_way(",
+        '    run(&["merge", sha]);',
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "nested block comment",
+      unguarded(
+        '/* outer /* inner */ ignored_files_in_the_way(repo, sha, t) */ run(&["merge", sha]);',
+      ),
+    ],
+  ]) {
+    assert.equal(mergeGuardHits(src).length, 1, label);
+  }
+});
+
+test("merge guard reads &'static str annotations as lets, never const items", () => {
+  for (const stmt of [
+    'let mut args: Vec<&\'static str> = vec!["merge", "--no-edit"];',
+    'let argv: &[&\'static str] = &["merge", x];',
+    'let a: [&\'static str; 2] = ["merge", x];',
+  ]) {
+    const hits = mergeGuardHits(unguarded(stmt));
+    assert.equal(hits.length, 1, stmt);
+    assert.equal(hits[0].fn, "unsafe_merge", stmt);
+  }
+});
+
+test("merge guard follows a receiver's pushes, extends and inserts", () => {
+  for (const body of [
+    'let mut a = vec!["-c", cfg]; a.push("merge");',
+    'let mut a = Vec::new(); a.push("merge");',
+    'let mut a: Vec<&str> = Vec::new(); a.extend(["merge", x]);',
+    'let mut a = Vec::new(); a.extend_from_slice(&["pull", "--no-rebase"]);',
+    'let mut a = vec!["--no-edit", x]; a.insert(0, "merge");',
+    'let mut cmd = Command::new("git"); cmd.arg("-C").arg(dir); cmd.arg("merge");',
+    'let mut a = vec!["-C", dir]; if sq { a.push("--squash"); } a.push("merge");',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+  for (const body of [
+    'let mut args = vec!["merge", "--no-overwrite-ignore"]; args.extend(["-X", "ours"]); ' +
+      "ignored_files_in_the_way(repo, sha, t);",
+    'let mut args: Vec<&str> = Vec::new(); args.extend(["-X", "ours"]);',
+    'let mut a = vec!["log"]; a.push("merge");',
+    'let a = vec!["merge"]; let a = vec!["log"]; a.push("x"); ' +
+      "ignored_files_in_the_way(repo, sha, t);",
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard resolves every element spelling of the verb", () => {
+  for (const element of [
+    '"merge".to_owned()',
+    '&"merge".to_string()',
+    'r"merge"',
+    'r#"merge"#',
+    'OsString::from("merge")',
+    'std::string::String::from("merge")',
+    'OsStr::new("pull")',
+    'Cow::Borrowed("merge")',
+    'format!("merge")',
+    String.raw`"mer\x67e"`,
+    "VERB",
+    "Self::VERB",
+    "verb",
+  ]) {
+    const src = [
+      'const VERB: &str = "merge";',
+      unguarded('let verb = "merge";\nrun(&[' + element + ", sha]);"),
+    ].join("\n");
+    const hits = mergeGuardHits(src);
+    assert.equal(hits.length, 1, element);
+    assert.equal(hits[0].fn, "unsafe_merge", element);
+  }
+});
+
+test("merge guard skips git's global options before the verb", () => {
+  for (const argv of [
+    '&["-C", dir, "merge", sha]',
+    '&["--no-pager", "merge", sha]',
+    '&["--literal-pathspecs", "pull"]',
+    '&["--no-optional-locks", "merge", sha]',
+    '&["--git-dir=.git", "merge", sha]',
+    '&["--work-tree=.", "merge", sha]',
+    '&["--git-dir", gitdir, "--work-tree", wt, "merge", sha]',
+    '&[&format!("--git-dir={gitdir}"), "merge", sha]',
+    'vec!["-c", "a=b", "-C", dir, "--no-pager", "pull"]',
+  ]) {
+    assert.equal(
+      mergeGuardHits(unguarded("run(" + argv + ");")).length,
+      1,
+      argv,
+    );
+  }
+  // A verb before `merge` makes it a positional, and an opaque verb slot is
+  // the named limitation, not a guess.
+  for (const argv of [
+    '&["-C", dir, "log", "merge"]',
+    '&["checkout", "merge"]',
+    "&[verb_from_caller, sha]",
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded("run(" + argv + ");")), [], argv);
+  }
+});
+
+test("merge guard finds arrays wherever they sit", () => {
+  for (const body of [
+    'let a = if sq { ["merge", "--squash", x] } else { ["merge", x] };',
+    'let a = match mode { Mode::Squash => ["merge", "--squash"], _ => ["log", x] };',
+    'run(["merge", x].as_slice());',
+    'run(vec!("merge", x));',
+    'run(vec!{"pull"});',
+    'let a = &mut ["merge", x];',
+  ]) {
+    assert.ok(mergeGuardHits(unguarded(body)).length >= 1, body);
+  }
+  // Indexing and attributes are not array literals.
+  for (const body of [
+    'let n = counts["merge"];',
+    'let n = lookup(x)["merge"];',
+    '#[doc = "merge"]\nlet n = 1;',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard voids the ff-only exemption beside an --overwrite-ignore", () => {
+  const ff = 'run(&["merge", "--ff-only", "--no-overwrite-ignore", sha]);';
+  assert.deepEqual(mergeGuardHits(unguarded(ff)), []);
+  for (const extra of [
+    'let flag = "--overwrite-ignore";',
+    'other.arg("--overwrite-ignore");',
+    'let raw = r"--overwrite-ignore";',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(extra + "\n" + ff)).length, 1, extra);
+  }
+  assert.equal(
+    mergeGuardHits(
+      unguarded(
+        'Command::new("git").arg("merge").arg("--ff-only").arg("--no-overwrite-ignore");',
+      ),
+    ).length,
+    1,
+  );
+  // Flags in a separate push may be conditional, so they grant nothing.
+  assert.equal(
+    mergeGuardHits(
+      unguarded(
+        'let mut a = vec!["merge"]; a.push("--ff-only"); a.push("--no-overwrite-ignore");',
+      ),
+    ).length,
+    1,
+  );
+  assert.equal(
+    mergeGuardHits(
+      unguarded('let mut a = vec!["merge"]; if stop { a.push("--abort"); }'),
+    ).length,
+    1,
+  );
+});
+
+test("merge guard requires every builder reference and alias to guard", () => {
+  for (const src of [
+    "fn caller() { plans.iter().map(plain_merge_argv).collect() }",
+    "fn caller() { let f = plain_merge_argv; f(repo) }",
+    [
+      "use crate::git::pull_guard::plain_merge_argv as build;",
+      "fn caller() { build(repo, plain, flag); }",
+    ].join("\n"),
+    [
+      "use crate::git::pull_guard::{plain_merge_argv as build, other};",
+      "fn caller() { build(repo, plain, flag); }",
+    ].join("\n"),
+  ]) {
+    const hits = mergeGuardHits(src);
+    assert.equal(hits.length, 1, src);
+    assert.equal(hits[0].fn, "caller", src);
+    assert.equal(hits[0].allowlisted, false, src);
+  }
+  assert.deepEqual(
+    mergeGuardHits(
+      "use crate::git::pull_guard::plain_merge_argv;\n" +
+        "fn caller() { ignored_files_in_the_way(r, s, t); plain_merge_argv(r); }",
+    ),
+    [],
+  );
+});
+
+test("merge guard states its function scope and its blind spots", () => {
+  const [hit] = mergeGuardHits(unguarded('run(&["merge", sha]);'));
+  assert.match(hit.fix, /no dominance/);
+  assert.match(hit.fix, /pre-authorizes/);
+  assert.match(MERGE_GUARD_NOTE, /^Not seen: /);
+});
+
+test("merge guard resolves a verb through same-name shadowing", () => {
+  for (const body of [
+    'let verb = "merge";\nlet verb = verb.clone();\nrun(&[verb, &sha]);',
+    'let verb = "merge";\nlet verb = verb.to_string();\nrun(&[&verb, &sha]);',
+    'let verb = "pull";\nlet verb = verb.to_owned();\nrun(&[verb.as_str()]);',
+    'let v = "merge";\nlet v = v.clone();\nlet v = v.to_string();\nrun(&[&v, sha]);',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+  // A shadow with no earlier binding is a parameter: opaque, and it terminates.
+  for (const src of [
+    unguarded("let verb = verb.clone();\nrun(&[verb, sha]);"),
+    [
+      "const A: &str = B;",
+      "const B: &str = A;",
+      unguarded("run(&[A, sha]);"),
+    ].join("\n"),
+  ]) {
+    assert.deepEqual(mergeGuardHits(src), [], src);
+  }
+});
+
+test("merge guard unions the arms of an if or match verb", () => {
+  for (const body of [
+    'let op = if mode == "rebase" { "rebase" } else { "merge" };\nrun(&[op, "--no-edit", sha]);',
+    'let op = match mode { "rebase" => "rebase", _ => "merge" };\nrun(&[op, sha]);',
+    'let op = match mode { Mode::Rebase => { "rebase" } Mode::Merge => "pull" };\nrun(&[op]);',
+    'run(&[if rebase { "rebase" } else { "merge" }, sha]);',
+    'let op = if a { "log" } else if b { "pull" } else { "fetch" };\nrun(&[op]);',
+    'let op = match m { A => "merge", _ => unreachable!() };\nrun(&[op, sha]);',
+    'let op = if a { let x = 1; "merge" } else { return Err(e) };\nrun(&[op]);',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+  for (const body of [
+    'let op = if mode == "rebase" { "rebase" } else { "fetch" };\nrun(&[op, sha]);',
+    'let op = if a { "merge" } else { other() };\nrun(&[op, sha]);',
+    // The shape at remote.rs/autostash.rs: an op label that never reaches argv.
+    'let op = if mode == "rebase" { "rebase" } else { "merge" };\nrefuse_mid_op_for(&repo, op);',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard counts a verified guard wrapper as the guard", () => {
+  const rows = [
+    ...MERGE_GUARD_ALLOWLIST,
+    {
+      file: "fixture.rs",
+      fn: "refuse_ignored",
+      guard: true,
+      rationale: "fixture wrapper",
+    },
+  ];
+  const wrapper =
+    "fn refuse_ignored(repo: &str) -> AppResult<()> { ignored_files_in_the_way(repo, sha, t)?; Ok(()) }";
+  const caller = 'fn caller() { refuse_ignored(repo)?; run(&["merge", sha]); }';
+  const hits = mergeGuardHits(wrapper + "\n" + caller, "fixture.rs", rows);
+  assert.deepEqual(
+    hits.map((h) => [h.fn, h.allowlisted]),
+    [["refuse_ignored", true]],
+  );
+  assert.deepEqual(splitStaleEntries(rows.slice(-1), hits).failing, []);
+  // The wrapper's calls count from any file.
+  assert.deepEqual(mergeGuardHits(caller, "other.rs", rows), []);
+  // A wrapper that skips the real guard fails, and so does its caller.
+  const hollow = mergeGuardHits(
+    "fn refuse_ignored(repo: &str) -> AppResult<()> { Ok(()) }\n" + caller,
+    "fixture.rs",
+    rows,
+  );
+  assert.deepEqual(
+    hollow.map((h) => [h.fn, h.allowlisted]),
+    [["refuse_ignored", false]],
+  );
+  // A row whose wrapper is gone is stale.
+  const gone = mergeGuardHits(caller, "fixture.rs", rows);
+  assert.deepEqual(
+    splitStaleEntries(rows.slice(-1), gone).failing,
+    rows.slice(-1),
+  );
+  // Without the row the wrapper is just a function.
+  assert.equal(mergeGuardHits(wrapper + "\n" + caller).length, 1);
+});
+
+test("merge guard reads slice patterns as patterns, not argv", () => {
+  for (const body of [
+    'match argv { ["merge", ..] => a(), ["pull", rest @ ..] => b(), _ => c() }',
+    'match argv { ["merge", x] if x.is_empty() => a(), _ => c() }',
+    'match argv { ["merge"] | ["pull"] => a(), _ => c() }',
+    'if let ["pull", rest @ ..] = args { go(rest); }',
+    'while let ["merge", ..] = args { step(); }',
+    'let ["merge", target] = parts else { return; };',
+    'let is_merge = matches!(args, ["merge", ..]);',
+    'assert!(matches!(args, ["merge", ..] | ["pull"]));',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  // An array in a match arm's VALUE is still an argv.
+  assert.equal(
+    mergeGuardHits(
+      unguarded('let a = match m { A => ["merge", x], _ => ["log", x] };'),
+    ).length,
+    1,
+  );
+});
+
+test("merge guard reads insert as argv only on an argv-shaped receiver", () => {
+  for (const body of [
+    'let mut body = HashMap::new();\nbody.insert("merge_method", "merge");',
+    'let mut m = serde_json::Map::new();\nm.insert("method".into(), "merge".into());',
+    'map.insert(key, "pull");',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  for (const body of [
+    'let mut a = Vec::new();\na.insert(i, "merge");',
+    'let mut a = Vec::with_capacity(4);\na.insert(at, "pull");',
+    'let mut a = vec!["--no-edit"];\na.insert(0, "merge");',
+    'args.insert(0, "merge");',
+    'args.insert(0usize, "pull");',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+});
+
+test("merge guard voids the ff-only exemption on a later fast-forward flag", () => {
+  const ff = '"merge", "--ff-only", "--no-overwrite-ignore", sha';
+  for (const body of [
+    "let mut a = vec![" + ff + '];\na.push("--no-ff");',
+    "let mut a = vec![" + ff + '];\na.push("--ff");',
+    'run(&["merge", "--ff-only", "--no-overwrite-ignore", "--no-ff", sha]);',
+    "let mut a = vec![" + ff + "];\na.extend(extra);",
+    "let mut a = vec![" + ff + "];\na.extend_from_slice(&flags);",
+    'let f = if x { "--ff" } else { "--stat" };\nlet mut a = vec![' +
+      ff +
+      "];\na.push(f);",
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+  // A fast-forward flag BEFORE --ff-only loses to it.
+  assert.deepEqual(
+    mergeGuardHits(
+      unguarded(
+        'run(&["merge", "--no-ff", "--ff-only", "--no-overwrite-ignore", sha]);',
+      ),
+    ),
+    [],
+  );
+});
+
+test("merge guard voids the ff-only exemption on a resolved --overwrite-ignore", () => {
+  for (const src of [
+    [
+      'const OW: &str = "--overwrite-ignore";',
+      unguarded(
+        'let mut a = vec!["merge", "--ff-only", "--no-overwrite-ignore", sha];\na.push(OW);',
+      ),
+    ].join("\n"),
+    [
+      'const OW: &str = "--overwrite-ignore";',
+      unguarded(
+        'run(&["merge", "--ff-only", "--no-overwrite-ignore", OW, sha]);',
+      ),
+    ].join("\n"),
+  ]) {
+    assert.equal(mergeGuardHits(src).length, 1, src);
+  }
+  // An --overwrite-ignore BEFORE the last --no-overwrite-ignore loses to it.
+  assert.deepEqual(
+    mergeGuardHits(
+      [
+        'const OW: &str = "--overwrite-ignore";',
+        unguarded(
+          'run(&["merge", OW, "--ff-only", "--no-overwrite-ignore", sha]);',
+        ),
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
+test("merge guard skips --shallow-file and its value before the verb", () => {
+  assert.equal(
+    mergeGuardHits(unguarded('run(&["--shallow-file", path, "merge", sha]);'))
+      .length,
+    1,
+  );
+});
+
+test("merge guard drops an arm whose block ends in a diverging statement", () => {
+  for (const choose of [
+    'let op = if a { "merge" } else { return Err(e); };',
+    [
+      "let op = if a {",
+      '    "merge"',
+      "} else {",
+      '    log::warn!("no op");',
+      "    return Err(e);",
+      "};",
+    ].join("\n"),
+    'let op = match m { Mode::Merge => "merge", _ => { log::warn!("x"); return Ok(()); } };',
+    'let op = match m { Mode::Merge => "merge", _ => { continue; } };',
+    'let op = if a { "merge" } else if b { return Ok(()); } else { "log" };',
+  ]) {
+    const body = choose + "\nrun(&[op, sha]);";
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+  // A block ending in a statement that does not diverge stays opaque.
+  assert.deepEqual(
+    mergeGuardHits(
+      unguarded('let op = if a { "merge" } else { log(); };\nrun(&[op, sha]);'),
+    ),
+    [],
+  );
+});
+
+test("merge guard resolves pathological binding chains fast", () => {
+  const shadows = (n) =>
+    unguarded(
+      'let a = "merge";\n' +
+        "let a = match m { A => a, B => a, C => a };\n".repeat(n) +
+        "run(&[a, sha]);",
+    );
+  for (const [label, src, expected] of [
+    ["15 shadowed three-arm matches", shadows(15), 1],
+    ["40 shadowed three-arm matches", shadows(40), 1],
+    [
+      "a self-referencing const match",
+      "const A: &str = match X { 1 => A, 2 => A, 3 => A, _ => A };\n" +
+        unguarded("run(&[A, sha]);"),
+      0,
+    ],
+  ]) {
+    const started = performance.now();
+    const hits = mergeGuardHits(src);
+    assert.ok(performance.now() - started < 1000, label);
+    assert.equal(hits.length, expected, label);
+  }
+});
+
+test("merge guard fails closed past its resolution hop cap", () => {
+  const chain = (n) =>
+    unguarded(
+      'let a = "merge";\n' +
+        "let a = a.clone();\n".repeat(n) +
+        "run(&[a, sha]);",
+    );
+  const deep = mergeGuardHits(chain(600));
+  assert.equal(deep.length, 1);
+  assert.equal(deep[0].fn, "<unreadable>");
+  assert.equal(deep[0].allowlisted, false);
+  const within = mergeGuardHits(chain(300));
+  assert.equal(within.length, 1);
+  assert.equal(within[0].fn, "unsafe_merge");
+});
+
+test("merge guard reads compound slice patterns as patterns", () => {
+  for (const body of [
+    'if let ["merge", ..] | ["pull", ..] = args { go(); }',
+    'match (args, ok) { (["merge", ..], true) => a(), _ => b() }',
+    'match opt { Some(["merge", rest @ ..]) => a(rest), _ => b() }',
+    'match nested { [["merge", ..], ..] => a(), _ => b() }',
+    'if let Some(["merge", x]) = parts { go(x); }',
+    'let f = |["merge", x]: [&str; 2]| x;',
+    'assert_matches!(args, ["merge", ..]);',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  assert.deepEqual(
+    mergeGuardHits('fn f(["merge", x]: [&str; 2]) -> &str { x }'),
+    [],
+  );
+  // Real argvs inside groups, comparisons and struct fields stay sites.
+  for (const body of [
+    'let ok = run(&["merge", x]) == 0;',
+    'let job = Job { argv: ["merge", x] };',
+    'match run(&["merge", x]).await { Ok(_) => a(), Err(_) => b() }',
+    'let r = matches!(run(&["merge", x]), Ok(_));',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+});
+
+test("merge guard keeps an argv whose expression is followed by a pattern token", () => {
+  for (const body of [
+    'results[run(&["merge", sha])] = true;',
+    'let code = run(&["merge", sha]) | 1;',
+    'match mode { _ if run(&["merge", sha]) => go(), _ => stop() }',
+    'match mode { Some(x) if check(run(&["merge", x])) => go(), _ => stop() }',
+    'let ok = matches!(mode, _ if run(&["merge", sha]));',
+    'let f = |x| run(&["merge", x]) | 1;',
+    'match m { A => run(&["merge", sha]) | 1, _ => 0 };',
+  ]) {
+    const hits = mergeGuardHits(unguarded(body));
+    assert.equal(hits.length, 1, body);
+    assert.equal(hits[0].fn, "unsafe_merge", body);
+  }
+  for (const body of [
+    'match argv { x | ["merge", ..] => a(), _ => b() }',
+    'match m { A => { go(); } ["merge", ..] => b(), _ => c() }',
+    'let ok = matches!(argv, ["merge", ..] if ready);',
+    'match argv { ["merge", ..] if run(&["log"]).is_ok() => a(), _ => b() }',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  // Accepted false positive: an arm pattern starts after the last top-level
+  // `}`, so a slice inside a struct pattern's braces reads as an expression.
+  assert.equal(
+    mergeGuardHits(
+      unguarded('match m { Job { argv: ["merge", ..] } => a(), _ => b() }'),
+    ).length,
+    1,
+  );
+});
+
+test("merge guard opens no pattern span at a raw identifier", () => {
+  for (const body of [
+    'r#let(&["merge", sha]);',
+    'let f = |r#let| run(&["merge", r#let]);',
+    'r#match(&["merge", sha]);',
+    'r#match! { run(&["merge", sha]) => go() }',
+    'let v = r#move | run(&["merge", sha]) | 1;',
+    'let v = \u00e5let(&["merge", sha]);',
+    'let ok = xmatches!(argv, ["merge", sha]);',
+    'let ok = amatches!(argv, ["merge", sha]);',
+  ]) {
+    const hits = mergeGuardHits(unguarded(body));
+    assert.equal(hits.length, 1, body);
+    assert.equal(hits[0].fn, "unsafe_merge", body);
+  }
+  // `matches` is a macro name, not a keyword: its raw spelling is the macro.
+  for (const body of [
+    'let ok = r#matches!(argv, ["merge", ..]);',
+    'r#assert_matches!(args, ["merge", ..]);',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard never reads a pattern's own pipe as a closure", () => {
+  for (const body of [
+    'match mode { | A if run(&["merge", sha]).is_ok() | ready => 1, _ => 0 };',
+    'match m { A => 0, | B if run(&["merge", sha]).is_ok() | z => 1, _ => 2 }',
+    'let ok = matches!(m, | A if run(&["merge", sha]).is_ok() | ready);',
+    'match m { A => |x| run(&["merge", x]), _ => |x| x }',
+  ]) {
+    const hits = mergeGuardHits(unguarded(body));
+    assert.equal(hits.length, 1, body);
+    assert.equal(hits[0].fn, "unsafe_merge", body);
+  }
+  for (const body of [
+    'match argv { | ["merge", ..] | ["pull", ..] => a(), _ => b() }',
+    'let ok = matches!(argv, | ["merge", ..] | ["pull"]);',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard verifies every namesake of a guard wrapper", () => {
+  const rows = [
+    {
+      file: "fixture.rs",
+      fn: "refuse_ignored",
+      guard: true,
+      rationale: "fixture wrapper",
+    },
+  ];
+  const hollow = mergeGuardHits(
+    'fn refuse_ignored(repo: &str) -> AppResult<()> { Ok(()) }\nfn caller() { refuse_ignored(r)?; run(&["merge", sha]); }',
+    "other.rs",
+    rows,
+  );
+  assert.deepEqual(
+    hollow.map((h) => [h.fn, h.allowlisted]),
+    [["refuse_ignored", false]],
+  );
+  // A method of the same name is not the wrapper.
+  assert.equal(
+    mergeGuardHits(
+      'fn caller() { self.refuse_ignored(r)?; run(&["merge", sha]); }',
+      "other.rs",
+      rows,
+    ).length,
+    1,
+  );
+  assert.deepEqual(
+    mergeGuardHits(
+      'fn caller() { refuse_ignored(r)?; run(&["merge", sha]); }',
+      "other.rs",
+      rows,
+    ),
+    [],
+  );
+});
+
+test("merge guard reads Vec::default and Vec::from receivers as argv-shaped", () => {
+  for (const init of ["Vec::default()", "Vec::from(base)"]) {
+    const body = "let mut a = " + init + ';\na.insert(i, "merge");';
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+});
+
+test("merge guard never lets a sibling branch's verb dismiss a merge", () => {
+  for (const body of [
+    'let mut cmd = Command::new("git");\nif probe { cmd.args(["status"]); } else { cmd.args(["merge", sha]); }',
+    'let mut cmd = Command::new("git");\nif dry { cmd.args(["status"]); } else { cmd.args(["merge", sha]); }',
+    'let mut cmd = Command::new("git");\nmatch mode { Mode::Probe => cmd.args(["status"]), _ => cmd.args(["merge", sha]) };',
+    'let mut cmd = Command::new("git");\nmatch mode { Mode::Probe => { cmd.arg("status"); } _ => { cmd.arg("merge"); } }',
+    'let mut cmd = Command::new("git");\nif probe { cmd.arg("status"); } else { cmd.arg("merge"); }',
+    'let mut a = Vec::new();\nfor _ in 0..n { a.push("status"); }\na.push("merge");',
+    'let mut a = Vec::new();\nitems.iter().for_each(|_| a.push("status"));\na.push("merge");',
+  ]) {
+    const hits = mergeGuardHits(unguarded(body));
+    assert.equal(hits.length, 1, body);
+    assert.equal(hits[0].fn, "unsafe_merge", body);
+  }
+  // A merge-led literal is a site on its own, whatever ran before it.
+  assert.equal(
+    mergeGuardHits(
+      unguarded('let mut a = vec!["log"];\na.extend(["merge", sha]);'),
+    ).length,
+    1,
+  );
+  // A verb that runs first on every path still makes a pushed `merge` a
+  // positional.
+  for (const body of [
+    'let mut a = vec!["log"];\nif x { a.push("merge"); }',
+    'let mut cmd = Command::new("git");\ncmd.arg("log");\nif x { cmd.arg("merge"); }',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+});
+
+test("merge guard resets a receiver at a collection-removal call", () => {
+  for (const removal of [
+    "args.clear();",
+    "args.truncate(0);",
+    "args.drain(..);",
+    "args.retain(|a| a.starts_with('-'));",
+    "args.remove(0);",
+    "args.pop();",
+    "args.split_off(0);",
+  ]) {
+    for (const add of [
+      'args.extend_from_slice(&["merge", sha]);',
+      'args.push("merge");',
+    ]) {
+      const body = 'let mut args = vec!["status"];\n' + removal + "\n" + add;
+      assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+    }
+  }
+});
+
+test("merge guard bounds later flags at a reset that runs first", () => {
+  const safe =
+    'let mut a = vec!["merge", "--ff-only", "--no-overwrite-ignore", sha];\nrun(&a);\n';
+  for (const body of [
+    safe + 'a = vec!["log"];\na.push("--no-ff");',
+    'let mut a = vec!["merge", "--ff-only", "--no-overwrite-ignore"];\nrun(&a);\na = vec!["status"];\na.push("--ff");',
+    safe + 'a.clear();\na.push("--no-ff");',
+    safe + 'let a = vec!["log", "--no-ff"];\nrun(&a);',
+    safe + 'a = vec!["log", "--no-ff"];',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  // A bound that may not run, or a partial removal, ends nothing.
+  for (const body of [
+    safe + 'if x { a = vec!["log"]; }\na.push("--no-ff");\nrun(&a);',
+    safe + 'if x { a.clear(); }\na.push("--no-ff");\nrun(&a);',
+    safe + 'a.pop();\na.push("--no-ff");',
+    safe + 'a.push("--no-ff");\na = vec!["log"];',
+  ]) {
+    assert.equal(mergeGuardHits(unguarded(body)).length, 1, body);
+  }
+});
+
+test("merge guard keeps its exemptions and flag non-hits under the new passes", () => {
+  for (const body of [
+    'let mut args = vec!["merge", "--no-overwrite-ignore"];\nargs.extend(["-X", "ours"]);\nignored_files_in_the_way(r, s, t);',
+    'let mut args: Vec<&str> = Vec::new();\nargs.extend(["-X", "ours"]);',
+    'run(&["merge", "--ff-only", "--no-overwrite-ignore", sha]);',
+    'let a = vec!["merge", "--ff-only", "--no-overwrite-ignore", sha];\nrun(&a);',
+    'run(&["-c", "a=b", "merge", "--ff-only", "--no-overwrite-ignore", sha]);',
+    'let mut a = vec!["merge"];\nif stop { a.push("--abort"); }\nignored_files_in_the_way(r, s, t);',
+  ]) {
+    assert.deepEqual(mergeGuardHits(unguarded(body)), [], body);
+  }
+  // A site the passes overlap on is reported once.
+  assert.equal(
+    mergeGuardHits(
+      unguarded('let mut a = vec!["merge", x];\na.push("--no-edit");'),
+    ).length,
+    1,
+  );
+});
 
 test("enclosingFn attributes const, unsafe and extern signatures", () => {
   const cases = [
