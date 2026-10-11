@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { memoizedStoreLoader } from "@/lib/plugin-store";
+import { withAppStoreLock } from "@/lib/app-store-lock";
+import {
+  memoizedStoreLoader,
+  reloadToleratingEmptyStore,
+} from "@/lib/plugin-store";
+import { reconcileNumbers } from "./agent-number-reconcile";
 
 // A GitHub-style short identifier (`#N`) for every agent entry — sessions, plans,
 // and research — so an entry is easy to reference and a plan can point at the
@@ -30,7 +35,8 @@ interface AgentNumberState {
   ensure: (ids: string[]) => void;
 }
 
-const getStore = memoizedStoreLoader("agent-numbers.json");
+const STORE_FILE = "agent-numbers.json";
+const getStore = memoizedStoreLoader(STORE_FILE);
 
 /** The in-flight `hydrate()` attempt, so concurrent callers share one disk read instead
  *  of each starting their own. Pairs with {@link RETRY_COOLDOWN_MS}: this bounds
@@ -149,8 +155,8 @@ export const useAgentNumbers = create<AgentNumberState>((set, get) => ({
 // keeps it off the file: it turns true only after a successful read, and nothing can
 // change `numbers`/`counter` before then (`ensure` refuses to mint while false), so
 // every map this writes descends from what was on disk. The write aborts on a failed
-// store open rather than rejecting unhandled — the numbers are re-derivable on the
-// next launch, and a half-written pair is worse than a missed save.
+// store open or reload (logged, never rejecting unhandled) — the numbers are
+// re-derivable on the next launch, and a half-written pair is worse than a missed save.
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 useAgentNumbers.subscribe((state, prev) => {
   if (
@@ -161,13 +167,33 @@ useAgentNumbers.subscribe((state, prev) => {
   }
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const st = useAgentNumbers.getState();
+    // Reconcile under the store lock against disk, the shared truth once persisted
+    // (see reconcileNumbers). Memory reads and absorbs the result synchronously, so no
+    // mint can land between the two; this deliberately departs from hydrate-once for
+    // the reconciled entries, and the re-fired pass finds nothing left to change.
     void getStore()
-      .then(async (store) => {
-        await store.set("numbers", st.numbers);
-        await store.set("counter", st.counter);
-      })
-      .catch(() => undefined);
+      .then((store) =>
+        withAppStoreLock(STORE_FILE, async () => {
+          await reloadToleratingEmptyStore(store);
+          const disk =
+            (await store.get<Record<string, number>>("numbers")) ?? {};
+          const diskCounter = (await store.get<number>("counter")) ?? 1;
+          const live = useAgentNumbers.getState();
+          const { numbers, counter, changed } = reconcileNumbers(
+            disk,
+            diskCounter,
+            live.numbers,
+            live.counter,
+          );
+          if (changed) useAgentNumbers.setState({ numbers, counter });
+          await store.set("numbers", numbers);
+          await store.set("counter", counter);
+          await store.save();
+        }),
+      )
+      .catch((e: unknown) => {
+        console.error("[agent-numbers] persist failed", e);
+      });
   }, 500);
 });
 
