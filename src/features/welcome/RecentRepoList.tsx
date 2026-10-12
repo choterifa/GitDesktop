@@ -7,6 +7,11 @@ import {
 import { RepoList } from "@/features/repository/RepoList";
 import type { RecentRepo } from "@/lib/settings/api";
 import { useSettings } from "@/lib/settings/queries";
+import {
+  BOX_CLASS,
+  COLUMN_CLASS,
+  HEADING_CLASS,
+} from "./recent-repo-list-sizes";
 
 export function RecentRepoList() {
   const settings = useSettings();
@@ -15,9 +20,9 @@ export function RecentRepoList() {
   const [removeTarget, setRemoveTarget] = useState<RecentRepo | null>(null);
 
   return (
-    <div className="min-w-0 space-y-2">
+    <div className={COLUMN_CLASS}>
       <div className="flex items-baseline justify-between gap-2 px-1">
-        <h2 className="font-heading text-sm font-medium">Repositories</h2>
+        <h2 className={HEADING_CLASS}>Repositories</h2>
         {recents.length > 0 && (
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {recents.length}
@@ -34,7 +39,7 @@ export function RecentRepoList() {
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-none border">
+        <div className={BOX_CLASS}>
           <RepoList
             onAliasRepo={setAliasTarget}
             onRemoveRepo={setRemoveTarget}

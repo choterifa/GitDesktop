@@ -46,6 +46,11 @@ import {
 } from "@/lib/settings/queries";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import {
+  FILTER_INPUT_CLASS,
+  FILTER_ROW_CLASS,
+  LIST_VIEWPORT_CLASS,
+} from "./repo-list-sizes";
 import { useOpenRepoByPath } from "./useOpenRepoByPath";
 
 const RECENT_COUNT = 5;
@@ -354,7 +359,7 @@ export function RepoList({
 
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="shrink-0 p-2">
+      <div className={FILTER_ROW_CLASS}>
         <Input
           // the filter is the keyboard entry point of this surface
           autoFocus
@@ -377,13 +382,10 @@ export function RepoList({
           aria-activedescendant={
             highlightedPath ? repoOptionId(highlightedPath) : undefined
           }
-          className="h-7"
+          className={FILTER_INPUT_CLASS}
         />
       </div>
-      <ScrollArea
-        className="min-h-0 **:data-[slot=scroll-area-viewport]:max-h-96"
-        ref={listRef}
-      >
+      <ScrollArea className={LIST_VIEWPORT_CLASS} ref={listRef}>
         <ContextMenu>
           <ContextMenuTrigger
             render={
