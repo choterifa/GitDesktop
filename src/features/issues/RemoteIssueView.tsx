@@ -5,11 +5,13 @@ import {
   DotsThreeIcon,
   PencilSimpleIcon,
 } from "@phosphor-icons/react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
+import { HeldFrame, heldParentProps } from "@/components/held-frame";
+import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { Markdown } from "@/components/markdown/markdown";
 import type { MarkdownEditorHandle } from "@/components/markdown-editor";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
@@ -60,6 +62,7 @@ import {
   TimelineEventRow,
 } from "@/features/pulls/PrTimeline";
 import { copyText } from "@/lib/clipboard";
+import { entityKeyNumber, entityKeyScope } from "@/lib/entity-hold";
 import { presentError } from "@/lib/error-summary";
 import type { LockReason, MinimizeReason } from "@/lib/git/api";
 import { useForgeGhHost } from "@/lib/git/host";
@@ -78,8 +81,11 @@ import {
   useForgeStatus,
   useGhRepos,
   useGlMemberProjects,
+  useIssueDependencies,
   useIssueDetails,
+  useIssueDevelopment,
   useIssueReactions,
+  useIssueRelations,
   useIssueTimeline,
   useLockIssue,
   useMinimizeComment,
@@ -94,7 +100,11 @@ import {
   WRITE_ACCESS_ITEM_REASON,
   writeAccessReason,
 } from "@/lib/git/queries";
-import { providerLabel, type RemoteLens } from "@/lib/git/types";
+import {
+  type IssueInfo,
+  providerLabel,
+  type RemoteLens,
+} from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import {
   COMMENT_DELETE_PENDING_REASON,
@@ -108,17 +118,21 @@ import {
 } from "@/lib/offline-writes";
 import { lensKey, useRepoLens } from "@/lib/repo-lens/queries";
 import { useConfirm } from "@/lib/stores/confirm";
-import { repoNameFromPath } from "@/lib/stores/notifications";
+import { refuseIfSwitched, repoNameFromPath } from "@/lib/stores/notifications";
 import { useUiStore } from "@/lib/stores/ui";
 import { parseableDate } from "@/lib/time";
 import { toastError, toastErrorWithNote } from "@/lib/toast";
+import { useEntityHold, useRevealGuard } from "@/lib/use-entity-hold";
 import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { PlanIssueButton } from "../plan/PlanIssueButton";
+import { readAnswered } from "../pulls/pr-section-answered";
 import { SolveIssueButton } from "../sessions/SolveIssueButton";
 import { IssueSubIssues } from "./IssueRelations";
 import {
   DeleteIssueDialog,
+  ISSUE_SWITCH_LOADING_REASON,
+  IssueLoadingFrame,
   IssueSidebar,
   TransferIssueDialog,
 } from "./RemoteIssueViewParts";
@@ -138,6 +152,27 @@ const CLOSE_TITLE_QUALIFIER = {
   completed: "",
   not_planned: " as not planned",
 } as const;
+
+/** The issue's row in any cached list page of this repo and lens, read at
+ *  render for the loading frame's title and state; undefined when no list
+ *  holds it (an arrival from another tab). */
+function cachedIssueRow(
+  queryClient: QueryClient,
+  repo: string,
+  lens: RemoteLens,
+  number: number,
+): IssueInfo | undefined {
+  for (const [key, rows] of queryClient.getQueriesData<IssueInfo[]>({
+    queryKey: repoKeys.issueList(repo),
+  })) {
+    // `useIssueList`'s key: index 3 is the lens, and a fork numbers its
+    // issues independently of its parent.
+    if (key[3] !== lens || !Array.isArray(rows)) continue;
+    const row = rows.find((r) => r.number === number);
+    if (row) return row;
+  }
+  return undefined;
+}
 
 /**
  * Full read+write view for a GitHub issue: header, description, threaded
@@ -227,7 +262,9 @@ export function RemoteIssueView({
   // Time tracking + related issues are GitLab-unique too — flag alone gates.
   const canTrackTime = forgeFeatureReady(forge.data, "timeTracking");
   const canLinkIssues = forgeFeatureReady(forge.data, "issueLinks");
-  const details = useIssueDetails(repoPath, number, lens);
+  // The selected issue's details. They answer the hold and start loading the
+  // moment the selection moves, while the view still paints the issue it holds.
+  const targetDetails = useIssueDetails(repoPath, number, lens);
   const mentions = useMentionCandidates({ repoPath, lens, provider });
   const comment = useCommentIssue(repoPath, lens);
   const closeIssue = useCloseIssue(repoPath, lens);
@@ -300,6 +337,7 @@ export function RemoteIssueView({
   const selectIssue = useUiStore((s) => s.selectIssue);
   const openPr = useUiStore((s) => s.openPr);
   const repoName = useUiStore((s) => s.repoName);
+  const liveRepoPath = useUiStore((s) => s.repoPath);
   const selectedIssue = useUiStore((s) => s.selectedIssue);
   const setPendingIssueDraft = useUiStore((s) => s.setPendingIssueDraft);
   // Whether this view owns the current selection: the mounted view lags the
@@ -315,13 +353,116 @@ export function RemoteIssueView({
   // wired, so `issueCommentEdit` is false there.
   const canEditOwnComments =
     canWrite || forgeFeatureReady(forge.data, "issueCommentEdit");
-  const reactions = useIssueReactions(repoPath, canReact ? number : null, lens);
   // Activity-timeline events (labels, assignment, milestones, cross-references,
   // state changes) interleaved into the feed below; provider-neutral via the
   // backend's `forge_issue_timeline`. The composite gate is load-bearing: an
   // unresolved provider must not fetch, and Bitbucket issues aren't wired.
   const timelineEnabled = !!provider && provider !== "bitbucket";
-  const timeline = useIssueTimeline(repoPath, number, timelineEnabled, lens);
+  // Only a known GitHub repo is sure to carry the sub-issue, relationship and
+  // development sections, so only there do they reserve their slots and hold
+  // the swap until they answer.
+  const githubRail = provider === "github";
+  // The lens is part of the identity: it can collapse to "origin" without a
+  // remount (upstream remote goes away), leaving the number pointing at another
+  // repo.
+  const issueIdentity = `${repoPath}#${lens}#${number}`;
+  // The selected issue's feed and rail reads, observed here so the hold knows
+  // when that issue can land whole; the view itself renders the SHOWN issue's.
+  const selectedTimeline = useIssueTimeline(
+    repoPath,
+    number,
+    timelineEnabled,
+    lens,
+  );
+  const selectedRelations = useIssueRelations(
+    repoPath,
+    githubRail ? number : null,
+    lens,
+  );
+  const selectedDependencies = useIssueDependencies(
+    repoPath,
+    githubRail ? number : null,
+    lens,
+  );
+  const selectedDevelopment = useIssueDevelopment(
+    repoPath,
+    githubRail ? number : null,
+    lens,
+  );
+  // Warms with the hold, so the reaction bars land in the swap, not after it.
+  const selectedReactions = useIssueReactions(
+    repoPath,
+    canReact ? number : null,
+    lens,
+  );
+  const targetOwn =
+    targetDetails.data !== undefined && !targetDetails.isPlaceholderData;
+  // A reveal that also moves the issue (openIssue from notifications, My work,
+  // the Projects board, a markdown ref) paints the loading frame until the
+  // deferred selection catches up, and never holds the issue it replaces: that
+  // one was never on screen. The guard reads the hold's shown key from the
+  // last step, since it runs before this render's.
+  const issuesTabShown = useUiStore((s) => s.repoTab === "issues");
+  const [lastShown, setLastShown] = useState(issueIdentity);
+  const reveal = useRevealGuard({
+    visible: issuesTabShown,
+    liveKey:
+      selectedIssue?.kind === "remote"
+        ? `${repoPath}#${lens}#${selectedIssue.id}`
+        : null,
+    viewKey: issueIdentity,
+    shownKey: lastShown,
+  });
+  // Through a switch the previous issue stays on screen, dimmed and inert, until
+  // the selected one can replace it in one step or the bound runs out. A failed
+  // details read lands at once: its error arm is the answer.
+  const hold = useEntityHold({
+    key: issueIdentity,
+    settled:
+      (targetDetails.isError && !targetOwn) ||
+      (targetOwn &&
+        (timelineEnabled ? readAnswered(selectedTimeline) : !forge.isPending) &&
+        (!canReact || readAnswered(selectedReactions)) &&
+        (!githubRail ||
+          (readAnswered(selectedRelations) &&
+            readAnswered(selectedDependencies) &&
+            readAnswered(selectedDevelopment)))),
+    // The issue on screen must be this repo's, under this lens: the number
+    // alone means another issue elsewhere, so no hold spans a scope change.
+    // Not the placeholder: a hover prefetch caches the target's details, and
+    // the held paint is the shown issue's own details, read below.
+    canHold: entityKeyScope(lastShown) === entityKeyScope(issueIdentity),
+    paused: targetDetails.isPaused && !targetOwn,
+    // Holds only when the tab was ALREADY visible and painted this view's
+    // issue: an arrival with the tab shows the new issue directly. In-tab
+    // moves keep holding.
+    active: reveal.active,
+  });
+  if (lastShown !== hold.shownKey) setLastShown(hold.shownKey);
+  // The issue on screen: the held one while holding, else the selection. Every
+  // per-issue read the view RENDERS keys on it, so a held view never mixes in
+  // parts of the issue loading behind it; writes keep addressing `number` and
+  // hold through `detailsStale`.
+  const shownIdentity = hold.shownKey;
+  const shownNumber = entityKeyNumber(shownIdentity);
+  const details = useIssueDetails(repoPath, shownNumber, lens);
+  // The rendered details are another issue's placeholder: the loading and
+  // offline arms, never a hold (the held issue's details are its own).
+  const detailsPlaceholder = details.isPlaceholderData;
+  // Handlers and in-menu items refuse on this; controls visible at rest read
+  // `detailsPlaceholder` (see `staleReason`).
+  const detailsStale = hold.holding || detailsPlaceholder;
+  const reactions = useIssueReactions(
+    repoPath,
+    canReact ? shownNumber : null,
+    lens,
+  );
+  const timeline = useIssueTimeline(
+    repoPath,
+    shownNumber,
+    timelineEnabled,
+    lens,
+  );
   // Feed-constant, so it's read once here rather than per event row; the
   // repo-path variant avoids the active-repo hook's second store subscription.
   const ghHost = useForgeGhHost(repoPath);
@@ -341,12 +482,9 @@ export function RemoteIssueView({
     successToast: "Issue updated",
   });
   // A different issue must never inherit this one's open delete/transfer/edit
-  // dialogs — a render-time state adjustment, not an effect. The lens is part of
-  // the identity: it can collapse to "origin" without a remount (upstream remote
-  // goes away), leaving the number pointing at another repo. The same identity
-  // keys the sidebar below, remounting its own per-issue drafts.
-  const issueIdentity = `${repoPath}#${lens}#${number}`;
-  const compose = useKeyedEntityState(issueIdentity, "");
+  // dialogs — a render-time state adjustment, not an effect. The SHOWN identity
+  // keys the draft and the sidebar below, remounting its per-issue drafts.
+  const compose = useKeyedEntityState(shownIdentity, "");
   const [lastIdentity, setLastIdentity] = useState(issueIdentity);
   if (issueIdentity !== lastIdentity) {
     setLastIdentity(issueIdentity);
@@ -373,7 +511,20 @@ export function RemoteIssueView({
 
   const issue = details.data;
 
-  const threadActive = isSelectedIssue && !!issue && !details.isPlaceholderData;
+  // The feed lands whole: comments and timeline events appear together once the
+  // shown issue's timeline has answered, so no event inserts above a comment
+  // after the fact. A DISABLED timeline never leaves pending, so with none
+  // coming a settled forge probe stands in for it.
+  // Reactions ride the same landing: the bars draw their chips before the
+  // add button, so late counts would push it sideways. A disabled read
+  // (`canReact` false) never answers, so it never holds anything.
+  const reactionsReady = !canReact || readAnswered(reactions);
+  const feedReady =
+    reactionsReady &&
+    (timelineEnabled ? readAnswered(timeline) : !forge.isPending);
+  // The thread's hotkeys wait for the feed too: a jump would land on its
+  // skeleton rows.
+  const threadActive = isSelectedIssue && !!issue && !detailsStale && feedReady;
   const jumpRef = useThreadJumpHotkeys(threadActive);
   // The composer sits below the thread AND the sidebar, so reaching it by Tab
   // means crossing the whole rail — this is the keyboard route past it. Enabled
@@ -397,23 +548,146 @@ export function RemoteIssueView({
   const { hostRef, retryRef } = useRetryFocusRescue(
     detailPane === "error" && details.isError,
   );
-  if (detailPane === "skeleton") {
-    return (
-      <div ref={hostRef} tabIndex={-1} className="space-y-3 p-4 outline-none">
-        <Skeleton className="h-5 w-2/3" />
-        <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="h-32 w-full" />
-      </div>
+  // The loading frame stands in for the LIVE selection: through a reveal,
+  // `number` is still the deferred previous issue. Only a remote issue of this
+  // repo (this lens being the live one) has a row to look up.
+  const frameNumber =
+    selectedIssue?.kind === "remote" && liveRepoPath === repoPath
+      ? Number(selectedIssue.id)
+      : null;
+  const frameKey =
+    frameNumber === null ? null : `${repoPath}#${lens}#${frameNumber}`;
+  // Whether the frame found a cached list row, decided once per live selection:
+  // a row arriving mid-frame would re-lay the header the frame already drew.
+  const [frameRow, setFrameRow] = useState<{
+    key: string;
+    row: IssueInfo | null;
+  } | null>(null);
+  // Which arm draws. A placeholder the hold isn't holding is never drawn: past
+  // the bound, or with no settled issue to hold, it is the previous issue under
+  // this one's number, so the loading frame stands in, as it does through a
+  // reveal that lags the selection.
+  const arm =
+    reveal.revealing ||
+    detailPane === "skeleton" ||
+    (detailsPlaceholder && hold.phase === "loading")
+      ? "loading"
+      : detailPane === "offline"
+        ? "offline"
+        : detailPane === "error" || !issue
+          ? "error"
+          : "content";
+  // Each frame episode decides afresh.
+  if (arm !== "loading" && frameRow !== null) setFrameRow(null);
+  // A swap that unmounts the focused node (in-view navigation onto an issue that
+  // lands without a hold, or an arm change) would drop focus to <body>; land it
+  // on the host. Change-only, so a mount never takes focus from elsewhere.
+  const focusHost = useRef<HTMLDivElement | null>(null);
+  const viewFrame = `${arm}:${shownIdentity}`;
+  const lastViewFrame = useRef(viewFrame);
+  useLayoutEffect(() => {
+    if (lastViewFrame.current === viewFrame) return;
+    lastViewFrame.current = viewFrame;
+    if (document.activeElement === document.body)
+      focusHost.current?.focus({ preventScroll: true });
+  }, [viewFrame]);
+  // Every arm draws inside the same host and frame, so React keeps both nodes
+  // (and the frame's focus sink) through each swap, and a Retry's focus lands
+  // on the host.
+  const shell = (content: ReactNode) => (
+    <div
+      ref={(node) => {
+        hostRef(node);
+        focusHost.current = node;
+      }}
+      tabIndex={-1}
+      className="@container/issue-detail h-full outline-none"
+      {...heldParentProps(hold.holding)}
+    >
+      <HeldFrame
+        holding={hold.holding}
+        className="flex h-full min-h-0 flex-col"
+      >
+        {content}
+      </HeldFrame>
+    </div>
+  );
+  if (arm === "loading") {
+    // The loaded header's controls, held where they will stand, gated on the
+    // list row's state as the loaded ones are on the issue's. With no cached
+    // row, Solve and Edit assume an open issue, the common case.
+    let listRow: IssueInfo | null = null;
+    if (frameKey !== null && frameNumber !== null) {
+      if (frameRow?.key === frameKey) listRow = frameRow.row;
+      else {
+        listRow =
+          cachedIssueRow(queryClient, repoPath, lens, frameNumber) ?? null;
+        setFrameRow({ key: frameKey, row: listRow });
+      }
+    }
+    const rowOpen = listRow === null || listRow.state === "OPEN";
+    return shell(
+      <IssueLoadingFrame
+        title={listRow?.title}
+        number={listRow?.number ?? number}
+        composer={canComment ? "comment" : canChangeState ? "bar" : null}
+        actions={
+          <>
+            <PlanIssueButton
+              title=""
+              body=""
+              disabledReason={ISSUE_SWITCH_LOADING_REASON}
+            />
+            {rowOpen && (
+              <SolveIssueButton
+                repoPath={repoPath}
+                title=""
+                body=""
+                disabledReason={ISSUE_SWITCH_LOADING_REASON}
+              />
+            )}
+            {rowOpen && canEdit && (
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                disabled
+                reason={ISSUE_SWITCH_LOADING_REASON}
+              >
+                <PencilSimpleIcon data-icon="inline-start" />
+                Edit
+              </DisabledReasonButton>
+            )}
+            <DisabledReasonButton
+              variant="outline"
+              size="xs"
+              disabled
+              reason={ISSUE_SWITCH_LOADING_REASON}
+            >
+              <ArrowSquareOutIcon data-icon="inline-start" />
+              {remoteLabel}
+            </DisabledReasonButton>
+            {(canLock || canDuplicate || canTransfer || canDelete) && (
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                aria-label="More actions"
+                disabled
+                reason={ISSUE_SWITCH_LOADING_REASON}
+              >
+                <DotsThreeIcon className="size-4" weight="bold" />
+              </DisabledReasonButton>
+            )}
+          </>
+        }
+      />,
     );
   }
-  if (detailPane === "offline") {
-    return (
-      <div ref={hostRef} tabIndex={-1} className="h-full outline-none">
-        <DiffPlaceholder message={offlinePendingMessage("this issue")} />
-      </div>
+  if (arm === "offline") {
+    return shell(
+      <DiffPlaceholder message={offlinePendingMessage("this issue")} />,
     );
   }
-  if (detailPane === "error" || !issue) {
+  if (arm === "error" || !issue) {
     // The failure class isn't knowable here, so the headline claims only which
     // host the read was aimed at and the summary beneath carries the reason. The
     // host goes unnamed while its own probe hasn't answered, rather than guessed.
@@ -423,61 +697,63 @@ export function RemoteIssueView({
     const errorSummary = details.error
       ? presentError(details.error).summary
       : null;
-    return (
-      <div ref={hostRef} tabIndex={-1} className="h-full outline-none">
-        <DiffPlaceholder
-          message={details.isError ? loadFailed : "Could not load this issue"}
-          action={
-            details.isError ? (
-              <div className="flex flex-col items-center gap-2">
-                {errorSummary ? (
-                  <p className="max-w-md text-center text-xs">{errorSummary}</p>
-                ) : null}
-                <Button
-                  ref={retryRef}
-                  variant="outline"
-                  size="sm"
-                  className="cursor-pointer"
-                  disabled={details.isFetching}
-                  onClick={() => details.refetch()}
-                >
-                  {details.isFetching ? "Retrying…" : "Retry"}
-                </Button>
-              </div>
-            ) : undefined
-          }
-        />
-      </div>
+    return shell(
+      <DiffPlaceholder
+        message={details.isError ? loadFailed : "Could not load this issue"}
+        action={
+          details.isError ? (
+            <div className="flex flex-col items-center gap-2">
+              {errorSummary ? (
+                <p className="max-w-md text-center text-xs">{errorSummary}</p>
+              ) : null}
+              <Button
+                ref={retryRef}
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                disabled={details.isFetching}
+                onClick={() => details.refetch()}
+              >
+                {details.isFetching ? "Retrying…" : "Retry"}
+              </Button>
+            </div>
+          ) : undefined
+        }
+      />,
     );
   }
 
   const isOpen = issue.state === "OPEN";
-  // The rendered issue is the previous one during a switch while `number` is
-  // already the new one, so everything that seeds a dialog from it, or reads a
-  // verb off it, holds until the selected issue is on screen.
-  const detailsStale = details.isPlaceholderData;
-  // What a control that holds through the switch says, in one wording. It ranks
-  // BELOW any permission reason wherever both hold: that one never lifts on its
-  // own and is the one still true once the new issue is on screen.
-  const staleReason = detailsStale ? "Loading this issue…" : undefined;
+  // Controls visible at rest hold only over the placeholder: a hold draws none
+  // of it, its controls keeping their look inside the inert frame. Handlers and
+  // items painted only inside an open menu (which can sit open as a hold
+  // starts) refuse on the hold too. Either reason ranks BELOW any permission
+  // reason: that one never lifts and is still true once the issue lands.
+  const staleReason = detailsPlaceholder
+    ? ISSUE_SWITCH_LOADING_REASON
+    : undefined;
+  const heldItemReason = detailsStale ? ISSUE_SWITCH_LOADING_REASON : undefined;
+  // Offline, the selected issue's reads key on its number under the previous
+  // issue's paint; held, every read keys on the shown issue, so they agree.
+  const feedMismatch = detailsPlaceholder;
   const detailFailed = refreshFailed(details);
   const detailNotice = detailNoticeMessage({
     noun: "issue",
     isError: detailFailed,
-    stale: detailsStale,
+    stale: detailsPlaceholder,
   });
   const busy =
     comment.isPending ||
     closeIssue.isPending ||
     reopenIssue.isPending ||
-    detailsStale;
+    detailsPlaceholder;
   // Which term of `busy` to name, ranked: the switch window outranks a write the
   // viewer started, being the hold they can't have caused themselves. Shared by
   // the composer and the close/reopen controls below — every one of them holds
   // for exactly these same terms. A write pressed offline is parked, not running.
   const composerReason = (() => {
     switch (true) {
-      case detailsStale:
+      case detailsPlaceholder:
         return staleReason;
       case comment.isPending:
         return pendingWriteReason(
@@ -558,10 +834,13 @@ export function RemoteIssueView({
     // The caret menu can sit open across a selection switch or a mutation, so
     // the hold has to be re-checked here — item clicks bypass the trigger's
     // disable.
-    if (busy || triageBlocked) return;
+    if (busy || detailsStale || triageBlocked) return;
     // Captured before the await: posting clears the draft, and the error arm
     // below has to know a comment already went out.
     const withComment = draftRidesStateChange;
+    // The post and the close build from the live repo's options, so a switch
+    // during either await refuses rather than writes there.
+    const closeIn = repoPath;
     // Ahead of the riding draft: a cancelled confirm must leave the comment
     // unposted.
     const ok = await useConfirm.getState().ask({
@@ -573,11 +852,28 @@ export function RemoteIssueView({
       holdOffline: true,
     });
     // Ahead of the riding draft too: a close refused offline posts nothing.
-    if (!ok || refuseWhileOffline()) return;
+    if (
+      !ok ||
+      refuseWhileOffline() ||
+      refuseIfSwitched(
+        closeIn,
+        withComment ? "nothing was posted or closed" : "nothing was closed",
+      )
+    )
+      return;
     // Again below the riding post: the connection can drop while it runs, and a
     // comment that went out is named in the refusal.
     if (!(await postRidingDraft())) return;
     if (refuseWhileOffline(withComment ? RIDING_COMMENT_CLOSE_HELD : undefined))
+      return;
+    if (
+      withComment &&
+      refuseIfSwitched(
+        closeIn,
+        "your comment was posted, but the issue wasn't closed",
+        "before the close started",
+      )
+    )
       return;
     try {
       await closeIssue.mutateAsync({ number, reason });
@@ -596,9 +892,21 @@ export function RemoteIssueView({
   }
 
   async function doReopen() {
-    if (busy || triageBlocked) return;
+    if (busy || detailsStale || triageBlocked) return;
     const withComment = draftRidesStateChange;
+    // The reopen builds from the live repo's options after the riding post's
+    // await, so a switch during it refuses rather than reopens there.
+    const reopenIn = repoPath;
     if (!(await postRidingDraft())) return;
+    if (
+      withComment &&
+      refuseIfSwitched(
+        reopenIn,
+        "your comment was posted, but the issue wasn't reopened",
+        "before the reopen started",
+      )
+    )
+      return;
     try {
       await reopenIssue.mutateAsync(number);
     } catch (e) {
@@ -724,8 +1032,9 @@ export function RemoteIssueView({
 
   async function submitTransfer() {
     const destination = transferDest.trim();
-    // The dialog's Enter submit reaches here past its held button.
-    if (!destination || refuseWhileOffline()) return;
+    // The dialog's Enter submit reaches here past its held button. `number`
+    // is the selection, so the previous issue still on screen holds it.
+    if (!destination || detailsStale || refuseWhileOffline()) return;
     const firedUnder = queryClient.getQueryData<RemoteLens>(lensKey(repoPath));
     const startedFor = issueIdentity;
     let url: string;
@@ -854,9 +1163,10 @@ export function RemoteIssueView({
               ? (body) => saveCommentEdit(c.id, body)
               : undefined
           }
-          // Withholding the handler only drops the menu entry; an editor
-          // already open when the switch began needs its Save held too.
-          editHeld={detailsStale}
+          // Withholding the handler only drops the menu entry: an editor already
+          // open when a placeholder took over holds its Save here. During a hold
+          // the inert frame covers it (no focus or pointer reaches it).
+          editHeld={detailsPlaceholder}
           onDelete={
             canEditOwnComments && c.viewerDidAuthor && !detailsStale
               ? () => setDeletingCommentId(c.id)
@@ -872,27 +1182,29 @@ export function RemoteIssueView({
               ? () => void unhideComment(c.id)
               : undefined
           }
-          // Hide/Unhide stay visible but disabled through the switch. The
-          // permission reason ranks first — it's the one still true once
-          // the selected issue is on screen.
-          disabledReason={triageItemReason ?? staleReason}
+          // Hide/Unhide sit in the comment's menu, which can be open as a
+          // hold starts, so they hold on it. The permission reason ranks first:
+          // it's the one still true once the selected issue is on screen.
+          disabledReason={triageItemReason ?? heldItemReason}
           reactions={canReact ? reactions.data?.comments[c.id] : undefined}
           onToggleReaction={
             canReact
               ? (content, active) => toggleReaction(c.id, content, active)
               : undefined
           }
-          reactionsHeld={detailsStale}
+          reactionsHeld={detailsPlaceholder}
           reactionsReason={staleReason}
+          // The picker is portaled out of the hold's `inert`, so it closes then.
+          reactionPickerHeld={detailsStale}
           mentions={mentions}
         />
       ),
     });
   }
-  // Details keep the PREVIOUS issue painted through a switch while the timeline
-  // keys on the NEW number and can resolve first — hold events until the
-  // identities agree, or the feed interleaves two issues.
-  for (const [i, ev] of (detailsStale ? [] : (timeline.data ?? [])).entries()) {
+  // Offline, details keep the PREVIOUS issue painted while the timeline keys on
+  // the NEW number and can resolve first — hold events until the identities
+  // agree, or the feed interleaves two issues.
+  for (const [i, ev] of (feedMismatch ? [] : (timeline.data ?? [])).entries()) {
     feedEntries.push({
       date: ev.date,
       sortKey: 3,
@@ -993,12 +1305,8 @@ export function RemoteIssueView({
     </>
   );
 
-  return (
-    <div
-      ref={hostRef}
-      tabIndex={-1}
-      className="@container/issue-detail flex h-full flex-col outline-none"
-    >
+  return shell(
+    <>
       <DegradedListNotice
         noun="this issue"
         degraded={detailPane === "content-degraded"}
@@ -1017,19 +1325,20 @@ export function RemoteIssueView({
               #{issue.number}
             </span>
           </h2>
-          {/* Both seed an AI run from the rendered issue, so they're absent while
+          {/* Both seed an AI run from the rendered issue, so they hold while
               that issue isn't the one you selected. */}
-          {!detailsStale && (
-            <>
-              <PlanIssueButton title={issue.title} body={issue.body} />
-              {isOpen && (
-                <SolveIssueButton
-                  repoPath={repoPath}
-                  title={issue.title}
-                  body={issue.body}
-                />
-              )}
-            </>
+          <PlanIssueButton
+            title={issue.title}
+            body={issue.body}
+            disabledReason={staleReason}
+          />
+          {isOpen && (
+            <SolveIssueButton
+              repoPath={repoPath}
+              title={issue.title}
+              body={issue.body}
+              disabledReason={staleReason}
+            />
           )}
           {isOpen && canEdit && (
             // A natively-disabled Button swallows its own `title`, so the wait
@@ -1037,7 +1346,7 @@ export function RemoteIssueView({
             <DisabledReasonButton
               variant="outline"
               size="xs"
-              disabled={detailsStale}
+              disabled={detailsPlaceholder}
               reason={staleReason}
               onClick={openIssueEdit}
               title="Edit the title and description"
@@ -1046,16 +1355,19 @@ export function RemoteIssueView({
               Edit
             </DisabledReasonButton>
           )}
-          <Button
+          {/* The URL is the rendered issue's, the previous one mid-switch. */}
+          <DisabledReasonButton
             variant="outline"
             size="xs"
+            disabled={detailsPlaceholder}
+            reason={staleReason}
             onClick={() => openUrl(issue.url)}
             title={`Open this issue on ${remoteLabel}`}
             className="cursor-pointer"
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
             {remoteLabel}
-          </Button>
+          </DisabledReasonButton>
           {(canLock || canDuplicate || canTransfer || canDelete) && (
             <DropdownMenu>
               {/* Every item but Transfer is withheld while the rendered issue is
@@ -1067,7 +1379,7 @@ export function RemoteIssueView({
                     variant="outline"
                     size="xs"
                     aria-label="More actions"
-                    disabled={detailsStale}
+                    disabled={detailsPlaceholder}
                     reason={staleReason}
                   />
                 }
@@ -1147,16 +1459,21 @@ export function RemoteIssueView({
                     Duplicate issue
                   </DropdownMenuItem>
                 )}
+                {/* Held, not absent, while stale: the menu can sit open across
+                    a switch, and the transfer addresses `number`, not the
+                    issue on screen. */}
                 {canTransfer && (
                   <DropdownMenuItem
-                    disabled={writeBlocked}
+                    className={MENU_HELD_ROW_CLASS}
+                    disabled={writeBlocked || detailsStale}
                     onClick={() => {
                       setTransferDest("");
                       setTransferOpen(true);
                     }}
                   >
                     {isGitLab ? "Move issue…" : "Transfer issue…"}
-                    {itemSuffix}
+                    {itemSuffix ||
+                      (heldItemReason ? ` — ${heldItemReason}` : "")}
                   </DropdownMenuItem>
                 )}
                 {/* Absent while a placeholder is served: the confirm names the
@@ -1210,7 +1527,12 @@ export function RemoteIssueView({
             flex MAIN axis, so in the column the body would otherwise floor at its
             thread's full height and push a scrollbar onto the document. */}
         <div className="flex min-w-0 flex-1 flex-col @max-2xl/issue-detail:min-h-0">
-          <ConversationScrollArea ref={jumpRef} className="flex-1">
+          {/* Keyed so a newly shown issue opens at its top. */}
+          <ConversationScrollArea
+            key={shownIdentity}
+            ref={jumpRef}
+            className="flex-1"
+          >
             <div className="space-y-4 p-4">
               <div className="group space-y-1">
                 <p className="flex items-center gap-2 text-xs">
@@ -1282,12 +1604,19 @@ export function RemoteIssueView({
                     No description provided.
                   </p>
                 )}
-                {canReact && (
+                {canReact && !reactionsReady && (
+                  // The bar's 24px row, until its counts land.
+                  <div aria-hidden className="flex h-6 items-center">
+                    <Skeleton className="h-5 w-12" />
+                  </div>
+                )}
+                {canReact && reactionsReady && (
                   // The counts are a read and stay; only the toggles hold.
                   <ReactionBar
                     reactions={reactions.data?.body ?? []}
-                    disabled={detailsStale}
+                    disabled={detailsPlaceholder}
                     reason={staleReason}
+                    held={detailsStale}
                     onToggle={(content, active) =>
                       toggleReaction(issue.id, content, active)
                     }
@@ -1296,14 +1625,16 @@ export function RemoteIssueView({
               </div>
               {canWrite && (
                 <IssueSubIssues
-                  // Remounts per issue like the sidebar: its add/create state is
-                  // local, and a dialog left open across a switch would re-point
-                  // its parent id as the placeholder resolves.
-                  key={issueIdentity}
+                  // Remounts per shown issue like the sidebar: its add/create
+                  // state is local, and a dialog left open across a switch would
+                  // re-point its parent id as the placeholder resolves.
+                  key={shownIdentity}
                   repoPath={repoPath}
                   issueId={issue.id}
-                  number={number}
+                  number={shownNumber}
                   lens={lens}
+                  reserve={githubRail}
+                  held={hold.holding}
                   // The writes take the rendered issue's id while the list is
                   // fetched for `number` — hold them until the two agree. A
                   // viewer who can't write hears that first instead: their reason
@@ -1311,28 +1642,33 @@ export function RemoteIssueView({
                   disabledReason={writeReason ?? staleReason}
                 />
               )}
-              {feed.map((e) => e.node)}
-              {/* Wait for the timeline too: on an events-only issue the details
-                  can resolve first and flash this before the rows arrive. A
-                  DISABLED timeline query never leaves pending, so it can't be
-                  the thing waited on — when the forge probe settles without
-                  enabling it, no events are coming and the line shows. */}
-              {feed.length === 0 &&
-                !forge.isPending &&
-                (!timelineEnabled || !timeline.isPending) && (
-                  <p className="text-xs text-muted-foreground">
-                    No comments yet.
-                  </p>
-                )}
+              {feedReady ? (
+                <>
+                  {feed.map((e) => e.node)}
+                  {feed.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No comments yet.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <ListRowSkeletons
+                  rows={3}
+                  lines={2}
+                  indent={false}
+                  name="the conversation"
+                />
+              )}
             </div>
           </ConversationScrollArea>
         </div>
         <IssueSidebar
-          // Remounts the rail per issue so its sections' drafts (the uncontrolled
-          // "Add spent" input, the link picker) can't commit against a new number.
-          key={issueIdentity}
+          // Remounts the rail per shown issue so its sections' drafts (the
+          // uncontrolled "Add spent" input, the link picker) can't commit
+          // against a new number.
+          key={shownIdentity}
           repoPath={repoPath}
-          number={number}
+          number={shownNumber}
           issue={issue}
           canWrite={canWrite}
           canEditLabels={canEditLabels}
@@ -1349,7 +1685,10 @@ export function RemoteIssueView({
           // hold until details are fresh — triage first, since it outlasts the wait.
           pickerDisabledReason={triageReason ?? staleReason}
           writeItemReason={writeItemReason}
-          paletteEnabled={isSelectedIssue}
+          loadingReason={staleReason}
+          reserve={githubRail}
+          held={hold.holding}
+          paletteEnabled={isSelectedIssue && hold.interactive}
         />
       </div>
       {/* Below the thread AND the rail: the conversation is the widest thing on
@@ -1402,7 +1741,7 @@ export function RemoteIssueView({
 
       <EditTitleBodyDialog
         form={edit.form}
-        open={edit.open}
+        open={edit.open && hold.interactive}
         onOpenChange={edit.setOpen}
         title="Edit issue"
         description={`Updates the title and description of #${number} on ${remoteLabel}.`}
@@ -1412,7 +1751,7 @@ export function RemoteIssueView({
       />
 
       <DeleteCommentDialog
-        commentId={deletingCommentId}
+        commentId={hold.interactive ? deletingCommentId : null}
         onClose={() => setDeletingCommentId(null)}
         pending={deleteComment.isPending}
         reason={pendingWriteReason(
@@ -1424,7 +1763,7 @@ export function RemoteIssueView({
       />
 
       <TransferIssueDialog
-        open={transferOpen}
+        open={transferOpen && hold.interactive}
         onClose={() => setTransferOpen(false)}
         number={number}
         dest={transferDest}
@@ -1437,7 +1776,7 @@ export function RemoteIssueView({
       />
 
       <DeleteIssueDialog
-        open={deleteOpen}
+        open={deleteOpen && hold.interactive}
         onClose={() => setDeleteOpen(false)}
         number={number}
         title={issue.title}
@@ -1449,6 +1788,6 @@ export function RemoteIssueView({
           isGitLab ? "needs Owner access" : "requires admin or triage access"
         }
       />
-    </div>
+    </>,
   );
 }

@@ -75,10 +75,12 @@ import {
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
+import { PR_NOUN } from "@/lib/pulls/pr-state";
 import { useRepoLens } from "@/lib/repo-lens/queries";
 import { useConfirm } from "@/lib/stores/confirm";
 import { formatDurationBetween } from "@/lib/time";
 import { toastError } from "@/lib/toast";
+import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn } from "@/lib/utils";
 import { checkPresentation, isOutstanding } from "./check-presentation";
 import {
@@ -563,6 +565,7 @@ export function ChecksRollup({
   provider,
   crossRepository,
   stale,
+  held = false,
   unmetRequiredContexts = [],
 }: {
   checks: PrCheckOut[];
@@ -587,10 +590,16 @@ export function ChecksRollup({
    *  Only the approval strip uses it: GitHub holds runs for approval on fork PRs
    *  alone, so the affordance is fork-scoped by design. */
   crossRepository: boolean;
-  /** True while the host view doesn't own the selection or the details are the
-   *  previous PR's placeholder — suppresses every mutating affordance in the
-   *  rollup, which would otherwise act on a PR the user never opened. */
+  /** True while the details are another PR's placeholder — withdraws every
+   *  mutating affordance in the rollup, which would otherwise act on a PR the
+   *  user never opened. A render gate: never pass a value that flips for one
+   *  render (a lagging selection), or the offers flicker. */
   stale: boolean;
+  /** The rendered PR isn't the one the actions would address right now: the
+   *  host holds it on screen while the selected one loads, or the host's
+   *  selection is a render ahead of it. The offers stay drawn, so the paint
+   *  doesn't change, but every action and palette entry refuses. */
+  held?: boolean;
   /** The base branch's required contexts the PR's checks haven't satisfied, exactly
    *  as the caller's blocked-merge join computes them. GitHub blocked-by-rules PRs
    *  only — absent or empty everywhere else, and the rollup never reads the rules
@@ -903,6 +912,9 @@ export function ChecksRollup({
   // switch lands, while the transient wording doesn't.
   const heldReason =
     writeReason ?? (stale ? PR_SWITCH_LOADING_REASON : undefined);
+  // Whether the rollup's PR stopped being the one its actions address, read
+  // live: the approve confirm awaits, and the switch can land under it.
+  const switchedRef = useLatestRef(stale || held);
   // Approve holds offline, as its prompt does. A running batch keeps a reason
   // of its own, so the button holds focus through the disable.
   const offlineHold = useOfflineHold();
@@ -991,9 +1003,17 @@ export function ChecksRollup({
   }
 
   async function approveBlockedRuns() {
-    if (writeBlocked || stale || approvePending) return;
+    if (writeBlocked || stale || held || approvePending) return;
     const ok = await useConfirm.getState().ask(APPROVE_RUN_CONFIRM);
     if (!ok) return;
+    // The prompt names no pull request, so a switch under it refuses, saying so
+    // rather than letting a just-confirmed action go silent.
+    if (switchedRef.current) {
+      toast.info(
+        `You switched ${PR_NOUN[provider]}s while the dialog was open — nothing was approved.`,
+      );
+      return;
+    }
     setApproving(true);
     let approved = 0;
     try {
@@ -1023,7 +1043,7 @@ export function ChecksRollup({
   }
 
   async function rerunOfferedRuns() {
-    if (writeBlocked || stale || rerunBusy || batchPending) return;
+    if (writeBlocked || stale || held || rerunBusy || batchPending) return;
     // Read before the first await: the button may be gone by the end of the
     // batch, and `activeElement` then reads `<body>` for a palette run and a
     // button run alike.
@@ -1073,7 +1093,8 @@ export function ChecksRollup({
     [jobId, completedAt, runId]: JobRerunCandidate,
     buttonEl: HTMLElement,
   ) {
-    if (writeBlocked || stale || rerunBusy || writeAccess.isPending) return;
+    if (writeBlocked || stale || held || rerunBusy || writeAccess.isPending)
+      return;
     if (!jobOffer || familyOf(runId) || agedOutRuns.has(runId)) return;
     // Read before the first await: this row is keyed by its job id, and a new
     // attempt mints a new one, so the button can be gone by the time the
@@ -1118,6 +1139,7 @@ export function ChecksRollup({
     "pr-rerun-failed-checks",
     () => void rerunOfferedRuns(),
     rerunOffer !== null &&
+      !held &&
       !writeBlocked &&
       !writeAccess.isPending &&
       !rerunBusy &&
@@ -1209,7 +1231,7 @@ export function ChecksRollup({
     },
   ].filter((s) => s.count > 0);
 
-  const prNoun = provider === "gitlab" ? "merge request" : "pull request";
+  const prNoun = PR_NOUN[provider];
   const notice = unknownListNotice({
     prNoun,
     list: "checks",

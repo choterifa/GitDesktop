@@ -15,11 +15,12 @@ import {
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Fragment,
   type ReactNode,
+  useCallback,
   useEffect,
   useEffectEvent,
   useLayoutEffect,
@@ -33,6 +34,8 @@ import { DiffStat } from "@/components/diff-stat";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { SelectControl } from "@/components/form/fields";
+import { HeldFrame, heldParentProps } from "@/components/held-frame";
+import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { Markdown } from "@/components/markdown/markdown";
 import type { MarkdownEditorHandle } from "@/components/markdown-editor";
 import {
@@ -103,6 +106,7 @@ import {
   useEffectiveBranchRulesSettling,
 } from "@/lib/branch-rules/queries";
 import { copyText } from "@/lib/clipboard";
+import { entityKeyNumber, entityKeyScope } from "@/lib/entity-hold";
 import { presentError } from "@/lib/error-summary";
 import {
   gitFetch,
@@ -115,13 +119,17 @@ import { splitUnifiedDiff } from "@/lib/git/diff-split";
 import { useForgeGhHost } from "@/lib/git/host";
 import {
   forgeFeatureReady,
+  glMrMergeStateOptions,
   invalidateRepoAfterWrite,
   isPendingFor,
   isStackMergePendingFor,
   isStackWritePendingFor,
+  itemFieldValuesOptions,
+  itemProjectsOptions,
   PIPELINE_IN_FLIGHT,
   type PrWriteKind,
   pendingWriteOfKind,
+  prApprovalsOptions,
   prDiffOptions,
   prUpdateBranchKeys,
   repoKeys,
@@ -145,6 +153,7 @@ import {
   useGlArmAutoMerge,
   useGlCancelAutoMerge,
   useGlMrMergeState,
+  useGlMrTimeStats,
   useMergePr,
   useMergeRemotePr,
   useMinimizeComment,
@@ -158,6 +167,7 @@ import {
   usePrMergeability,
   usePrReactions,
   usePrReviewThreads,
+  usePrTasks,
   usePrTimeline,
   usePrUpdateBranch,
   useReopenPr,
@@ -189,6 +199,7 @@ import {
   type ForgeProvider,
   type ForgeUserRef,
   type PrDetails,
+  type PrInfo,
   type PrThreadOut,
   prHeadSha,
   providerLabel,
@@ -207,6 +218,7 @@ import {
   useOfflineHold,
 } from "@/lib/offline-writes";
 import type { PrSection } from "@/lib/pulls/pr-section";
+import { PR_NOUN } from "@/lib/pulls/pr-state";
 import {
   useClearReviewDrafts,
   useReviewDrafts,
@@ -214,15 +226,18 @@ import {
 import { useRepoLens } from "@/lib/repo-lens/queries";
 import { useAiEnabled } from "@/lib/settings/queries";
 import { useConfirm } from "@/lib/stores/confirm";
+import { refuseIfSwitched } from "@/lib/stores/notifications";
 import { queuedMergeKey, useUiStore } from "@/lib/stores/ui";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError, toastErrorWithNote } from "@/lib/toast";
+import { useEntityHold, useRevealGuard } from "@/lib/use-entity-hold";
 import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { useRetained } from "@/lib/use-retained";
 import { cn } from "@/lib/utils";
 import { ChecksRollup } from "./ChecksRollup";
 import { LinkedIssuesField } from "./LinkedIssuesField";
+import { mergeStripArm } from "./merge-strip-arm";
 import { PendingReviewBar } from "./PendingReviewBar";
 import { PendingReviewStrip } from "./PendingReviewStrip";
 import { PrActivityFeed, usePrThreadClaims } from "./PrActivityFeed";
@@ -231,12 +246,12 @@ import {
   blockedMergeLine,
   gitlabBlockedLine,
   PR_SWITCH_LOADING_REASON,
-  type PrMergeabilityArm,
   PrMergeabilityBanner,
   type PromotionKind,
 } from "./PrMergeabilityBanner";
 import { PrReviewPanel } from "./PrReviewPanel";
 import { PrTasksChip, PrTasksSection } from "./PrTasksSection";
+import { prSectionAnswered } from "./pr-section-answered";
 import {
   MergePrDialog,
   MrTimeTracking,
@@ -352,6 +367,174 @@ function isServerMergeDisabled(pr: PrDetails, s: MergeStrategy): boolean {
  *  guard against it in step rather than re-typing the sentence. */
 const BUSY_HOLD_FALLBACK_REASON = "Another operation is in progress";
 
+/** The PR's row in any cached list page of this repo and lens, for the loading
+ *  frame: its title, state, author and branches are what the header's first rows
+ *  wrap around. `usePrList`'s key carries the lens at index 3, and a fork numbers
+ *  its pull requests independently of its parent. */
+function cachedPrRow(
+  queryClient: QueryClient,
+  repo: string,
+  lens: RemoteLens,
+  number: number,
+): PrInfo | undefined {
+  for (const [key, rows] of queryClient.getQueriesData<PrInfo[]>({
+    queryKey: repoKeys.prList(repo),
+  })) {
+    if (key[3] !== lens || !Array.isArray(rows)) continue;
+    const row = rows.find((r) => r.number === number);
+    if (row) return row;
+  }
+  return undefined;
+}
+
+/** A meta-grid value cell holding user chips: a `UserChip` is its 24px avatar,
+ *  `py-0.5` and a 1px border, taller than the 24px cell an empty field draws.
+ *  Bot-only cells (a Copilot reviewer chip) are 24px too, so they run short. */
+const USER_FIELD_CELL = "h-[30px]";
+
+/**
+ * The view's loading arm, built from the loaded header's own rows so the answer
+ * fills the frame instead of pushing it around, at every width:
+ * - the title row: the cached row's title beside the real header buttons,
+ *   disabled, so it wraps where the loaded one will;
+ * - the meta row: state badge, author and branches, laid out the same way;
+ * - the meta grid's label/value pairs in its container-query grid, the user
+ *   fields at the height of a cell holding user chips;
+ * - the real section tabs (disabled), the strip line for an open PR, and the
+ *   composer and footer bar the loaded view docks under the feed.
+ * With no cached row when the frame began for this selection (an arrival from
+ * another tab) the title and meta row are skeletons of a typical width, and an
+ * open PR is assumed. The checks rollup, a stack, the stack offer and board
+ * field values vary per PR and stay unreserved, as do the diff totals the list
+ * row doesn't carry.
+ */
+function PrLoadingFrame({
+  noun,
+  title,
+  number,
+  actions,
+  meta,
+  userFields,
+  tabs,
+  strip,
+  composer,
+  footer,
+}: {
+  noun: string;
+  title?: string;
+  number: number;
+  actions: ReactNode;
+  meta: ReactNode;
+  /** One entry per meta field in the loaded grid's order: whether its value cell
+   *  holds user chips. */
+  userFields: boolean[];
+  tabs: ReactNode;
+  strip: boolean;
+  composer: ReactNode;
+  footer: boolean;
+}) {
+  return (
+    <>
+      <span role="status" className="sr-only">
+        {PR_SWITCH_LOADING_REASON}
+      </span>
+      <header className="@container/pr-header space-y-2 border-b px-4 py-3">
+        <div className="flex flex-wrap items-start gap-2">
+          <h2 className="min-w-0 flex-auto text-sm font-medium break-words">
+            {title === undefined ? (
+              <Skeleton
+                aria-hidden
+                className="inline-block h-4 w-80 max-w-full align-middle"
+              />
+            ) : (
+              <>
+                {title}{" "}
+                <span className="font-normal text-muted-foreground">
+                  #{number}
+                </span>
+              </>
+            )}
+          </h2>
+          {actions}
+        </div>
+        <div
+          aria-hidden
+          className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        >
+          {meta}
+        </div>
+        {userFields.length > 0 ? (
+          <div
+            aria-hidden
+            className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 text-xs @3xl/pr-header:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]"
+          >
+            {/* Index key: a fixed static list that never reorders. */}
+            {userFields.map((users, i) => (
+              <Fragment key={i}>
+                <Skeleton className="h-6 w-20" />
+                <Skeleton
+                  className={cn(
+                    "w-28 max-w-full",
+                    users ? USER_FIELD_CELL : "h-6",
+                  )}
+                />
+              </Fragment>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-1 pt-1">{tabs}</div>
+      </header>
+      {strip && (
+        <div aria-hidden className="flex border-b px-3 py-1.5">
+          <div className="flex h-6 w-full items-center">
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+        </div>
+      )}
+      <div aria-hidden className="min-h-0 flex-1 space-y-4 overflow-hidden p-4">
+        <div className="space-y-2 border-b pb-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+        <ListRowSkeletons
+          rows={3}
+          lines={2}
+          indent={false}
+          name={`this ${noun}`}
+        />
+      </div>
+      {composer}
+      {footer && (
+        <div
+          aria-hidden
+          className="flex flex-wrap items-center gap-2 border-t p-3"
+        >
+          <span className="flex-1" />
+          <Skeleton className="h-7 w-16" />
+          <Skeleton className="h-7 w-20" />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The loaded tab labels' count suffix, reserved invisibly while the counts are
+ *  unknown so the tab row wraps where the loaded one will; two digits is the
+ *  common case. */
+const TAB_COUNT_SLOT: Record<PrSection, boolean> = {
+  conversation: true,
+  commits: true,
+  files: true,
+  review: false,
+};
+const TAB_NAME: Record<PrSection, string> = {
+  conversation: "Conversation",
+  commits: "Commits",
+  files: "Files",
+  review: "Review",
+};
+
 export function RemotePrView({
   repoPath,
   number,
@@ -367,7 +550,7 @@ export function RemotePrView({
   const forge = useForgeStatus(repoPath);
   const provider = forge.data?.provider;
   const remoteLabel = providerLabel(provider);
-  const prNoun = provider === "gitlab" ? "merge request" : "pull request";
+  const prNoun = PR_NOUN[provider ?? "github"];
   // The single lens-resolution point for this surface: every PR read/write below
   // targets the fork (origin) or its parent (upstream) — "origin" everywhere but a
   // GitHub fork whose lens is set upstream.
@@ -430,13 +613,136 @@ export function RemotePrView({
     canCreateThread,
     canSubmitReview,
   } = usePrCapabilities(forge.data, provider, writeAccess.data);
-  const details = usePrDetails(repoPath, number, lens);
-  // Every handler that refuses while the rendered PR is the previous one reads
+  const [section, setSection] = useState<PrSection>("conversation");
+  // The <Activity> gate every polling read below carries.
+  const repoTab = useUiStore((s) => s.repoTab);
+  const selectedPr = useUiStore((s) => s.selectedPr);
+  // The PR on screen as of the previous render (`hold.shownKey`, recorded below).
+  const [lastShown, setLastShown] = useState(entityKey);
+  // A navigator that reveals the tab AND moves the PR in one update (openPr from
+  // notifications, My work, the Projects board, a markdown ref) leaves `number`
+  // behind the reveal. Those frames show the loading frame, never the old PR, and
+  // the move shows directly rather than holding a PR the user never saw. Moves
+  // made with the tab already showing keep holding.
+  // The store's selection under this repo and lens, urgent: `number` is the
+  // deferred one, a render behind it.
+  const liveKey =
+    selectedPr?.kind === "remote"
+      ? `${repoPath}#${lens}#${selectedPr.id}`
+      : null;
+  const reveal = useRevealGuard({
+    visible: repoTab === "pulls",
+    liveKey,
+    viewKey: entityKey,
+    shownKey: lastShown,
+  });
+  // The selected PR's own reads. They answer the hold, and they start loading the
+  // moment the selection moves, while the view still paints the PR it holds.
+  const targetDetails = usePrDetails(repoPath, number, lens);
+  const targetThreads = usePrReviewThreads(repoPath, number, lens);
+  const targetTimeline = usePrTimeline(
+    repoPath,
+    number,
+    section === "conversation" && !!provider,
+    lens,
+  );
+  const targetDiff = usePrDiff(repoPath, number, lens);
+  const targetReactions = usePrReactions(
+    repoPath,
+    canReact ? number : null,
+    lens,
+  );
+  const targetTasks = usePrTasks(repoPath, canTasks ? number : null);
+  const targetOwnDetails =
+    targetDetails.isError ||
+    (targetDetails.data !== undefined && !targetDetails.isPlaceholderData);
+  // The hold settles on the same rule the section mounts on
+  // (`prSectionAnswered`), over the selected PR's reads: the swap brings the
+  // section whole, never a skeleton that fills in as a second step.
+  const hold = useEntityHold({
+    key: entityKey,
+    settled:
+      targetOwnDetails &&
+      prSectionAnswered(section, {
+        threads: targetThreads,
+        timeline: provider ? targetTimeline : null,
+        forgeSettled: !forge.isPending,
+        reactions: canReact ? targetReactions : null,
+        tasks: canTasks ? targetTasks : null,
+        diff: targetDiff,
+      }),
+    // The PR on screen may stand in when it is of the same repo and lens (the
+    // key's prefix); the reducer adds that it settled. Never the placeholder: a
+    // hover prefetch caches the target's details, which then arrive with none.
+    canHold: entityKeyScope(lastShown) === entityKeyScope(entityKey),
+    paused: targetDetails.isPaused && !targetOwnDetails,
+    active: reveal.active,
+  });
+  // The PR on screen: the held one while holding, else the selected one. Every
+  // per-PR read the view RENDERS keys on it, so nothing of the selected PR paints
+  // into the held one; writes keep addressing `number`, and hold through `detailsStale`.
+  const shownNumber = entityKeyNumber(hold.shownKey);
+  const details = usePrDetails(repoPath, shownNumber, lens);
+  // The rendered details are another PR's placeholder: the loading and offline
+  // arms, never a hold (the held PR's details are its own).
+  const detailsPlaceholder = details.isPlaceholderData;
+  // Every handler that refuses while the rendered PR isn't the selected one reads
   // this, so each of their entry points can hold too rather than sit enabled and
   // do nothing. Declared up here beside `details` because the gates that need it
   // (the update-branch derivation among them) run well before the strip does.
-  const detailsStale = details.isPlaceholderData;
-  const prDiff = usePrDiff(repoPath, number, lens);
+  const detailsStale = hold.holding || detailsPlaceholder;
+  const prDiff = usePrDiff(repoPath, shownNumber, lens);
+  // The selected PR's late reads, warmed while the hold keeps the old one on
+  // screen so they are cached when it swaps in, rather than filling it in after.
+  // Gated as their consumers are, on the selected PR's own state where known.
+  // Reactions and tasks are observed above, since the hold waits for them; drafts
+  // and GitLab time stats have no shared options factory, so they warm through an
+  // observer.
+  const targetState = targetDetails.isPlaceholderData
+    ? undefined
+    : targetDetails.data?.state;
+  useEffect(() => {
+    if (!hold.holding) return;
+    if (targetState === "OPEN" && (canApprove || canRequestChanges))
+      void queryClient.prefetchQuery(prApprovalsOptions(repoPath, number));
+    if (targetState === "OPEN" && canAutoMerge)
+      void queryClient.prefetchQuery(glMrMergeStateOptions(repoPath, number));
+    // Only where the held PR's own memberships read worked: without the token
+    // scope it fails, and the pickers stay disabled rather than read that error.
+    const shownMemberships = itemProjectsOptions(
+      repoPath,
+      "pr",
+      shownNumber,
+      lens,
+    ).queryKey;
+    if (
+      canWrite &&
+      queryClient.getQueryState(shownMemberships)?.status === "success"
+    ) {
+      const memberships = itemProjectsOptions(repoPath, "pr", number, lens);
+      void queryClient.prefetchQuery(memberships).then(() => {
+        const boards = queryClient.getQueryData(memberships.queryKey);
+        if ((boards?.items.length ?? 0) > 0)
+          void queryClient.prefetchQuery(
+            itemFieldValuesOptions(repoPath, "pr", number, lens),
+          );
+      });
+    }
+  }, [
+    hold.holding,
+    queryClient,
+    repoPath,
+    number,
+    shownNumber,
+    lens,
+    targetState,
+    canApprove,
+    canRequestChanges,
+    canAutoMerge,
+    canWrite,
+  ]);
+  useReviewDrafts(repoPath, lens, number);
+  useGlMrTimeStats(repoPath, canTrackTime ? number : null);
   const setAssignees = useSetPrAssignees(repoPath, lens);
   const setReviewers = useSetPrReviewers(repoPath, lens);
   // For the read-only assignee/reviewer chips (closed/merged PRs): GitHub avatars
@@ -456,7 +762,7 @@ export function RemotePrView({
   const approvals = usePrApprovals(
     repoPath,
     (canApprove || canRequestChanges) && details.data?.state === "OPEN"
-      ? number
+      ? shownNumber
       : null,
   );
   const approvePr = useApprovePr(repoPath, lens);
@@ -467,11 +773,10 @@ export function RemotePrView({
   // MRs) and stops its refetchInterval — it polls so the view notices the pipeline
   // completing and the auto-merge firing. The repoTab gate is load-bearing: an
   // <Activity>-hidden subtree still renders; staleTime (5s) refetches on return.
-  const repoTab = useUiStore((s) => s.repoTab);
   const mergeState = useGlMrMergeState(
     repoPath,
     repoTab === "pulls" && canAutoMerge && details.data?.state === "OPEN"
-      ? number
+      ? shownNumber
       : null,
   );
   const armAutoMerge = useGlArmAutoMerge(repoPath);
@@ -482,7 +787,7 @@ export function RemotePrView({
   // <Activity>-hidden subtree still fetches. Non-open PRs have no answer to give.
   const mergeability = usePrMergeability(
     repoPath,
-    number,
+    shownNumber,
     lens,
     repoTab === "pulls" && isOpenPr,
   );
@@ -497,13 +802,13 @@ export function RemotePrView({
   // fetches, so it answers with the forge unreachable) — and it NAMES the conflicting
   // files when the forge says "conflicting" but won't say where. Never for a fork head:
   // a same-named branch under our remote would make the prediction lie. The placeholder
-  // term is the PR-switch guard — details serves the PREVIOUS PR's refs while the new
-  // mergeability read has none. Hoisted because a DISABLED query keeps serving its last
-  // value, so every reader of the prediction has to gate on this too.
+  // term is the PR-switch guard — a placeholder serves another PR's refs while this
+  // one's mergeability read has none. Hoisted because a DISABLED query keeps serving its
+  // last value, so every reader of the prediction has to gate on this too.
   const previewEnabled =
     repoTab === "pulls" &&
     isOpenPr &&
-    !details.isPlaceholderData &&
+    !detailsPlaceholder &&
     !details.data?.crossRepository &&
     (serverState === "unavailable" ||
       serverState === "conflicting" ||
@@ -521,7 +826,7 @@ export function RemotePrView({
   // hide the pull request the user came to read.
   const findResolve = useFindRemotePrResolve(
     repoPath,
-    number,
+    shownNumber,
     lens,
     repoTab === "pulls" && isOpenPr,
   );
@@ -532,7 +837,7 @@ export function RemotePrView({
     repoTab === "pulls" && provider === "github" && isOpenPr;
   const divergence = usePrBaseDivergence(
     repoPath,
-    number,
+    shownNumber,
     lens,
     divergenceEnabled,
   );
@@ -561,15 +866,24 @@ export function RemotePrView({
   // Files-tab diff anchors — so the read lives at the top level. It gates on the PR
   // number alone (a flaky status probe mustn't hide threads); the WRITE controls
   // below stay gated on the per-provider Implemented flags.
-  const reviewThreads = usePrReviewThreads(repoPath, number, lens);
+  const reviewThreads = usePrReviewThreads(repoPath, shownNumber, lens);
   const threadReply = useThreadReply(repoPath);
   const threadResolve = useThreadResolve(repoPath);
-  const pendingThreadWrites = usePendingThreadWrites(repoPath, number, lens);
+  const pendingThreadWrites = usePendingThreadWrites(
+    repoPath,
+    shownNumber,
+    lens,
+  );
   // The reactions fetch is gated on `canReact` (see usePrCapabilities) so it never
   // fires for a provider whose reactions aren't wired (Bitbucket).
-  const reactions = usePrReactions(repoPath, canReact ? number : null, lens);
+  const reactions = usePrReactions(
+    repoPath,
+    canReact ? shownNumber : null,
+    lens,
+  );
   const toggleReactionMutation = useToggleReaction(repoPath, "mr");
-  const [section, setSection] = useState<PrSection>("conversation");
+  // The section's own read, observed here only so the feed can land with it.
+  const prTasks = usePrTasks(repoPath, canTasks ? shownNumber : null);
   // A review thread the user asked to jump to (timeline "View thread"). Handed to
   // whichever ReviewThreadList owns it; that list reveals the (possibly
   // resolved/collapsed) thread and clears this via onRevealed.
@@ -585,15 +899,29 @@ export function RemotePrView({
   // composite gate is load-bearing.
   const timeline = usePrTimeline(
     repoPath,
-    number,
+    shownNumber,
     section === "conversation" && !!provider,
     lens,
   );
+  // The Conversation feed mounts once the shown PR's reads have answered
+  // (`prSectionAnswered`, the hold's rule too): reviews, comments, claimed
+  // threads, timeline events, reaction counts and the Bitbucket tasks above them
+  // appear together, so no row inserts above another after.
+  const feedReady = prSectionAnswered("conversation", {
+    threads: reviewThreads,
+    timeline: provider ? timeline : null,
+    forgeSettled: !forge.isPending,
+    reactions: canReact ? reactions : null,
+    tasks: canTasks ? prTasks : null,
+    diff: prDiff,
+  });
+  // The header chip's "View" asks for the tasks section, which mounts with the
+  // feed: armed per shown PR and consumed once the section is in the DOM.
+  const [tasksScrollFor, setTasksScrollFor] = useState<string | null>(null);
   const pendingPrSection = useUiStore((s) => s.pendingPrSection);
   const setPendingPrSection = useUiStore((s) => s.setPendingPrSection);
   const pendingReviewId = useUiStore((s) => s.pendingReviewId);
   const setPendingReviewId = useUiStore((s) => s.setPendingReviewId);
-  const selectedPr = useUiStore((s) => s.selectedPr);
   // A stack member can sit on the list tab that isn't showing, so hops arm the
   // tab align (plain `selectPr` clears it).
   const selectPrWithAlign = useUiStore((s) => s.selectPrWithAlign);
@@ -603,17 +931,17 @@ export function RemotePrView({
   // Keyed on the same repo+number+LENS identity `divergenceIdentity` uses: the
   // lens flips while this view stays mounted, and origin and upstream can both
   // have a pull request numbered 7.
-  const queuedKey = queuedMergeKey(repoPath, number, lens);
+  const queuedKey = queuedMergeKey(repoPath, shownNumber, lens);
   const mergeQueued = useUiStore((s) => Boolean(s.queuedMerges[queuedKey]));
   const markMergeQueued = useUiStore((s) => s.markMergeQueued);
   const clearMergeQueued = useUiStore((s) => s.clearMergeQueued);
   // Details are authoritative once they land: a merged or closed pull request is
   // out of the queue however it got there. The placeholder gate is what makes the
-  // retraction safe — `queuedKey` follows the number and lens immediately while
-  // `details` still serves the PREVIOUS pull request, so switching away to a
-  // merged one and back would otherwise read ITS state against THIS key and drop
-  // the record for good. Same gate on the chip below, so both read one truth.
-  const queuedDetailsReady = !details.isPlaceholderData;
+  // retraction safe — `queuedKey` follows the number and lens while `details` can
+  // still serve ANOTHER pull request's placeholder, so switching away to a merged
+  // one and back would otherwise read ITS state against THIS key and drop the
+  // record for good. Same gate on the chip below, so both read one truth.
+  const queuedDetailsReady = !detailsPlaceholder;
   const prState = details.data?.state;
   useEffect(() => {
     if (!queuedDetailsReady) return;
@@ -684,7 +1012,7 @@ export function RemotePrView({
   const [submitOpen, setSubmitOpen] = useState(false);
   // Pending-review drafts (local-only until submitted); shared by the Files-tab
   // anchors, the PendingReviewBar count, and the ReviewComposer's draft count.
-  const drafts = useReviewDrafts(repoPath, lens, number);
+  const drafts = useReviewDrafts(repoPath, lens, shownNumber);
   const clearDrafts = useClearReviewDrafts(repoPath, lens, number);
   // The composer/thread-create side of the forge detection: a strict provider key
   // (default "github" — gh is the authoritative default for an unrecognized host).
@@ -692,8 +1020,8 @@ export function RemotePrView({
 
   // Palette-only PR actions — mounted here so they live only while a remote PR is
   // open. Every one whose enablement reads `details.data` also gates on
-  // `!details.isPlaceholderData`: during a switch that data is the previous PR's,
-  // so the command would offer (and act on) a PR the user never opened.
+  // `!detailsStale`: during a switch that data is another PR's, so the command
+  // would offer (and act on) a PR the user never opened.
   const draftCount = drafts.data?.length ?? 0;
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   useHotkeyAction(
@@ -702,12 +1030,13 @@ export function RemotePrView({
     isSelectedPr &&
       canSubmitReview &&
       details.data?.state === "OPEN" &&
-      !details.isPlaceholderData,
+      !detailsStale,
   );
+  // `draftCount` is the RENDERED PR's, while the confirm clears `number`'s.
   useHotkeyAction(
     "discard-pending-review",
     () => setDiscardConfirmOpen(true),
-    isSelectedPr && draftCount > 0,
+    isSelectedPr && draftCount > 0 && !detailsStale,
   );
   // The shared Ready / Convert-to-draft pair: visible when a wired provider
   // (GitLab/Bitbucket) flags `mrDraftToggle`, or on GitHub via `canWrite` (its
@@ -720,15 +1049,16 @@ export function RemotePrView({
   const pendingWrites = usePendingPrWrites(repoPath);
   // A write holds only the PR it targets: its number, and its lens where the
   // variables carry one. Most lens-less kinds are GitLab/Bitbucket-only, where the
-  // lens is always origin, so the bare number is the whole identity.
+  // lens is always origin, so the bare number is the whole identity. Matched
+  // against the PR on screen, so a held PR keeps showing its own writes.
   const writePending = (kind: PrWriteKind) =>
-    isPendingFor(pendingWrites, kind, number, lens);
+    isPendingFor(pendingWrites, kind, shownNumber, lens);
   // The same match over the entries parked offline, so `composerReason` reads the
   // cache entry that set the hold — a hook's own observer resets on unmount or a
   // key change and would name a parked write as running.
   const pausedWrites = pendingWrites.filter((w) => w.paused);
   const writePaused = (kind: PrWriteKind) =>
-    isPendingFor(pausedWrites, kind, number, lens);
+    isPendingFor(pausedWrites, kind, shownNumber, lens);
   // The native stack this PR sits in, parsed once — the number a dissolve writes
   // and a cascading merge names. A native stack's id is a numeric string by
   // contract, so a value that won't parse means the contract broke: null then
@@ -764,13 +1094,17 @@ export function RemotePrView({
   const updateBranchPending = writePending("update-branch");
   const resolveMergePending = writePending("resolve-merge");
   // A stack create or add holds the offer of every PR it names, whichever PR fired it.
-  const stackWritePending = isStackWritePendingFor(pendingWrites, number, lens);
+  const stackWritePending = isStackWritePendingFor(
+    pendingWrites,
+    shownNumber,
+    lens,
+  );
   // Parked only when ALL matching stack writes are: one running means in-flight.
   const stackWritePaused =
     stackWritePending &&
     !isStackWritePendingFor(
       pendingWrites.filter((w) => !w.paused),
-      number,
+      shownNumber,
       lens,
     );
   // Repo-wide by design: checkout writes the working tree, and a discard deletes a
@@ -782,10 +1116,12 @@ export function RemotePrView({
   // Every footer/state control and its palette twin holds while a write to THIS PR
   // runs, or a stack merge cascading through its native stack; any other write
   // holds nothing here. Declared above the palette wiring so both share the exact
-  // same gate. Placeholder details are the previously shown PR's and the footer's
-  // verbs derive from them, so the same gate holds through a switch.
+  // same gate. A placeholder's details are another PR's and the footer's verbs
+  // derive from them, so the same gate holds until it lands. A hold is not in
+  // here: the held controls keep their look, and every handler and palette twin
+  // refuses on `detailsStale` as well.
   const busy =
-    details.isPlaceholderData ||
+    detailsPlaceholder ||
     commentPending ||
     mergePending ||
     stackMergePending ||
@@ -799,25 +1135,28 @@ export function RemotePrView({
     cancelAutoMergePending ||
     setDraftPending;
   // WHICH draft action exists is picked off `isDraft`, so placeholder details would
-  // offer the PREVIOUS PR's. Retain the last FRESH value and the PR it belonged to;
-  // a mismatch means nothing fresh has landed for this one yet, and neither action is
-  // offered. Both retained values are primitives — an object would re-set every
-  // render. The stale arms feed null so a mount landing mid-switch seeds neither,
-  // and the settled identity keys the checks rollup for the same reason.
+  // offer another PR's. Retain the last FRESH value and the PR it belonged to; a
+  // mismatch with the shown PR means nothing fresh has landed for it yet, and neither
+  // action is offered. Both retained values are primitives — an object would re-set
+  // every render. The stale arms feed null so a mount landing mid-switch seeds
+  // neither, and the settled identity keys the checks rollup for the same reason.
+  // Held details are fresh for the held PR, so a hold keeps its pair and rollup.
   const settledEntityKey = useRetained(
-    details.isPlaceholderData ? null : entityKey,
-    !details.isPlaceholderData,
+    detailsPlaceholder ? null : hold.shownKey,
+    !detailsPlaceholder,
   );
   const retainedIsDraft = useRetained(
-    details.isPlaceholderData ? null : (details.data?.isDraft ?? null),
-    !details.isPlaceholderData,
+    detailsPlaceholder ? null : (details.data?.isDraft ?? null),
+    !detailsPlaceholder,
   );
-  const shownIsDraft = settledEntityKey === entityKey ? retainedIsDraft : null;
+  const shownIsDraft =
+    settledEntityKey === hold.shownKey ? retainedIsDraft : null;
   // Awaited, not per-call callbacks: an `<Activity>` hide (or a host unmount) tears
   // this observer's subscription down, and react-query drops per-call callbacks once
   // an observer has no listeners — the toast and the ready-review automation would
   // never run for a write the forge had already taken.
   async function markReadyForReview() {
+    if (detailsStale) return;
     try {
       await setDraft.mutateAsync({ number, lens, draft: false });
       toast.success("Marked ready for review");
@@ -827,6 +1166,7 @@ export function RemotePrView({
     }
   }
   async function convertToDraft() {
+    if (detailsStale) return;
     try {
       await setDraft.mutateAsync({ number, lens, draft: true });
       toast.success("Converted to draft");
@@ -841,22 +1181,27 @@ export function RemotePrView({
   useHotkeyAction(
     "pr-ready-for-review",
     () => {
-      if (shownIsDraft !== true) return;
+      if (shownIsDraft !== true || detailsStale) return;
       void markReadyForReview();
     },
-    isSelectedPr && draftPairVisible && shownIsDraft === true && !busy,
+    isSelectedPr &&
+      draftPairVisible &&
+      shownIsDraft === true &&
+      !busy &&
+      !detailsStale,
   );
   useHotkeyAction(
     "pr-convert-to-draft",
     () => {
-      if (shownIsDraft !== false) return;
+      if (shownIsDraft !== false || detailsStale) return;
       void convertToDraft();
     },
     isSelectedPr &&
       draftPairVisible &&
       shownIsDraft === false &&
       details.data?.state === "OPEN" &&
-      !busy,
+      !busy &&
+      !detailsStale,
   );
 
   // Palette twins of the Stack section's arrow keys: step one position up or down
@@ -871,22 +1216,28 @@ export function RemotePrView({
       (m) => m.position === info.position + delta,
     );
   }
+  // An in-view hop: the hold's inert frame takes focus off the stack row the user
+  // moved to, so the member it named gets its row back once that PR is shown.
+  const stackHopRef = useRef<number | null>(null);
+  function hopToStackMember(member: number) {
+    stackHopRef.current = member;
+    selectPrWithAlign({ kind: "remote", id: String(member) });
+  }
   function goToStackNeighbor(delta: 1 | -1) {
     // Re-resolved on activation: `enabled` is a render snapshot, while `run` reads
     // live state through useEffectEvent.
     const target = stackNeighbor(delta);
-    if (target)
-      selectPrWithAlign({ kind: "remote", id: String(target.number) });
+    if (target) hopToStackMember(target.number);
   }
   useHotkeyAction(
     "pr-stack-next",
     () => goToStackNeighbor(1),
-    isSelectedPr && !details.isPlaceholderData && !!stackNeighbor(1),
+    isSelectedPr && !detailsStale && !!stackNeighbor(1),
   );
   useHotkeyAction(
     "pr-stack-previous",
     () => goToStackNeighbor(-1),
-    isSelectedPr && !details.isPlaceholderData && !!stackNeighbor(-1),
+    isSelectedPr && !detailsStale && !!stackNeighbor(-1),
   );
 
   // Stack writes are GitHub-only, and the chain that would be stacked is read
@@ -895,11 +1246,11 @@ export function RemotePrView({
   // means "unknown") has nothing to offer. A fork PR is refused here, ahead of
   // that fetch and its stacks join; `detectStackOffer` keeps its own row-level
   // fork filter (stack-chains.ts) for the other members of the list. Every term
-  // below reads `details`, so the offer waits for the SELECTED PR's — under the
-  // placeholder it would decide eligibility from the previous one.
+  // below reads `details`, so the offer waits for the shown PR's own — under a
+  // placeholder it would decide eligibility from another one.
   const offerEnabled =
     providerKey === "github" &&
-    !details.isPlaceholderData &&
+    !detailsPlaceholder &&
     details.data?.state === "OPEN" &&
     canEdit &&
     !details.data?.stack &&
@@ -919,7 +1270,7 @@ export function RemotePrView({
   // through this handle so both entry points land on the same Confirm button.
   const offerRef = useRef<StackOfferHandle>(null);
   const openPrs = offerEnabled ? (offerList.data ?? []) : [];
-  const currentRow = openPrs.find((p) => p.number === number);
+  const currentRow = openPrs.find((p) => p.number === shownNumber);
   const stackOffer = currentRow ? detectStackOffer(currentRow, openPrs) : null;
   // The offer's members in the same bottom→top order, dropped if a member has
   // somehow left the list between detection and render.
@@ -980,7 +1331,7 @@ export function RemotePrView({
     // Permission holds the offer rather than hiding it, so the refusal lives here.
     if (
       !stackOffer ||
-      details.isPlaceholderData ||
+      detailsStale ||
       writeBlocked ||
       stackWritePending ||
       // A stack write rewrites every member's base, so it refuses offline
@@ -1048,12 +1399,7 @@ export function RemotePrView({
   async function dissolveStack() {
     const info = details.data?.stack;
     // The confirm names this stack's id and size, both read off the rendered PR.
-    if (
-      !info ||
-      nativeStackNumber === null ||
-      details.isPlaceholderData ||
-      writeBlocked
-    )
+    if (!info || nativeStackNumber === null || detailsStale || writeBlocked)
       return;
     const count = details.data?.stackMembers.length || info.size;
     const ok = await useConfirm.getState().ask({
@@ -1076,7 +1422,7 @@ export function RemotePrView({
     "pr-stack-create",
     () => offerRef.current?.expand(),
     isSelectedPr &&
-      !details.isPlaceholderData &&
+      !detailsStale &&
       !writeBlocked &&
       !offlineHold &&
       stackOffer?.kind === "create",
@@ -1085,7 +1431,7 @@ export function RemotePrView({
     "pr-stack-add",
     () => offerRef.current?.expand(),
     isSelectedPr &&
-      !details.isPlaceholderData &&
+      !detailsStale &&
       !writeBlocked &&
       !offlineHold &&
       stackOffer?.kind === "add",
@@ -1094,7 +1440,7 @@ export function RemotePrView({
     "pr-stack-dissolve",
     () => void dissolveStack(),
     isSelectedPr &&
-      !details.isPlaceholderData &&
+      !detailsStale &&
       canDissolveStack &&
       !writeBlocked &&
       !dissolvePending &&
@@ -1239,52 +1585,40 @@ export function RemotePrView({
   // matching LocalPrView's twin, since nothing would arrive to lift the hold.
   const defaultBranchSettling = lens === "origin" && defaultBranch.isPending;
 
-  // The banner's arm: server truth, then the local prediction where the forge has
-  // none, then the resume offer — the resolve worktree is only worth its own line
-  // when there's nothing more urgent to say about the merge. `updating` outranks
-  // `checking` because GitHub reports mergeability UNKNOWN for the whole async update
-  // window, and that arm would otherwise hide the very thing the user just started.
-  // Behind-the-base and the unreachable line are the quietest of all, so they fill
-  // only an arm that would otherwise stay silent.
-  const bannerArm: PrMergeabilityArm = (() => {
-    switch (true) {
-      case !isOpenPr:
-        return null;
-      case serverConflicting:
-        return "conflicting";
-      case predictedConflict:
-        return "predicted";
-      case !!findResolve.data:
-        return "resume";
-      case updatingBranch:
-        return "updating";
-      case mergeability.data?.state === "checking":
-        return mergeability.polling ? "checking" : "unknown";
-      // A settled answer that a later read failed to refresh stays invisible; only a
-      // read that never landed leaves the banner with nothing but the local prediction.
-      case forgeUnreachable:
-        return "unreachable";
-      // Below the answer-shaped arms above only for reading order: a BLOCKED detail
-      // rides a settled "mergeable" answer, which neither `checking` nor
-      // `unreachable` can be true of. It does outrank `behind` — rules the base is
-      // enforcing are more pressing than a base that has merely moved on.
-      case blockedByRules || gitlabBlockedNote !== null:
-        return "blocked";
-      case behindBy > 0:
-        return "behind";
-      default:
-        return null;
-    }
-  })();
-  // Both halves below read `details`, which through a PR switch still serves the
-  // PREVIOUS pull request — and revisiting a blocked PR serves its cached mergeability
+  // The banner's arm and whether its waiting line blames the connection. The
+  // ladder and its rung order live in `mergeStripArm`, pinned by its test.
+  const { arm: bannerArm, pendingOffline } = mergeStripArm({
+    isOpen: isOpenPr,
+    offline: offlineHold !== undefined,
+    mergeability,
+    preview: {
+      enabled: previewEnabled,
+      isPending: conflictPreview.isPending,
+      data: conflictPreview.data,
+    },
+    resolve: {
+      enabled: repoTab === "pulls",
+      isPending: findResolve.isPending,
+      found: !!findResolve.data,
+    },
+    updating: updatingBranch,
+    blocked: blockedByRules || gitlabBlockedNote !== null,
+    divergence: {
+      enabled: divergenceEnabled,
+      data: divergence.data,
+      isFetching: divergence.isFetching,
+    },
+    behindBy,
+  });
+  // Both halves below read `details`, which can serve ANOTHER pull request's
+  // placeholder — and revisiting a blocked PR serves its cached mergeability
   // synchronously, so the arm can be "blocked" while the base ref and checks belong to
   // the last one. Naming that PR's checks, or reading rules for its base, would both
   // be wrong.
   // `blockedByRules` and not merely the arm: the rules read below is a GitHub command,
   // and the arm now also fires for GitLab, which names its own reason.
   const blockedDetailsReady =
-    bannerArm === "blocked" && blockedByRules && !details.isPlaceholderData;
+    bannerArm === "blocked" && blockedByRules && !detailsPlaceholder;
   // The base branch's required checks, read only for the arm that names them. The
   // repoTab term is the <Activity> gate every sibling read here carries: a hidden
   // subtree still refetches, and this one would respawn `gh` on every focus regain.
@@ -1294,8 +1628,9 @@ export function RemotePrView({
     lens,
     repoTab === "pulls" && blockedDetailsReady,
   );
-  // A failed or empty rules read leaves this empty and the line stays generic — the
-  // banner never waits on the join to say that the merge is blocked.
+  // A failed, empty or still-loading rules read leaves this empty and the line
+  // stays generic: the banner never waits on the join to say that the merge is
+  // blocked, and the names fill in on the same (truncating) line once it lands.
   const blockedRequirements = blockedDetailsReady
     ? unmetRequiredChecks(
         requiredChecks.data?.contexts ?? [],
@@ -1333,12 +1668,7 @@ export function RemotePrView({
   async function runResolve(withAi: boolean) {
     // A running discard may be deleting the very worktree the backend would hand
     // back, so a resolve waits for it.
-    if (
-      details.isPlaceholderData ||
-      resolve ||
-      resolveMergePending ||
-      abortResolvePending
-    )
+    if (detailsStale || resolve || resolveMergePending || abortResolvePending)
       return;
     // A resolve with no conflicts left pushes straight to the head, so it holds
     // offline with the merge-class writes.
@@ -1419,7 +1749,7 @@ export function RemotePrView({
     "pr-resolve-conflicts",
     () => void runResolve(false),
     isSelectedPr &&
-      !details.isPlaceholderData &&
+      !detailsStale &&
       (canResolveConflicts || resolveWorktree !== null) &&
       !resolve &&
       !resolveMergePending &&
@@ -1431,7 +1761,7 @@ export function RemotePrView({
    *  rewrites the head's history and force-pushes it — on a fork that branch is the
    *  contributor's — so it asks first. */
   async function runUpdateBranch(rebase: boolean) {
-    if (details.isPlaceholderData) return;
+    if (detailsStale) return;
     const base = details.data?.baseRefName;
     if (!base) return;
     // The one refusal rule, shared by the button, the menu item, the palette and
@@ -1482,10 +1812,11 @@ export function RemotePrView({
   useHotkeyAction(
     "pr-update-branch",
     () => void runUpdateBranch(false),
-    isSelectedPr && !details.isPlaceholderData && canUpdateBranch,
+    isSelectedPr && !detailsStale && canUpdateBranch,
   );
 
-  const compose = useKeyedEntityState(entityKey, "");
+  // Keyed on the PR on screen, so a hold keeps showing the held PR's draft.
+  const compose = useKeyedEntityState(hold.shownKey, "");
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(
     null,
   );
@@ -1605,7 +1936,7 @@ export function RemotePrView({
     // Every quotable body — the description and each rendered comment — belongs to
     // the PR on screen, which mid-switch is the previous one, while the draft it
     // would land in is keyed to the new one.
-    if (details.isPlaceholderData) return;
+    if (detailsStale) return;
     makeQuoteReply({ composerRef, setBody: compose.set })(body);
   };
 
@@ -1616,7 +1947,7 @@ export function RemotePrView({
   // otherwise the label lags a full approve-POST + refetch. Success invalidation
   // reconciles; errors roll back.
   async function toggleApproval() {
-    if (details.isPlaceholderData) return;
+    if (detailsStale) return;
     const approved = approvals.data?.viewerHasApproved ?? false;
     const action = approved ? unapprovePr : approvePr;
     // Must mirror usePrApprovals' key exactly — its lens segment is always the
@@ -1663,7 +1994,7 @@ export function RemotePrView({
   // optimistic flip as the approve toggle — the state lives in the separate
   // approvals query.
   async function requestChanges() {
-    if (details.isPlaceholderData) return;
+    if (detailsStale) return;
     const requested = approvals.data?.viewerRequestedChanges ?? false;
     // Already requested on GitLab: the button is a focusable state indicator
     // (its title says how to clear); a re-click must not fire the Premium-only
@@ -1714,7 +2045,7 @@ export function RemotePrView({
 
   async function submitComment() {
     const body = compose.value.trim();
-    if (!body || details.isPlaceholderData) return;
+    if (!body || detailsStale) return;
     // Clear the draft immediately (the perceived-speed win) and append the
     // synthetic comment optimistically; on error restore the draft, but only if
     // that PR's composer is still empty so we never clobber newly-typed text.
@@ -1763,7 +2094,9 @@ export function RemotePrView({
   async function doClose() {
     // Re-checked in the handler: the footer disables on the same hold, but a
     // click can land across a selection switch before the disable repaints.
-    if (busy || triageBlocked) return;
+    if (busy || detailsStale || triageBlocked) return;
+    // `closePr` follows the live repo once the awaits below have run.
+    const closeIn = repoPath;
     // Captured before the await: posting clears the draft, and the error arm
     // below has to know a comment already went out.
     const withComment = draftRidesStateChange;
@@ -1779,10 +2112,28 @@ export function RemotePrView({
     });
     // Ahead of the riding draft too: a close refused offline posts nothing.
     if (!ok || refuseWhileOffline()) return;
+    // The riding post follows the live repo too, so a switch under the prompt
+    // sends neither write.
+    if (
+      refuseIfSwitched(
+        closeIn,
+        withComment ? "nothing was posted or closed" : "nothing was closed",
+      )
+    )
+      return;
     // Again below the riding post: the connection can drop while it runs, and a
     // comment that went out is named in the refusal.
     if (!(await postRidingDraft())) return;
     if (refuseWhileOffline(withComment ? RIDING_COMMENT_CLOSE_HELD : undefined))
+      return;
+    if (
+      withComment &&
+      refuseIfSwitched(
+        closeIn,
+        `your comment was posted, but the ${prNoun} wasn't closed`,
+        "before the close started",
+      )
+    )
       return;
     try {
       await closePr.mutateAsync({ number, lens });
@@ -1804,9 +2155,20 @@ export function RemotePrView({
   }
 
   async function doReopen() {
-    if (busy || triageBlocked) return;
+    if (busy || detailsStale || triageBlocked) return;
+    // `reopenPr` follows the live repo once the riding post has run.
+    const reopenIn = repoPath;
     const withComment = draftRidesStateChange;
     if (!(await postRidingDraft())) return;
+    if (
+      withComment &&
+      refuseIfSwitched(
+        reopenIn,
+        `your comment was posted, but the ${prNoun} wasn't reopened`,
+        "before the reopen started",
+      )
+    )
+      return;
     try {
       await reopenPr.mutateAsync({ number, lens });
       toast.success(
@@ -1942,8 +2304,12 @@ export function RemotePrView({
     });
   }
   // One derivation of which review owns which line-comment threads, shared by the
-  // feed and the residual block below it.
-  const threadClaims = usePrThreadClaims(pr, reviewThreads.data?.threads);
+  // feed and the residual block below it. A placeholder PR's reviews must not claim
+  // the shown number's threads, so those wait as if still loading.
+  const threadClaims = usePrThreadClaims(
+    pr,
+    detailsPlaceholder ? undefined : reviewThreads.data?.threads,
+  );
   // Guards for the merge dialog's "delete head branch on the remote" checkbox:
   // every forge refuses to delete the DEFAULT branch (so the option is hidden),
   // and a local branch RULE can block deleting the head (so it's disabled with a
@@ -1975,14 +2341,11 @@ export function RemotePrView({
   // a lens flip under a mounted view is a different repo's PR at the same number.
   // The same identity re-keys the metadata pickers, whose drafts live inside them.
   const [lastEntity, setLastEntity] = useState(entityKey);
-  if (entityKey !== lastEntity) {
-    setLastEntity(entityKey);
-    setSelectedPath(null);
-    setSelectedCommitOid(null);
-    // Everything below is bound to the PR it was opened on — the conflict-resolution
-    // takeover, the dialogs and confirmations — so a different PR must inherit
-    // none of it.
-    setResolve(null);
+  // The dialogs and confirmations are bound to the PR they were opened on, so a
+  // different PR inherits none of them. Run on BOTH edges of a hold: a portaled
+  // menu open when it starts is out of reach of `inert`, and state it set while
+  // held must not open against the PR that replaces it.
+  const closePerPrDialogs = () => {
     setDeletingCommentId(null);
     setDeletingThreadCommentId(null);
     setSubmitOpen(false);
@@ -1992,10 +2355,25 @@ export function RemotePrView({
     setMergeStrategy("merge");
     setDeleteBranch(false);
     edit.setOpen(false);
+  };
+  if (entityKey !== lastEntity) {
+    setLastEntity(entityKey);
+    // The conflict-resolution takeover too, held or not.
+    setResolve(null);
+    closePerPrDialogs();
   }
   // The edit dialog's in-flight generation belongs to the PR it was started on; the
   // cancel is imperative, so it rides an effect rather than the block above.
   useCancelOnIdentityChange(entityKey, prGen.cancel);
+  // The selections the panes paint reset when the PR ON SCREEN changes, so a
+  // hold keeps the held PR's file and commit in place. `lastShown` also feeds
+  // the hold's and the reveal guard's inputs (top).
+  if (hold.shownKey !== lastShown) {
+    setLastShown(hold.shownKey);
+    setSelectedPath(null);
+    setSelectedCommitOid(null);
+    closePerPrDialogs();
+  }
   // Default to the first changed file until the user picks one.
   const effectivePath =
     selectedPath && pr?.files.some((f) => f.path === selectedPath)
@@ -2056,10 +2434,11 @@ export function RemotePrView({
         ? `${approval.approvedBy.length} of ${approval.approvalsRequired} approvals`
         : `${approval.approvedBy.length} approval${approval.approvedBy.length === 1 ? "" : "s"}`
       : null;
-  // What a control that holds through the switch says, in one wording. It ranks
-  // BELOW any permission or read-error reason wherever both hold: those never
-  // lift on their own and are the ones still true once the switch lands.
-  const staleReason = detailsStale ? PR_SWITCH_LOADING_REASON : undefined;
+  // What a control that holds over another PR's placeholder says, in one wording.
+  // It ranks BELOW any permission or read-error reason wherever both hold: those
+  // never lift on their own and are the ones still true once the switch lands. A
+  // hold draws none of it: its controls keep their look inside the inert frame.
+  const staleReason = detailsPlaceholder ? PR_SWITCH_LOADING_REASON : undefined;
   // Which term of `busy` the composer names, ranked: the switch window outranks a
   // write the viewer started, being the hold they can't have caused themselves.
   // Same scoped terms as `busy`, so it only ever names a write that touches this PR.
@@ -2067,7 +2446,7 @@ export function RemotePrView({
   // write pressed offline is parked, not running, until the connection returns.
   const composerReason = (() => {
     switch (true) {
-      case detailsStale:
+      case detailsPlaceholder:
         return staleReason;
       case commentPending:
         return pendingWriteReason(
@@ -2143,19 +2522,15 @@ export function RemotePrView({
   // anchors, so the handoff waits for that sub-tab too — the hinted tab arrives
   // through `pendingPrSection` in its own commit.
   //
-  // Details alone aren't enough: threads decide which reviews claim inline
-  // blocks and the timeline interleaves rows ABOVE the target, so either landing
-  // afterwards would push a scrolled-to card back off screen. Waiting for all
-  // three to settle (an ERROR settles too — the feed keeps what it has under a
-  // refresh notice) keeps this to one attempt against the finished layout. A
-  // DISABLED timeline (no provider resolved yet) is neither, so the reveal waits
-  // and fires once the probe answers; if it never does, the request simply lapses.
-  // Retained content counts as settled: a failed refresh keeps rendering it.
+  // The request is consumed only once the feed it scrolls in is MOUNTED: the
+  // feed's own readiness (`feedReady`), so no row lands above the target after
+  // the one attempt, and never under a placeholder, a hold or a resolve takeover.
+  // Retained content counts: a failed refresh keeps rendering it.
   const revealInputsSettled =
     (details.isSuccess || (details.isError && details.data !== undefined)) &&
     !detailsStale &&
-    (reviewThreads.isSuccess || reviewThreads.isError) &&
-    (timeline.isSuccess || timeline.isError);
+    !resolve &&
+    feedReady;
   useEffect(() => {
     if (pendingReviewId === null || !isSelectedPr) return;
     if (!revealInputsSettled || section !== "conversation") return;
@@ -2176,12 +2551,16 @@ export function RemotePrView({
     if (revealReviewId !== null) setRevealReviewId(null);
   }, [revealReviewId]);
 
+  // An open emoji picker is portaled out of the hold's `inert`, so it closes
+  // while the view is stale or still catching up to the selection.
+  const reactionPickerHeld = detailsStale || !isSelectedPr;
   const threadActive =
     isSelectedPr &&
     section === "conversation" &&
     !resolve &&
     !!pr &&
-    !details.isPlaceholderData;
+    !detailsStale &&
+    feedReady;
   const jumpRef = useThreadJumpHotkeys(threadActive);
   // The palette's route to the comment box. Every term the composer itself is
   // gated on rides here too, so the action is offered only where there is a box
@@ -2207,20 +2586,217 @@ export function RemotePrView({
   const { hostRef, retryRef } = useRetryFocusRescue(
     detailPane === "error" && details.isError,
   );
-  if (detailPane === "skeleton") {
-    return (
-      <div ref={hostRef} tabIndex={-1} className="space-y-3 p-4 outline-none">
-        <Skeleton className="h-5 w-2/3" />
-        <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="h-32 w-full" />
-      </div>
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  const setHostNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      viewRef.current = node;
+      hostRef(node);
+    },
+    [hostRef],
+  );
+  // No answer for the shown PR yet. Its placeholder is never painted here: past the
+  // hold it is the PR the hold left, and it would flash back over the new one. A
+  // tab arrival that lags the live selection shows this frame too, never the PR
+  // the view still renders.
+  const showsLoadingFrame =
+    reveal.revealing ||
+    detailPane === "skeleton" ||
+    (hold.phase === "loading" && detailsPlaceholder);
+  // The chip's pending scroll, consumed in the commit that mounts the tasks
+  // section (it lands with the feed, so a bare frame after the click can miss
+  // it). A request armed for another PR retires at the swap.
+  const tasksSectionShown =
+    section === "conversation" && canTasks && feedReady && !showsLoadingFrame;
+  useLayoutEffect(() => {
+    if (tasksScrollFor === null) return;
+    if (tasksScrollFor !== hold.shownKey) {
+      setTasksScrollFor(null);
+      return;
+    }
+    if (!tasksSectionShown) return;
+    const tasksEl = document.getElementById("pr-tasks-section");
+    if (!tasksEl) return;
+    setTasksScrollFor(null);
+    tasksEl.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }, [tasksScrollFor, hold.shownKey, tasksSectionShown]);
+  // The frame stands in for the LIVE selection, never the lagging `number` (a
+  // reveal frame paints before it catches up). Whether a cached list row lays
+  // its header out is decided once per selection and latched: a row landing
+  // mid-frame would re-lay it, so a frame begun without one keeps its skeleton
+  // rows until the PR itself lands. Cleared whenever the frame isn't shown.
+  const [frameRow, setFrameRow] = useState<{
+    key: string | null;
+    row: PrInfo | undefined;
+  } | null>(null);
+  if (!showsLoadingFrame) {
+    if (frameRow !== null) setFrameRow(null);
+  } else if (frameRow === null || frameRow.key !== liveKey) {
+    setFrameRow({
+      key: liveKey,
+      row:
+        liveKey === null
+          ? undefined
+          : cachedPrRow(queryClient, repoPath, lens, entityKeyNumber(liveKey)),
+    });
+  }
+  // A stack hop lands its focus back on the member's row once that PR is on
+  // screen; until then the hold's sink (or the loading frame) has it. Focus the
+  // user moved out of the view in the meantime stays where they put it.
+  useLayoutEffect(() => {
+    const member = stackHopRef.current;
+    if (member === null || hold.holding || showsLoadingFrame) return;
+    stackHopRef.current = null;
+    const host = viewRef.current;
+    const active = document.activeElement;
+    if (member !== shownNumber || !host) return;
+    if (active !== document.body && !host.contains(active)) return;
+    host
+      .querySelector<HTMLElement>(`[data-row="${member}"][aria-current="true"]`)
+      ?.focus();
+  }, [hold.holding, showsLoadingFrame, shownNumber]);
+  // Every arm renders inside the same host and frame, so the frame's focus sink
+  // survives an arm swap and the hold dims whichever arm the held PR showed.
+  const framed = (content: ReactNode) => (
+    <div
+      ref={setHostNode}
+      tabIndex={-1}
+      className="flex h-full flex-col outline-none"
+      {...heldParentProps(hold.holding)}
+    >
+      <HeldFrame
+        holding={hold.holding}
+        className="flex h-full min-h-0 flex-col"
+      >
+        {content}
+      </HeldFrame>
+    </div>
+  );
+  if (showsLoadingFrame) {
+    // The loaded header's controls, held where they will stand and gated on the
+    // list row's state as the loaded ones are on the PR's. With no cached row an
+    // open PR is assumed, the common case.
+    const row = frameRow?.key === liveKey ? frameRow.row : undefined;
+    const rowOpen = row === undefined || row.state === "OPEN";
+    const author = row?.author?.login ?? "";
+    return framed(
+      <PrLoadingFrame
+        noun={prNoun}
+        title={row?.title}
+        number={row?.number ?? number}
+        actions={
+          <>
+            {rowOpen &&
+              canWrite &&
+              (row !== undefined &&
+              repoStatus.data?.branch?.name === row.headRefName ? (
+                <span className="inline-flex h-6 shrink-0 items-center gap-1 border border-border bg-background pr-2 pl-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground">
+                  <CheckCircleIcon className="size-3" aria-hidden />
+                  Checked out
+                </span>
+              ) : (
+                <DisabledReasonButton
+                  variant="outline"
+                  size="xs"
+                  disabled
+                  reason={PR_SWITCH_LOADING_REASON}
+                >
+                  <GitBranchIcon data-icon="inline-start" />
+                  Checkout
+                </DisabledReasonButton>
+              ))}
+            {rowOpen && canEdit && (
+              <DisabledReasonButton
+                variant="outline"
+                size="xs"
+                disabled
+                reason={PR_SWITCH_LOADING_REASON}
+              >
+                <PencilSimpleIcon data-icon="inline-start" />
+                Edit
+              </DisabledReasonButton>
+            )}
+            <DisabledReasonButton
+              variant="outline"
+              size="xs"
+              disabled
+              reason={PR_SWITCH_LOADING_REASON}
+            >
+              <ArrowSquareOutIcon data-icon="inline-start" />
+              {remoteLabel}
+            </DisabledReasonButton>
+          </>
+        }
+        meta={
+          row === undefined ? (
+            <>
+              <Skeleton className="h-5 w-12" />
+              <Skeleton className="size-6 rounded-full" />
+              <Skeleton className="h-4 w-56 max-w-full" />
+            </>
+          ) : (
+            <>
+              <Badge variant={rowOpen ? "default" : "secondary"}>
+                {row.isDraft ? "Draft" : row.state.toLowerCase()}
+              </Badge>
+              {author ? (
+                <ForgeUserAvatar login={author} ghHost={ghHost} decorative />
+              ) : null}
+              <span>{displayLogin(author)}</span>
+              <span>•</span>
+              <span className="font-mono">{row.headRefName}</span>
+              <span>→</span>
+              <span className="font-mono">{row.baseRefName}</span>
+              <Skeleton className="h-4 w-16" />
+            </>
+          )
+        }
+        // The editable fields an OPEN pull request draws, in the loaded grid's
+        // order; board field values join only for a PR already on a board.
+        userFields={[
+          ...(rowOpen && canEditLabels ? [false] : []),
+          ...(rowOpen && canEditAssignees ? [true] : []),
+          ...(canWrite ? [false] : []),
+          ...(rowOpen && canEditReviewers ? [true] : []),
+        ]}
+        tabs={availableSections.map((s) => (
+          <Button
+            key={s}
+            variant={section === s ? "secondary" : "ghost"}
+            size="xs"
+            aria-pressed={section === s}
+            disabled
+          >
+            {TAB_NAME[s]}
+            {TAB_COUNT_SLOT[s] && (
+              <span aria-hidden className="invisible">
+                (00)
+              </span>
+            )}
+          </Button>
+        ))}
+        strip={rowOpen}
+        composer={
+          section === "conversation" && canComment ? (
+            <CommentComposer
+              value=""
+              onChange={() => undefined}
+              onSubmit={() => undefined}
+              submitLabel="Comment"
+              ariaLabel="Leave a comment"
+              placeholder="Leave a comment…"
+              busy
+              disabled
+              reason={PR_SWITCH_LOADING_REASON}
+            />
+          ) : null
+        }
+        footer={rowOpen && (canChangeState || canMerge || canWrite)}
+      />,
     );
   }
   if (detailPane === "offline") {
-    return (
-      <div ref={hostRef} tabIndex={-1} className="h-full outline-none">
-        <DiffPlaceholder message={offlinePendingMessage(`this ${prNoun}`)} />
-      </div>
+    return framed(
+      <DiffPlaceholder message={offlinePendingMessage(`this ${prNoun}`)} />,
     );
   }
   if (detailPane === "error" || !pr) {
@@ -2234,43 +2810,40 @@ export function RemotePrView({
     const errorSummary = details.error
       ? presentError(details.error).summary
       : null;
-    return (
-      <div ref={hostRef} tabIndex={-1} className="h-full outline-none">
-        <DiffPlaceholder
-          message={
-            details.isError ? loadFailed : `Could not load this ${prNoun}`
-          }
-          action={
-            details.isError ? (
-              <div className="flex flex-col items-center gap-2">
-                {/* The headline can't name the failure class, so the real reason —
-                    offline, deleted, no access — lives here. */}
-                {errorSummary ? (
-                  <p className="max-w-md text-center text-xs">{errorSummary}</p>
-                ) : null}
-                <Button
-                  ref={retryRef}
-                  variant="outline"
-                  size="sm"
-                  className="cursor-pointer"
-                  disabled={details.isFetching}
-                  onClick={() => details.refetch()}
-                >
-                  {details.isFetching ? "Retrying…" : "Retry"}
-                </Button>
-              </div>
-            ) : undefined
-          }
-        />
-      </div>
+    return framed(
+      <DiffPlaceholder
+        message={details.isError ? loadFailed : `Could not load this ${prNoun}`}
+        action={
+          details.isError ? (
+            <div className="flex flex-col items-center gap-2">
+              {/* The headline can't name the failure class, so the real reason —
+                  offline, deleted, no access — lives here. */}
+              {errorSummary ? (
+                <p className="max-w-md text-center text-xs">{errorSummary}</p>
+              ) : null}
+              <Button
+                ref={retryRef}
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                disabled={details.isFetching}
+                onClick={() => details.refetch()}
+              >
+                {details.isFetching ? "Retrying…" : "Retry"}
+              </Button>
+            </div>
+          ) : undefined
+        }
+      />,
     );
   }
 
   const detailFailed = refreshFailed(details);
+  // Only a placeholder paint is "the last opened" PR; a held one is dimmed instead.
   const detailNotice = detailNoticeMessage({
     noun: prNoun,
     isError: detailFailed,
-    stale: detailsStale,
+    stale: detailsPlaceholder,
   });
 
   // Open the Edit dialog: the chips OWN the trailing ref block, so peel any exact
@@ -2390,7 +2963,7 @@ export function RemotePrView({
 
   // The pane keeps rendering the previous PR's diff through a switch, so its lines
   // can belong to another PR than the `number` a new thread would be created under.
-  const diffStale = detailsStale || prDiff.isPlaceholderData;
+  const diffStale = detailsPlaceholder || prDiff.isPlaceholderData;
   // The inline line-comment composer for the Files tab: only when the provider allows
   // creating a thread, anchored to the selected file (its section prefills a
   // suggestion's code). Absent otherwise ⇒ read-only diff.
@@ -2401,7 +2974,7 @@ export function RemotePrView({
           render: ({ side, line, fromLine, onClose }) => (
             <ReviewComposer
               repoPath={repoPath}
-              number={number}
+              number={shownNumber}
               path={effectivePath}
               side={side}
               line={line}
@@ -2549,8 +3122,9 @@ export function RemotePrView({
 
   async function checkoutHead(headRefName: string) {
     // Any checkout in flight refuses another, whichever PR it is for: both write
-    // the one working tree.
-    if (runningCheckout) return;
+    // the one working tree. Through a switch the head named here is the rendered
+    // PR's while the checkout addresses `number`.
+    if (runningCheckout || detailsStale) return;
     // Read at fire time: the promote's claim never re-renders anything.
     if (promotionBlocksCheckout(repoPath)) {
       toast.info(PROMOTION_BLOCKS_CHECKOUT);
@@ -2565,12 +3139,30 @@ export function RemotePrView({
   }
 
   async function doCancelAutoMerge() {
+    if (detailsStale) return;
     try {
       await cancelAutoMerge.mutateAsync({ number, lens });
       toast.success(`Auto-merge canceled for #${number}`);
     } catch (e) {
       onError(e);
     }
+  }
+
+  // Openers reachable from a portaled menu, which a menu already open when a hold
+  // starts keeps live outside `inert`: each refuses while the rendered PR isn't
+  // the selected one, so nothing it would open lands on the PR that replaces it.
+  function openMergeDialog(strategy: MergeStrategy, auto: boolean) {
+    if (detailsStale) return;
+    setMergeStrategy(strategy);
+    setDeleteBranch(false);
+    setMergeAuto(auto);
+    setMergeOpen(true);
+  }
+  function askDeleteComment(commentId: string) {
+    if (!detailsStale) setDeletingCommentId(commentId);
+  }
+  function askDeleteThreadComment(commentId: string) {
+    if (!detailsStale) setDeletingThreadCommentId(commentId);
   }
 
   // The delete confirms close functionally: by the settle the dialog may hold
@@ -2737,7 +3329,7 @@ export function RemotePrView({
         cells
         repoPath={repoPath}
         enabled
-        number={number}
+        number={shownNumber}
         target="mr"
         labelableId={pr.id}
         labels={pr.labels}
@@ -2797,13 +3389,14 @@ export function RemotePrView({
         repoPath={repoPath}
         enabled
         kind="pr"
-        number={number}
+        number={shownNumber}
         contentId={pr.id}
         lens={lens}
         disabledReason={pickerReason}
         // The provider term of the palette gate is this branch's `canWrite`; the
         // trigger's own hold is the rest, and each component derives that itself.
-        paletteEnabled={isSelectedPr}
+        // A hold leaves the trigger as it was, so the palette stands down here.
+        paletteEnabled={isSelectedPr && hold.interactive}
       />,
     );
     // Field values under the picker, on the same gate: they come from the same
@@ -2816,10 +3409,10 @@ export function RemotePrView({
         repoPath={repoPath}
         enabled
         kind="pr"
-        number={number}
+        number={shownNumber}
         lens={lens}
         disabledReason={pickerReason}
-        paletteEnabled={isSelectedPr}
+        paletteEnabled={isSelectedPr && hold.interactive}
       />,
     );
   }
@@ -2833,7 +3426,7 @@ export function RemotePrView({
         key={`reviewers-${entityKey}`}
         cells
         repoPath={repoPath}
-        number={number}
+        number={shownNumber}
         enabled
         value={humanReviewers}
         lens={lens}
@@ -2886,12 +3479,8 @@ export function RemotePrView({
     );
   }
 
-  return (
-    <div
-      ref={hostRef}
-      tabIndex={-1}
-      className="flex h-full flex-col outline-none"
-    >
+  return framed(
+    <>
       <DegradedListNotice
         noun={`this ${prNoun}`}
         degraded={detailPane === "content-degraded"}
@@ -2929,11 +3518,13 @@ export function RemotePrView({
               <DisabledReasonButton
                 variant="outline"
                 size="xs"
-                disabled={runningCheckout !== undefined}
+                disabled={runningCheckout !== undefined || detailsPlaceholder}
                 reason={
-                  checkoutPending || runningCheckout?.target == null
-                    ? "Checking out…"
-                    : `Checking out #${runningCheckout.target}…`
+                  runningCheckout === undefined
+                    ? staleReason
+                    : checkoutPending || runningCheckout.target == null
+                      ? "Checking out…"
+                      : `Checking out #${runningCheckout.target}…`
                 }
                 onClick={() => void checkoutHead(pr.headRefName)}
                 title={`Check out ${pr.headRefName} locally`}
@@ -2952,7 +3543,7 @@ export function RemotePrView({
             <DisabledReasonButton
               variant="outline"
               size="xs"
-              disabled={detailsStale}
+              disabled={detailsPlaceholder}
               reason={staleReason}
               onClick={openEditWithChips}
               title="Edit the title and description"
@@ -3028,12 +3619,16 @@ export function RemotePrView({
             while the MR is open, static once closed. */}
         {canTrackTime && (
           <MrTimeTracking
+            // Keyed on the MR on screen: its popover holds a typed duration, which
+            // must never submit against the MR that replaces it.
+            key={`time-${hold.shownKey}`}
             repoPath={repoPath}
-            number={number}
+            number={shownNumber}
             open={isOpen}
-            // No stale arm, unlike the pickers beside it: the stats query carries
-            // no placeholder and the write payload is what the viewer typed, both
-            // keyed by `number` — only `open` above reads the rendered MR's state.
+            // The stats carry no placeholder and the writes address the shown
+            // number; a hold shuts the portaled popover (out of `inert`'s reach)
+            // and refuses its writes, so a held MR is never written mid-switch.
+            held={hold.holding}
             disabledReason={triageReason}
           />
         )}
@@ -3042,15 +3637,10 @@ export function RemotePrView({
         {canTasks && (
           <PrTasksChip
             repoPath={repoPath}
-            number={number}
+            number={shownNumber}
             onView={() => {
               setSection("conversation");
-              // Defer the scroll so the conversation column has mounted.
-              requestAnimationFrame(() =>
-                document
-                  .getElementById("pr-tasks-section")
-                  ?.scrollIntoView({ block: "nearest", behavior: "auto" }),
-              );
+              setTasksScrollFor(hold.shownKey);
             }}
           />
         )}
@@ -3063,14 +3653,14 @@ export function RemotePrView({
           membersUnknown={pr.membersUnknown}
           detailsPaused={details.isPaused}
           onRetryMembers={() => void details.refetch()}
-          currentNumber={number}
-          onSelect={(n) => selectPrWithAlign({ kind: "remote", id: String(n) })}
+          currentNumber={shownNumber}
+          onSelect={hopToStackMember}
           onDissolve={canDissolveStack ? dissolveStack : undefined}
           dissolving={dissolvePending}
           // `dissolveStack` refuses without push or while the rendered stack is
           // the previous PR's, so hold its control — without the spinner a real
           // write would show. Permission outranks the switch, as on Merge.
-          disabled={detailsStale || writeBlocked || !!offlineHold}
+          disabled={detailsPlaceholder || writeBlocked || !!offlineHold}
           reason={writeReason ?? staleReason ?? offlineHold}
         />
         {stackOffer && (
@@ -3088,7 +3678,7 @@ export function RemotePrView({
             // The rendered twin of `confirmStackOffer`'s refusals. Permission only
             // enables, so a viewer without push sees the offer held with its reason;
             // the stale arm is unreachable today (no offer exists then).
-            disabled={detailsStale || writeBlocked || !!offlineHold}
+            disabled={detailsPlaceholder || writeBlocked || !!offlineHold}
             reason={writeReason ?? staleReason ?? offlineHold}
             error={
               stackWriteError ? presentError(stackWriteError).summary : null
@@ -3120,7 +3710,12 @@ export function RemotePrView({
           provider={providerKey}
           crossRepository={!!pr.crossRepository}
           unmetRequiredContexts={blockedRequirements}
-          stale={detailsStale || !isSelectedPr}
+          // Split like the view's own controls: `stale` withdraws the offers, so
+          // only a placeholder may set it. A hold, and the one urgent render in
+          // which the deferred `number` lags the store's selection, keep them
+          // drawn and refuse through `held`; a render gate on that lag flickers.
+          stale={detailsPlaceholder}
+          held={hold.holding || !isSelectedPr}
         />
         <div className="flex flex-wrap gap-1 pt-1">
           {availableSections.map((s) => (
@@ -3145,11 +3740,11 @@ export function RemotePrView({
         provider={provider}
         forkBlocked={!!pr.crossRepository}
         hasResolveWorktree={resolveWorktree !== null}
-        busy={resolveMergePending || abortResolvePending || detailsStale}
+        busy={resolveMergePending || abortResolvePending || detailsPlaceholder}
         // Ranked like `busy` above it, then offline; the running write outranks it.
         resolveHeldReason={(() => {
           switch (true) {
-            case detailsStale:
+            case detailsPlaceholder:
               return staleReason;
             case resolveMergePending:
               return ACT_PENDING_REASON;
@@ -3167,14 +3762,16 @@ export function RemotePrView({
         blockedRequirements={blockedRequirements}
         blockedApprovals={blockedApprovals}
         blockedReason={gitlabBlockedNote}
+        pendingOffline={pendingOffline}
         updateBlockedReason={updateBlockedReason}
-        updateHeldReason={offlineHold}
+        // A placeholder holds the update without its spinner, which only real
+        // waits draw; a hold leaves it as it was, the frame being inert.
+        updateHeldReason={staleReason ?? offlineHold}
         // Busy-shaped, not a reason — the banner supplies its own words for the wait,
         // which now spans GitHub's whole queued update rather than one CLI call.
         updateBusy={
           updateBranchPending ||
           updatingBranch ||
-          detailsStale ||
           defaultBranchSettling ||
           rulesSettling
         }
@@ -3194,22 +3791,24 @@ export function RemotePrView({
 
       {/* Same slot as the banner above, and shown whatever section is active: an
           unfinished review is PR state, and the feed no longer carries a row for it.
-          GitHub allows one per viewer — the first is the only one. */}
+          GitHub allows one per viewer — the first is the only one. Its number and
+          review are both the shown PR's, so a hold keeps it painted; `selected`
+          withdraws its palette actions there, since inert can't reach them. */}
       <PendingReviewStrip
         repoPath={repoPath}
         lens={lens}
-        number={number}
+        number={shownNumber}
         review={threadClaims.pendingReviews[0]}
         prUrl={pr.url}
         remoteLabel={remoteLabel}
-        stale={detailsStale}
-        selected={isSelectedPr}
+        stale={detailsPlaceholder}
+        selected={isSelectedPr && hold.interactive}
       />
 
       {aiEnabled && canComment && section === "review" && (
         <PrReviewPanel
           prKind="remote"
-          prRef={String(number)}
+          prRef={String(shownNumber)}
           prNoun={prNoun}
           context={{
             title: pr.title,
@@ -3230,7 +3829,7 @@ export function RemotePrView({
             // re-fetching it — PR diffs are among the slowest loads in the app.
             loadDiff: () =>
               queryClient
-                .ensureQueryData(prDiffOptions(repoPath, number, lens))
+                .ensureQueryData(prDiffOptions(repoPath, shownNumber, lens))
                 .then((text) => ({
                   text,
                   truncated: false,
@@ -3246,7 +3845,7 @@ export function RemotePrView({
           // The context above is seeded from the rendered PR, so through a switch
           // `stale` holds both the run and the post — without the spinner that
           // `posting` shows for a real one.
-          stale={detailsStale}
+          stale={detailsPlaceholder}
           // The panel posts its AI review as a comment and passes `asBot: true`,
           // forwarded to the mutation so GitLab attributes it to the review-bot
           // identity (other providers ignore the flag).
@@ -3268,7 +3867,13 @@ export function RemotePrView({
 
       {section === "conversation" && (
         <>
-          <ConversationScrollArea ref={jumpRef} className="flex-1">
+          {/* Keyed on the PR on screen: a new one opens at the top, never at the
+              scroll offset the last one was read to. */}
+          <ConversationScrollArea
+            key={hold.shownKey}
+            ref={jumpRef}
+            className="flex-1"
+          >
             <div className="space-y-4 p-4">
               <div className="group space-y-1 border-b pb-3">
                 <div className="flex items-start justify-between gap-2">
@@ -3303,7 +3908,7 @@ export function RemotePrView({
                       {/* Absent, not disabled, while the description belongs to
                           the previous PR — the same shape the thread menus take
                           when their `onQuote` is withheld. */}
-                      {!detailsStale && (
+                      {!detailsPlaceholder && (
                         <DropdownMenuItem onClick={() => quoteReply(pr.body)}>
                           Quote reply
                         </DropdownMenuItem>
@@ -3316,7 +3921,7 @@ export function RemotePrView({
                       {/* Absent for the same reason as Quote reply, and because
                           a disabled item drops pointer events — no hint could
                           reach the viewer to explain it. */}
-                      {isOpen && canEdit && !detailsStale && (
+                      {isOpen && canEdit && !detailsPlaceholder && (
                         <DropdownMenuItem onClick={openEditWithChips}>
                           Edit
                         </DropdownMenuItem>
@@ -3329,8 +3934,9 @@ export function RemotePrView({
                   // bar carries the wait itself (a disabled button swallows `title`).
                   <ReactionBar
                     reactions={reactions.data?.body ?? []}
-                    disabled={detailsStale}
+                    disabled={detailsPlaceholder}
                     reason={staleReason}
+                    held={reactionPickerHeld}
                     onToggle={(content, active) =>
                       toggleReaction(pr.id, content, active)
                     }
@@ -3338,15 +3944,19 @@ export function RemotePrView({
                 )}
               </div>
               {/* Bitbucket-only PR tasks checklist, between the description and the
-                  threads. Gated on the flag alone. */}
-              {canTasks && (
+                  threads. Gated on the flag, and lands with the feed below it. */}
+              {canTasks && feedReady && (
                 <PrTasksSection
+                  // Keyed on the selection, so a hold's start shuts its portaled
+                  // task menu, which `inert` can't reach; the remount repaints the
+                  // same held tasks from cache.
+                  key={`tasks-${entityKey}`}
                   repoPath={repoPath}
-                  number={number}
-                  // The open-state verb comes off the rendered pr while the task
-                  // writes address `number`, so a switch would offer Add against a
-                  // pull request whose own state hasn't arrived yet.
-                  editable={pr.state === "OPEN" && !detailsStale}
+                  number={shownNumber}
+                  // The open-state verb comes off the rendered pr, so another PR's
+                  // placeholder would offer Add against a pull request whose own
+                  // state hasn't arrived yet.
+                  editable={pr.state === "OPEN" && !detailsPlaceholder}
                 />
               )}
               {/* The comments and commits ride sub-fetches of the details read that
@@ -3359,151 +3969,166 @@ export function RemotePrView({
                 {...(feedListsNotice ?? {})}
                 className="px-0 pb-0"
               />
-              <PrActivityFeed
-                pr={pr}
-                timeline={timeline}
-                reactions={reactions.data}
-                claims={threadClaims}
-                providerKey={providerKey}
-                suggestionApply={suggestionApply}
-                fileDiffLookup={fileDiffLookup}
-                mentions={mentions}
-                // Hide/Unhide stay visible but disabled through the switch. The
-                // permission reason ranks first — it's the one still true once the
-                // selected pull request is on screen.
-                disabledReason={triageItemReason ?? staleReason}
-                revealThreadId={revealThreadId}
-                setRevealThreadId={setRevealThreadId}
-                revealReviewId={revealReviewId}
-                onReviewRevealed={() => setRevealReviewId(null)}
-                setSection={setSection}
-                // Drill into the commit via the Commits-tab machinery
-                // (selectedCommitOid → PrCommitDetail).
-                onSelectCommit={(oid) => {
-                  setSelectedCommitOid(oid);
-                  setSection("commits");
-                }}
-                canWrite={canWrite}
-                canThreadReply={canThreadReply}
-                canThreadResolve={canThreadResolve}
-                canEditOwnThreadComments={canEditOwnThreadComments}
-                canEditOwnComments={canEditOwnComments}
-                canReact={canReact}
-                onQuote={detailsStale ? undefined : quoteReply}
-                onThreadReply={(threadId, body) =>
-                  threadReply.mutateAsync({ number, lens, threadId, body })
-                }
-                onThreadResolve={(threadId, resolved) =>
-                  threadResolve.mutateAsync({
-                    number,
-                    lens,
-                    threadId,
-                    resolved,
-                  })
-                }
-                pendingThreadWrites={pendingThreadWrites}
-                // All four pair a rendered comment id with `number`, so they're
-                // withheld through a switch; `editHeld` covers an editor already
-                // open when it began.
-                onEditThreadComment={
-                  detailsStale ? undefined : saveThreadCommentEdit
-                }
-                onDeleteThreadComment={
-                  detailsStale ? undefined : setDeletingThreadCommentId
-                }
-                onEditComment={detailsStale ? undefined : saveCommentEdit}
-                onDeleteComment={
-                  detailsStale ? undefined : setDeletingCommentId
-                }
-                editHeld={detailsStale}
-                onHideComment={hideComment}
-                onUnhideComment={unhideComment}
-                onToggleReaction={toggleReaction}
-                reactionsHeld={detailsStale}
-                reactionsReason={staleReason ?? null}
-              />
-              {/* Residual review threads — those NOT shown inline under a review
-                  above: all threads on GitLab/Bitbucket (no reviewId), plus
-                  standalone line comments on GitHub. Retitled when reviews claimed
-                  threads above so it doesn't read as a duplicate. */}
-              <ReviewThreadsBlock
-                // `undefined` until the read lands, so the block can tell a
-                // first load parked offline from a loaded empty answer.
-                threads={
-                  threadClaims.visibleThreads === undefined
-                    ? undefined
-                    : threadClaims.residualThreads
-                }
-                truncated={reviewThreads.data?.threadsTruncated ?? false}
-                heading={
-                  threadClaims.claimedThreadIds.size > 0
-                    ? "Other line comments"
-                    : "Review comments"
-                }
-                isError={reviewThreads.isError}
-                isPaused={reviewThreads.isPaused}
-                isFetching={reviewThreads.isFetching}
-                onRetry={() => void reviewThreads.refetch()}
-                onQuote={detailsStale ? undefined : quoteReply}
-                onReply={
-                  canThreadReply
-                    ? (threadId, body) =>
-                        threadReply.mutateAsync({
-                          number,
-                          lens,
-                          threadId,
-                          body,
-                        })
-                    : undefined
-                }
-                onResolve={
-                  canThreadResolve
-                    ? (threadId, resolved) =>
-                        threadResolve.mutateAsync({
-                          number,
-                          lens,
-                          threadId,
-                          resolved,
-                        })
-                    : undefined
-                }
-                pendingWrites={pendingThreadWrites}
-                onEditComment={
-                  canEditOwnThreadComments && !detailsStale
-                    ? saveThreadCommentEdit
-                    : undefined
-                }
-                onDeleteComment={
-                  canEditOwnThreadComments && !detailsStale
-                    ? setDeletingThreadCommentId
-                    : undefined
-                }
-                editHeld={detailsStale}
-                provider={providerKey}
-                apply={suggestionApply}
-                fileDiffLookup={fileDiffLookup}
-                mentions={mentions}
-                revealThreadId={revealThreadId}
-                onRevealed={() => setRevealThreadId(null)}
-              />
-              {/* What the FEED holds, not what the payload does: the viewer's own
-                  pending review and its draft line comments are carried by the notice
-                  strip, so counting either here would silence this line over an empty
-                  feed. Comments, threads and timeline must have LOADED: an unread one
-                  counts zero, and "no activity" is a claim about what was read. */}
-              {threadClaims.renderedReviews.length === 0 &&
-                pr.comments.length === 0 &&
-                !pr.commentsUnknown &&
-                pr.commits.length === 0 &&
-                !pr.commitsUnknown &&
-                timeline.data !== undefined &&
-                timeline.data.length === 0 &&
-                threadClaims.visibleThreads !== undefined &&
-                threadClaims.visibleThreadCount === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    No activity yet.
-                  </p>
-                )}
+              {feedReady ? (
+                <>
+                  <PrActivityFeed
+                    pr={pr}
+                    timeline={timeline}
+                    stale={detailsPlaceholder}
+                    reactions={reactions.data}
+                    claims={threadClaims}
+                    providerKey={providerKey}
+                    suggestionApply={suggestionApply}
+                    fileDiffLookup={fileDiffLookup}
+                    mentions={mentions}
+                    // Hide/Unhide stay visible but disabled through the switch. The
+                    // permission reason ranks first — it's the one still true once the
+                    // selected pull request is on screen.
+                    disabledReason={triageItemReason ?? staleReason}
+                    revealThreadId={revealThreadId}
+                    setRevealThreadId={setRevealThreadId}
+                    revealReviewId={revealReviewId}
+                    onReviewRevealed={() => setRevealReviewId(null)}
+                    setSection={setSection}
+                    // Drill into the commit via the Commits-tab machinery
+                    // (selectedCommitOid → PrCommitDetail).
+                    onSelectCommit={(oid) => {
+                      setSelectedCommitOid(oid);
+                      setSection("commits");
+                    }}
+                    canWrite={canWrite}
+                    canThreadReply={canThreadReply}
+                    canThreadResolve={canThreadResolve}
+                    canEditOwnThreadComments={canEditOwnThreadComments}
+                    canEditOwnComments={canEditOwnComments}
+                    canReact={canReact}
+                    onQuote={detailsPlaceholder ? undefined : quoteReply}
+                    onThreadReply={(threadId, body) =>
+                      threadReply.mutateAsync({ number, lens, threadId, body })
+                    }
+                    onThreadResolve={(threadId, resolved) =>
+                      threadResolve.mutateAsync({
+                        number,
+                        lens,
+                        threadId,
+                        resolved,
+                      })
+                    }
+                    pendingThreadWrites={pendingThreadWrites}
+                    // All four pair a rendered comment id with `number`, so they're
+                    // withheld over a placeholder, and `editHeld` holds an editor
+                    // already open then; during a hold the inert frame covers it.
+                    onEditThreadComment={
+                      detailsPlaceholder ? undefined : saveThreadCommentEdit
+                    }
+                    onDeleteThreadComment={
+                      detailsPlaceholder ? undefined : askDeleteThreadComment
+                    }
+                    onEditComment={
+                      detailsPlaceholder ? undefined : saveCommentEdit
+                    }
+                    onDeleteComment={
+                      detailsPlaceholder ? undefined : askDeleteComment
+                    }
+                    editHeld={detailsPlaceholder}
+                    onHideComment={hideComment}
+                    onUnhideComment={unhideComment}
+                    onToggleReaction={toggleReaction}
+                    reactionsHeld={detailsPlaceholder}
+                    reactionsReason={staleReason ?? null}
+                    reactionPickerHeld={reactionPickerHeld}
+                  />
+                  {/* Residual review threads — those NOT shown inline under a review
+                      above: all threads on GitLab/Bitbucket (no reviewId), plus
+                      standalone line comments on GitHub. Retitled when reviews claimed
+                      threads above so it doesn't read as a duplicate. */}
+                  <ReviewThreadsBlock
+                    // `undefined` until the read lands, so the block can tell a
+                    // first load parked offline from a loaded empty answer.
+                    threads={
+                      threadClaims.visibleThreads === undefined
+                        ? undefined
+                        : threadClaims.residualThreads
+                    }
+                    truncated={reviewThreads.data?.threadsTruncated ?? false}
+                    heading={
+                      threadClaims.claimedThreadIds.size > 0
+                        ? "Other line comments"
+                        : "Review comments"
+                    }
+                    isError={reviewThreads.isError}
+                    isPaused={reviewThreads.isPaused}
+                    isFetching={reviewThreads.isFetching}
+                    onRetry={() => void reviewThreads.refetch()}
+                    onQuote={detailsPlaceholder ? undefined : quoteReply}
+                    onReply={
+                      canThreadReply
+                        ? (threadId, body) =>
+                            threadReply.mutateAsync({
+                              number,
+                              lens,
+                              threadId,
+                              body,
+                            })
+                        : undefined
+                    }
+                    onResolve={
+                      canThreadResolve
+                        ? (threadId, resolved) =>
+                            threadResolve.mutateAsync({
+                              number,
+                              lens,
+                              threadId,
+                              resolved,
+                            })
+                        : undefined
+                    }
+                    pendingWrites={pendingThreadWrites}
+                    onEditComment={
+                      canEditOwnThreadComments && !detailsPlaceholder
+                        ? saveThreadCommentEdit
+                        : undefined
+                    }
+                    onDeleteComment={
+                      canEditOwnThreadComments && !detailsPlaceholder
+                        ? askDeleteThreadComment
+                        : undefined
+                    }
+                    editHeld={detailsPlaceholder}
+                    provider={providerKey}
+                    apply={suggestionApply}
+                    fileDiffLookup={fileDiffLookup}
+                    mentions={mentions}
+                    revealThreadId={revealThreadId}
+                    onRevealed={() => setRevealThreadId(null)}
+                  />
+                  {/* What the FEED holds, not what the payload does: the viewer's own
+                      pending review and its draft line comments are carried by the notice
+                      strip, so counting either here would silence this line over an empty
+                      feed. Comments, threads and timeline must have LOADED: an unread one
+                      counts zero, and "no activity" is a claim about what was read. */}
+                  {threadClaims.renderedReviews.length === 0 &&
+                    pr.comments.length === 0 &&
+                    !pr.commentsUnknown &&
+                    pr.commits.length === 0 &&
+                    !pr.commitsUnknown &&
+                    timeline.data !== undefined &&
+                    timeline.data.length === 0 &&
+                    threadClaims.visibleThreads !== undefined &&
+                    threadClaims.visibleThreadCount === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No activity yet.
+                      </p>
+                    )}
+                </>
+              ) : (
+                <ListRowSkeletons
+                  rows={3}
+                  lines={2}
+                  indent={false}
+                  name="the conversation"
+                />
+              )}
             </div>
           </ConversationScrollArea>
           {/* Shown for closed/merged PRs too — GitHub lets you comment (and
@@ -3686,7 +4311,7 @@ export function RemotePrView({
             return (
               <PrCommitDetail
                 repoPath={repoPath}
-                number={number}
+                number={shownNumber}
                 commit={selectedCommit}
                 onBack={() => setSelectedCommitOid(null)}
                 canCommentCommits={canCommentCommits}
@@ -3733,7 +4358,7 @@ export function RemotePrView({
           <PendingReviewBar
             repoPath={repoPath}
             lens={lens}
-            number={number}
+            number={shownNumber}
             onSubmit={() => setSubmitOpen(true)}
           />
           {/* The files ride a sub-fetch of the details read that can fail or come
@@ -3778,9 +4403,9 @@ export function RemotePrView({
               drafts={drafts.data}
               repoPath={repoPath}
               lens={lens}
-              number={number}
+              number={shownNumber}
               lineWidget={reviewLineWidget}
-              onQuote={detailsStale ? undefined : quoteReply}
+              onQuote={detailsPlaceholder ? undefined : quoteReply}
               onReply={
                 canThreadReply
                   ? (threadId, body) =>
@@ -3946,12 +4571,7 @@ export function RemotePrView({
                     <DropdownMenuItem
                       key={s}
                       disabled={blocked}
-                      onClick={() => {
-                        setMergeStrategy(s);
-                        setDeleteBranch(false);
-                        setMergeAuto(false);
-                        setMergeOpen(true);
-                      }}
+                      onClick={() => openMergeDialog(s, false)}
                     >
                       {MERGE_LABEL[s]}
                       {serverDisabled
@@ -3969,12 +4589,7 @@ export function RemotePrView({
                       <DropdownMenuItem
                         key={`auto-${s}`}
                         title="Merges when the running pipeline succeeds"
-                        onClick={() => {
-                          setMergeStrategy(s);
-                          setDeleteBranch(false);
-                          setMergeAuto(true);
-                          setMergeOpen(true);
-                        }}
+                        onClick={() => openMergeDialog(s, true)}
                       >
                         Auto-merge: {MERGE_LABEL[s]}
                       </DropdownMenuItem>
@@ -4011,7 +4626,7 @@ export function RemotePrView({
       )}
 
       <MergePrDialog
-        open={mergeOpen}
+        open={mergeOpen && hold.interactive}
         onClose={() => setMergeOpen(false)}
         number={number}
         host={remoteLabel}
@@ -4033,7 +4648,7 @@ export function RemotePrView({
 
       <EditTitleBodyDialog
         form={edit.form}
-        open={edit.open}
+        open={edit.open && hold.interactive}
         onOpenChange={(open) => {
           // The dialog stays mounted, so cancel any in-flight generation on close.
           if (!open) prGen.cancel();
@@ -4105,7 +4720,7 @@ export function RemotePrView({
       />
 
       <DeleteCommentDialog
-        commentId={deletingCommentId}
+        commentId={hold.interactive ? deletingCommentId : null}
         onClose={() => setDeletingCommentId(null)}
         pending={deleteComment.isPending}
         reason={pendingWriteReason(
@@ -4117,7 +4732,7 @@ export function RemotePrView({
       />
 
       <DeleteCommentDialog
-        commentId={deletingThreadCommentId}
+        commentId={hold.interactive ? deletingThreadCommentId : null}
         onClose={() => setDeletingThreadCommentId(null)}
         pending={deleteReviewComment.isPending}
         reason={pendingWriteReason(
@@ -4137,7 +4752,7 @@ export function RemotePrView({
         key={entityKey}
         repoPath={repoPath}
         number={number}
-        open={submitOpen}
+        open={submitOpen && hold.interactive}
         onOpenChange={setSubmitOpen}
         caps={{
           canApprove: canWrite || canApprove,
@@ -4150,7 +4765,7 @@ export function RemotePrView({
       {/* Palette-triggered "Discard pending review" confirmation (the bar has its
           own inline confirm; this is the keyboard/command-palette entry point). */}
       <ConfirmDialog
-        open={discardConfirmOpen}
+        open={discardConfirmOpen && hold.interactive}
         onCancel={() => setDiscardConfirmOpen(false)}
         title="Discard pending review?"
         body={`This deletes all ${draftCount} pending comment${draftCount === 1 ? "" : "s"}. They haven't been posted yet and can't be recovered.`}
@@ -4159,7 +4774,7 @@ export function RemotePrView({
         pending={clearDrafts.isPending}
         onConfirm={() => void discardPendingReview()}
       />
-    </div>
+    </>,
   );
 }
 
