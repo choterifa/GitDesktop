@@ -497,11 +497,11 @@ export function TagDetailView({
             "You were offline, so the manifest wasn't uploaded. Save the release again once you're back online to update it.",
           );
         // The upload builds from the live repo's options once the edit lands;
-        // a switch during it takes the same partial-state path.
-        const { live, away } = landedIn(saveIn);
+        // a switch or close during it takes the same partial-state path.
+        const { live, away, closed } = landedIn(saveIn);
         if (!live)
           throw new Error(
-            `You switched repositories, so the manifest wasn't uploaded${away}. Save the release again to update it.`,
+            `You ${closed ? "closed the repository" : "switched repositories"}, so the manifest wasn't uploaded${away}. Save the release again to update it.`,
           );
         await syncUpdaterNotes.mutateAsync({ tag, notes: editNotes.trim() });
       } catch (err) {
