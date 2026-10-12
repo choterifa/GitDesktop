@@ -57,6 +57,12 @@ import {
   staleAllowlistEntries as staleCommandEntries,
 } from "./check-dead-surface.mjs";
 import {
+  CARRIER_TOKEN as ENFORCED_CARRIER_TOKEN,
+  parseEnforcedSuites,
+  readsExpectDeps,
+  unlistedCarriers,
+} from "./check-enforced-node-suites.mjs";
+import {
   verdict as dedupeVerdict,
   parsePackageVersions,
   SINGLETONS,
@@ -235,6 +241,7 @@ const loneActivity = scanner("lone-activity-boundary");
 const seedOnOpen = scanner("seed-effect-on-open");
 const finishAndSurface = scanner("generator-dialog-finish-and-surface");
 const diffStatPair = scanner("hand-rolled-diff-stat");
+const diffStatSlot = scanner("list-row-diff-stat-slot");
 const kindBadge = scanner("kind-badge-single-source");
 const nullFallback = scanner("null-suspense-fallback");
 const bareGroupLabel = scanner("bare-group-label");
@@ -1251,6 +1258,138 @@ test("hand-rolled-diff-stat exempts the component file and vendored ui only", ()
   assert.equal(appliesTo("src/components/diff-stat.tsx"), false);
   assert.equal(appliesTo("src/components/ui/badge.tsx"), false);
   assert.equal(appliesTo("src/features/repository/FileRow.tsx"), true);
+});
+
+test("list-row-diff-stat-slot flags a counts cell gated on its own stat", () => {
+  // The FileRow / CommitDialog shape the slot replaced, wrapped as formatted.
+  const fileRow = [
+    "      {nameCell}",
+    "      {stat ? (",
+    "        <DiffStat",
+    "          added={stat.added}",
+    "          deleted={stat.deleted}",
+    "          isBinary={stat.isBinary}",
+    '          className="text-[11px]"',
+    "        />",
+    "      ) : null}",
+  ].join("\n");
+  assert.deepEqual(diffStatSlot(fileRow), [2]);
+  const andForm = [
+    "{file.stats && (",
+    "  <DiffStat added={file.stats.added} deleted={file.stats.deleted} />",
+    ")}",
+  ].join("\n");
+  assert.deepEqual(diffStatSlot(andForm), [1]);
+  assert.deepEqual(
+    diffStatSlot(
+      "{stat ? <DiffStat added={stat.added} deleted={stat.deleted} /> : null}",
+    ),
+    [1],
+  );
+});
+
+test("list-row-diff-stat-slot flags a total on its own flag; the allowlist exempts RemotePrView", () => {
+  // The shape is flagged whatever the condition: RemotePrView's header total,
+  // hidden while totals are unknown, is exempt by its allowlist entry only.
+  const total = [
+    "{!totalsUnknown && (",
+    "  <DiffStat added={pr.additions} deleted={pr.deletions} />",
+    ")}",
+  ].join("\n");
+  assert.deepEqual(diffStatSlot(total), [1]);
+  const check = CHECKS.find((c) => c.name === "list-row-diff-stat-slot");
+  const file = "src/features/pulls/RemotePrView.tsx";
+  const { violations, stale } = runCheck(
+    check,
+    [file],
+    new Map([[file, view(total)]]),
+  );
+  assert.deepEqual(violations, []);
+  assert.deepEqual(stale, []);
+  // The entry covers exactly one real site.
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  assert.equal(
+    check.scan(view(readFileSync(join(root, file), "utf8")), file).length,
+    1,
+  );
+});
+
+test("list-row-diff-stat-slot flags the condition by shape, not by spelling", () => {
+  assert.deepEqual(
+    diffStatSlot("{ok ? <DiffStat added={stat.added} deleted={0} /> : null}"),
+    [1],
+  );
+  assert.deepEqual(diffStatSlot("{stat && <DiffStat {...stat} />}"), [1]);
+  assert.deepEqual(
+    diffStatSlot(
+      "{stat ? <DiffStat added={stat.added} deleted={stat.deleted} /> : null}",
+    ),
+    [1],
+  );
+  assert.deepEqual(
+    diffStatSlot(
+      "{stat != null && <DiffStat added={stat.added} deleted={stat.deleted} />}",
+    ),
+    [1],
+  );
+  assert.deepEqual(
+    diffStatSlot(
+      "{x?.stat && <DiffStat added={x.stat.added} deleted={x.stat.deleted} />}",
+    ),
+    [1],
+  );
+  assert.deepEqual(
+    diffStatSlot("{map.get(path) && <DiffStat added={1} deleted={2} />}"),
+    [1],
+  );
+  // The else branch and the `||` / `??` operands are the same shape.
+  assert.deepEqual(
+    diffStatSlot("{busy ? null : <DiffStat added={1} deleted={2} />}"),
+    [1],
+  );
+  assert.deepEqual(
+    diffStatSlot("{fallback ?? <DiffStat added={1} deleted={2} />}"),
+    [1],
+  );
+});
+
+test("list-row-diff-stat-slot leaves unconditional cells, the slot, and text alone", () => {
+  assert.deepEqual(
+    diffStatSlot("<DiffStat added={file.added} deleted={file.deleted} />"),
+    [],
+  );
+  assert.deepEqual(
+    diffStatSlot('<DiffStatSlot stat={stat} className="text-[11px]" />'),
+    [],
+  );
+  assert.deepEqual(
+    diffStatSlot("{stat ? <DiffStatSlot stat={stat} /> : null}"),
+    [],
+  );
+  // Masked text: a comment or string can't trigger a hit.
+  assert.deepEqual(
+    diffStatSlot(
+      "// {stat && <DiffStat added={1} deleted={2} />}\nconst a = 1;",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    diffStatSlot("{/* stat ? <DiffStat added={1} deleted={2} /> : null */}"),
+    [],
+  );
+  assert.deepEqual(
+    diffStatSlot('const s = "x && <DiffStat added={1} />";'),
+    [],
+  );
+});
+
+test("list-row-diff-stat-slot scans feature tsx files only", () => {
+  const { appliesTo } = CHECKS.find(
+    (c) => c.name === "list-row-diff-stat-slot",
+  );
+  assert.equal(appliesTo("src/features/x/A.tsx"), true);
+  assert.equal(appliesTo("src/components/diff-stat.tsx"), false);
+  assert.equal(appliesTo("src/features/x/a.ts"), false);
 });
 
 test("kind-badge-single-source flags a re-declared table, exported or not", () => {
@@ -7195,4 +7334,425 @@ test("the review prompt cautions that newer reviewer notes may exist", async () 
   } finally {
     hooks.deregister();
   }
+});
+
+// ------------------------------------------------ check-enforced-node-suites
+
+const enforcedWorkflowFixture = (suites, extra = "") =>
+  [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - name: Node suites needing node_modules (enforced)",
+    "        env:",
+    '          GD_EXPECT_DEPS: "1"',
+    `        run: node --test ${suites.map((s) => `"${s}"`).join(" ")}`,
+    extra,
+    "      - name: Next step",
+    "        run: echo done",
+    "",
+  ].join("\n");
+
+test("enforced-node-suites reads the enforced step's list under both line endings", () => {
+  for (const ending of ["\n", "\r\n"]) {
+    assert.deepEqual(
+      parseEnforcedSuites(
+        enforcedWorkflowFixture([
+          "scripts/a.test.mjs",
+          "scripts/b.test.mjs",
+        ]).replaceAll("\n", ending),
+      ),
+      new Set(["scripts/a.test.mjs", "scripts/b.test.mjs"]),
+    );
+  }
+});
+
+test("enforced-node-suites fails closed on a step it cannot read", () => {
+  const ok = enforcedWorkflowFixture(["scripts/a.test.mjs"]);
+  for (const [workflow, message] of [
+    [ok.replace("(enforced)", "(renamed)"), /Could not find/],
+    [ok.replace('GD_EXPECT_DEPS: "1"', 'OTHER: "1"'), /GD_EXPECT_DEPS/],
+    [
+      ok.replace(/run: node --test .*/, "run: |\n          node --test x"),
+      /block scalar/,
+    ],
+    [
+      ok.replace('"scripts/a.test.mjs"', "scripts/a.test.mjs"),
+      /Could not parse the run line/,
+    ],
+    [ok.replace("scripts/a.test.mjs", "scripts/*.test.mjs"), /Not a single/],
+    [
+      enforcedWorkflowFixture(["scripts/a.test.mjs", "scripts/a.test.mjs"]),
+      /Listed twice/,
+    ],
+    [ok.replace(/run: node --test .*/, "run: node --test"), /Could not parse/],
+    [`${ok}\n${ok}`, /Found 2/],
+  ]) {
+    assert.throws(() => parseEnforcedSuites(workflow), message);
+  }
+});
+
+// Every element the guard reads is structural: a direct key of the step, or a
+// direct entry of its env: block mapping. Each fixture below is one way raw
+// text could look like enforcement while GitHub would not apply it.
+const enforcedStep = (...stepLines) =>
+  [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - name: Other step",
+    "        env:",
+    "          OTHER: x",
+    "        run: echo other",
+    "      - name: Node suites needing node_modules (enforced)",
+    ...stepLines.map((line) => (line === "" ? "" : `        ${line}`)),
+    "      - name: Next step",
+    "        run: echo done",
+    "",
+  ].join("\n");
+const ENFORCED_RUN = 'run: node --test "scripts/a.test.mjs"';
+
+test("enforced-node-suites: GD_EXPECT_DEPS inside another var's block scalar fails", () => {
+  assert.throws(
+    () =>
+      parseEnforcedSuites(
+        enforcedStep(
+          "env:",
+          "  UNUSED: |",
+          '    GD_EXPECT_DEPS: "1"',
+          ENFORCED_RUN,
+        ),
+      ),
+    /does not set GD_EXPECT_DEPS/,
+  );
+});
+
+test("enforced-node-suites: GD_EXPECT_DEPS only in a comment fails", () => {
+  assert.throws(
+    () =>
+      parseEnforcedSuites(
+        enforcedStep(
+          "env:",
+          "  OTHER: x",
+          '  # GD_EXPECT_DEPS: "1"',
+          ENFORCED_RUN,
+        ),
+      ),
+    /does not set GD_EXPECT_DEPS/,
+  );
+});
+
+test("enforced-node-suites: GD_EXPECT_DEPS in a different step's env fails", () => {
+  const workflow = enforcedStep(ENFORCED_RUN).replace(
+    "          OTHER: x",
+    '          GD_EXPECT_DEPS: "1"',
+  );
+  assert.throws(() => parseEnforcedSuites(workflow), /has no env: mapping/);
+});
+
+test("enforced-node-suites: a run list inside another key's block scalar fails", () => {
+  assert.throws(
+    () =>
+      parseEnforcedSuites(
+        enforcedStep(
+          "env:",
+          '  GD_EXPECT_DEPS: "1"',
+          "with:",
+          "  script: |",
+          `    ${ENFORCED_RUN}`,
+        ),
+      ),
+    /has no run: key/,
+  );
+});
+
+test("enforced-node-suites: a flow-mapping env: fails closed", () => {
+  assert.throws(
+    () =>
+      parseEnforcedSuites(
+        enforcedStep('env: { GD_EXPECT_DEPS: "1" }', ENFORCED_RUN),
+      ),
+    /env is a flow collection/,
+  );
+});
+
+test("enforced-node-suites: a duplicate GD_EXPECT_DEPS key fails closed", () => {
+  assert.throws(
+    () =>
+      parseEnforcedSuites(
+        enforcedStep(
+          "env:",
+          '  GD_EXPECT_DEPS: "1"',
+          '  GD_EXPECT_DEPS: "0"',
+          ENFORCED_RUN,
+        ),
+      ),
+    /duplicate key 'GD_EXPECT_DEPS'/,
+  );
+});
+
+test("enforced-node-suites: extra env vars and comments between keys pass", () => {
+  assert.deepEqual(
+    parseEnforcedSuites(
+      enforcedStep(
+        "# why this step exists",
+        "env:",
+        "  FORCE_COLOR: 0",
+        "  # the enforcement switch",
+        "  GD_EXPECT_DEPS: '1' # turns skips into failures",
+        "  NOTES: |",
+        "    free text",
+        "",
+        "# the list",
+        ENFORCED_RUN,
+        "shell: bash",
+      ),
+    ),
+    new Set(["scripts/a.test.mjs"]),
+  );
+});
+
+test("enforced-node-suites fails closed on anchors, tabs, stray names and bad parents", () => {
+  const valid = ["env:", '  GD_EXPECT_DEPS: "1"', ENFORCED_RUN];
+  for (const [workflow, message] of [
+    [
+      enforcedStep("env: &deps", '  GD_EXPECT_DEPS: "1"', ENFORCED_RUN),
+      /anchor or alias/,
+    ],
+    [enforcedStep("env:", "  <<: *deps", ENFORCED_RUN), /unreadable entry/],
+    [
+      enforcedStep("env:", '\tGD_EXPECT_DEPS: "1"', ENFORCED_RUN),
+      /Tab in indentation/,
+    ],
+    [enforcedStep(...valid, "env:"), /duplicate key 'env'/],
+    [
+      enforcedStep(...valid).replace(
+        "      - name: Node suites needing node_modules (enforced)",
+        "      # - name: Node suites needing node_modules (enforced)",
+      ),
+      /Could not find/,
+    ],
+    [
+      enforcedStep(...valid).replace("    steps:", "    services:"),
+      /not an item of a steps: list/,
+    ],
+    [
+      enforcedStep("env:", '  GD_EXPECT_DEPS: "1', ENFORCED_RUN),
+      /Multi-line quoted value/,
+    ],
+  ]) {
+    assert.throws(() => parseEnforcedSuites(workflow), message);
+  }
+});
+
+test("enforced-node-suites names carriers the step leaves out", () => {
+  assert.deepEqual(
+    unlistedCarriers(
+      ["scripts/b.test.mjs", "scripts/a.test.mjs"],
+      new Set(["scripts/a.test.mjs"]),
+    ),
+    ["scripts/b.test.mjs"],
+  );
+});
+
+test("enforced-node-suites CLI fails an unlisted carrier (negative control)", () => {
+  const root = mkdtempSync(join(tmpdir(), "gd-enforced-suites-"));
+  const gate = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "check-enforced-node-suites.mjs",
+  );
+  let lastOut = "";
+  const run = () => {
+    try {
+      lastOut = String(
+        execFileSync(process.execPath, [gate], {
+          env: { ...process.env, GD_ENFORCED_SUITES_ROOT: root },
+          stdio: "pipe",
+        }),
+      );
+      return 0;
+    } catch (err) {
+      lastOut = String(err.stdout || "") + String(err.stderr || "");
+      return err.status;
+    }
+  };
+  try {
+    mkdirSync(join(root, ".github/workflows"), { recursive: true });
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    const workflow = join(root, ".github/workflows/frontend.yml");
+    // Built by interpolation: spelling the token here would make this file a
+    // carrier the real gate then demands in the enforced step.
+    const carrier = `if (${ENFORCED_CARRIER_TOKEN}) throw err;\nskip = "needs deps";\n`;
+    writeFileSync(join(root, "scripts/a.test.mjs"), carrier);
+    writeFileSync(join(root, "scripts/plain.test.mjs"), "// no deps\n");
+    // A longer variable sharing the prefix is not the token.
+    writeFileSync(
+      join(root, "scripts/near.test.mjs"),
+      `const x = ${ENFORCED_CARRIER_TOKEN}_OTHER;\n`,
+    );
+    writeFileSync(workflow, enforcedWorkflowFixture(["scripts/a.test.mjs"]));
+    assert.equal(run(), 0, lastOut);
+    assert.match(lastOut, /OK 1 installed-only suites/);
+
+    writeFileSync(join(root, "scripts/b.test.mjs"), carrier);
+    assert.equal(run(), 1, lastOut);
+    assert.match(lastOut, /missing from .*: scripts\/b\.test\.mjs/);
+
+    // A suite wording its skip differently is still a carrier: detection keys
+    // on the variable it reads, never on its skip text.
+    rmSync(join(root, "scripts/b.test.mjs"));
+    writeFileSync(
+      join(root, "scripts/c.test.mjs"),
+      `const expect = Boolean(${ENFORCED_CARRIER_TOKEN});\nconst skip = expect ? false : "optional deps absent";\n`,
+    );
+    assert.equal(run(), 1, lastOut);
+    assert.match(lastOut, /missing from .*: scripts\/c\.test\.mjs/);
+    writeFileSync(join(root, "scripts/b.test.mjs"), carrier);
+    rmSync(join(root, "scripts/c.test.mjs"));
+
+    writeFileSync(
+      workflow,
+      enforcedWorkflowFixture([
+        "scripts/a.test.mjs",
+        "scripts/b.test.mjs",
+        "scripts/gone.test.mjs",
+      ]),
+    );
+    assert.equal(run(), 1, lastOut);
+    assert.match(lastOut, /listed but not on disk: scripts\/gone\.test\.mjs/);
+
+    rmSync(join(root, "scripts/a.test.mjs"));
+    rmSync(join(root, "scripts/b.test.mjs"));
+    writeFileSync(
+      workflow,
+      enforcedWorkflowFixture(["scripts/plain.test.mjs"]),
+    );
+    assert.equal(run(), 1, lastOut);
+    assert.match(lastOut, /refusing a vacuous pass/);
+
+    rmSync(workflow);
+    assert.equal(run(), 1, lastOut);
+    assert.match(lastOut, /FAIL/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Carrier recognition: every equivalent read of the variable marks a suite;
+// any other code-level mention fails closed. The variable's name is spliced
+// in so this file's own code never reads it.
+const EXPECT_VAR = ENFORCED_CARRIER_TOKEN.split(".").at(-1);
+const UNSUPPORTED_READ = /unsupported GD_EXPECT_DEPS read in s\.mjs/;
+
+test("enforced-node-suites: a single-quoted bracket read is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process.env['${EXPECT_VAR}']) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: a double-quoted bracket read is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process.env["${EXPECT_VAR}"]) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: an optional-chaining read is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process?.env?.${EXPECT_VAR}) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: a read with whitespace around the dots is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process . env\n  . ${EXPECT_VAR}) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: destructuring from process.env is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(
+      `const { CI, ${EXPECT_VAR}: expect = "" } = process.env;`,
+      "s.mjs",
+    ),
+    true,
+  );
+});
+
+test("enforced-node-suites: a shorthand destructured binding fails closed at its use", () => {
+  assert.throws(
+    () =>
+      readsExpectDeps(
+        `const { ${EXPECT_VAR} } = process.env;\nif (${EXPECT_VAR}) x();`,
+        "s.mjs",
+      ),
+    UNSUPPORTED_READ,
+  );
+});
+
+test("enforced-node-suites: a shorthand binding with a default fails closed at its use", () => {
+  assert.throws(
+    () =>
+      readsExpectDeps(
+        `const { ${EXPECT_VAR} = "" } = process.env;\nif (${EXPECT_VAR}) x();`,
+        "s.mjs",
+      ),
+    UNSUPPORTED_READ,
+  );
+});
+
+test("enforced-node-suites: a backtick-quoted bracket read is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process.env[\`${EXPECT_VAR}\`]) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: an optional bracket read is a carrier", () => {
+  assert.equal(
+    readsExpectDeps(`if (process.env?.["${EXPECT_VAR}"]) x();`, "s.mjs"),
+    true,
+  );
+});
+
+test("enforced-node-suites: an unrecognized read fails closed", () => {
+  assert.throws(
+    () =>
+      readsExpectDeps(
+        `const e = process.env;\nif (e.${EXPECT_VAR}) x();`,
+        "s.mjs",
+      ),
+    UNSUPPORTED_READ,
+  );
+});
+
+test("enforced-node-suites: the name held in a string key fails closed", () => {
+  assert.throws(
+    () =>
+      readsExpectDeps(
+        `const k = "${EXPECT_VAR}";\nif (process.env[k]) x();`,
+        "s.mjs",
+      ),
+    UNSUPPORTED_READ,
+  );
+});
+
+test("enforced-node-suites: the name inside text or a comment is neither", () => {
+  assert.equal(
+    readsExpectDeps(
+      `const yaml = '  ${EXPECT_VAR}: "1"';\n// process.env.${EXPECT_VAR}\n`,
+      "s.mjs",
+    ),
+    false,
+  );
+});
+
+test("enforced-node-suites: a suite it cannot scan fails closed", () => {
+  assert.throws(
+    () => readsExpectDeps("const a = 'unterminated\nconst b = 1;\n", "s.mjs"),
+    /could not scan s\.mjs/,
+  );
 });
