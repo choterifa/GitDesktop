@@ -29,6 +29,7 @@ import {
   gitlabAxisCap,
   useRemoteListFilter,
 } from "@/features/conversations/useRemoteListFilter";
+import { useScopeProbeReason } from "@/features/conversations/useScopeProbeReason";
 import { presentError } from "@/lib/error-summary";
 import type { IssueStateFilter } from "@/lib/git/api";
 import {
@@ -58,9 +59,8 @@ import {
 import { formatStoryPoints, type JiraIssueInfo } from "@/lib/jira/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import {
-  useLensGate,
+  useLensState,
   useRemoteSlug,
-  useRepoLens,
   useSetRepoLens,
 } from "@/lib/repo-lens/queries";
 import { useUiStore } from "@/lib/stores/ui";
@@ -123,8 +123,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   // The origin|upstream lens (GitHub forks only) scopes ONLY the remote section
   // below — local + Jira issues are lens-independent. It decides which repo feeds
   // `remotes`, not how rows are partitioned.
-  const lens = useRepoLens(repoPath);
-  const lensGate = useLensGate(repoPath);
+  const { lens, gate: lensGate } = useLensState(repoPath);
   const setLens = useSetRepoLens(repoPath);
   const upstreamSlug = useRemoteSlug(repoPath, "upstream", lens === "upstream");
   const providerName = providerLabel(provider);
@@ -142,6 +141,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   const implemented = gh.data?.implemented;
   const canFilterMine = forgeFeatureReady(gh.data, "listFilterMine");
   const probe = forgeProbeState(gh);
+  const scopeProbeReason = useScopeProbeReason(repoPath);
   const canFilterAuthor = forgeFeatureReady(gh.data, "listFilterAuthor");
   // Borrowed from the label-editing flag: a provider with no issue labels has
   // nothing for the forge to filter by — the pick runs client-side there.
@@ -469,10 +469,12 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
           <ConversationPresetSwitcher
             feature="issues"
             preset={listFilter.preset}
+            storedPreset={listFilter.storedPreset}
             onPreset={listFilter.setPreset}
             canFilterMine={canFilterMine}
             canGroupByReview={false}
             disabledReason={listFilter.prefsReason}
+            probeReason={scopeProbeReason}
           />
         }
         lensControl={<RepoLensSwitcher repoPath={repoPath} />}
@@ -568,6 +570,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
         onToggleLocal={toggleLocal}
         onToggleRemote={toggleRemote}
         ghPending={gh.isPending}
+        ghProbeFailed={gh.errorUpdateCount > 0}
         ghReady={ghReady}
         remoteNotReadySlot={bitbucketNotReadySlot}
         listPending={issueList.isPending}

@@ -43,6 +43,7 @@ import {
   gitlabAxisCap,
   useRemoteListFilter,
 } from "@/features/conversations/useRemoteListFilter";
+import { useScopeProbeReason } from "@/features/conversations/useScopeProbeReason";
 import { clipTitleFromText } from "@/lib/clip-title";
 import { presentError } from "@/lib/error-summary";
 import type { PrStateFilter } from "@/lib/git/api";
@@ -178,6 +179,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   const canFilterLabel = forgeFeatureReady(gh.data, "mrLabels");
   const canGroupByReview = forgeFeatureReady(gh.data, "reviewGrouping");
   const probe = forgeProbeState(gh);
+  const scopeProbeReason = useScopeProbeReason(repoPath);
   // "closed" matches the Closed tab: closed and merged alike.
   const [stateFilter, setStateFilter] = useState<PrStateFilter>("open");
   // How many remote PRs to load; "Load more" bumps it. A tab switch (open/closed)
@@ -988,10 +990,12 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
           <ConversationPresetSwitcher
             feature="pulls"
             preset={listFilter.preset}
+            storedPreset={listFilter.storedPreset}
             onPreset={listFilter.setPreset}
             canFilterMine={canFilterMine}
             canGroupByReview={canGroupByReview}
             disabledReason={listFilter.prefsReason}
+            probeReason={scopeProbeReason}
           />
         }
         lensControl={<RepoLensSwitcher repoPath={repoPath} />}
@@ -1137,6 +1141,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
         onToggleLocal={toggleLocal}
         onToggleRemote={toggleRemote}
         ghPending={gh.isPending}
+        ghProbeFailed={gh.errorUpdateCount > 0}
         ghReady={ghReady}
         listPending={prList.isPending}
         remoteError={prList.isError}

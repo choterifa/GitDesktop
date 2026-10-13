@@ -107,6 +107,7 @@ import {
   settlePane,
   startPaneHold,
 } from "./diff-pane-slots";
+import { restingDiffMessage } from "./diff-resting-message";
 import {
   collapseAllContext,
   diffRendersRows,
@@ -165,8 +166,8 @@ export function DiffViewer({ repoPath }: { repoPath: string }) {
   const target = paneTarget(repoPath, file, isConflicted);
 
   // The last settled view stays painted while a newly selected file prepares
-  // out of sight, stacked invisibly over it, so a click swaps the pane once
-  // (see diff-pane-slots.ts).
+  // out of sight, clipped over it, so a click swaps the pane once (see
+  // diff-pane-slots.ts).
   const [storedHold, setHold] = useState(() => startPaneHold(target));
   const hold = retargetPane(storedHold, target);
   if (hold !== storedHold) setHold(hold);
@@ -208,15 +209,12 @@ export function DiffViewer({ repoPath }: { repoPath: string }) {
         <ConflictFileView repoPath={repoPath} path={view.key} />
       );
     }
-    const treeClean =
-      !status.isPending && (status.data?.entries.length ?? 0) === 0;
     return (
       <DiffPlaceholder
-        message={
-          treeClean
-            ? "No changes to review"
-            : "Select a file to see its changes"
-        }
+        message={restingDiffMessage(
+          status.isPending,
+          status.data?.entries.length ?? 0,
+        )}
       />
     );
   };
@@ -264,15 +262,18 @@ function paneTarget(
 const SLOT_FRAME_CLASS: Record<SlotPhase, string> = {
   shown: "h-full",
   held: "h-full",
-  // Stacked invisibly over the held slot (absolute, rendered after it) at full
-  // size, so container queries, the split/unified measure and row measurement
-  // are final before it shows.
-  preparing: "invisible absolute inset-0",
+  // Stacked over the held slot (absolute, rendered after it) at full size, so
+  // container queries, the split/unified measure and row measurement are final
+  // before it shows. Hidden by a full clip, never `invisible`: the vendored
+  // Button's transition-all animates inherited visibility, so its buttons would
+  // paint a frame late at promotion. Never opacity either: the frame's
+  // PLACEHOLDER_FADE would fade the slot in instead of showing it at once.
+  preparing: "absolute inset-0 [clip-path:inset(50%)]",
 };
 
 /** The no-file placeholder or a conflict view. Only the placeholder is ever
- *  held (a first selection prepares out of sight, stacked invisibly over it),
- *  and undimmed: it isn't content. */
+ *  held (a first selection prepares out of sight, clipped over it), and
+ *  undimmed: it isn't content. */
 function PaneFrame({ held, children }: { held: boolean; children: ReactNode }) {
   return (
     <div className="h-full" inert={held}>
