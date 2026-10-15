@@ -34,12 +34,16 @@ import {
   CHECKS,
   cookSource,
   cookStringBody,
+  EXTENSIONS,
   generateChordCalls,
+  isPreparingSlotHost,
   okReportLine,
+  preparingSlotSites,
   reachesGitQueriesInternal,
   reachesQueriesInternalFromSibling,
   runCheck,
   scopePinFailure,
+  SLOT_ROLES,
   splitTopLevel,
   stripComments,
   unscannedScripts,
@@ -244,6 +248,7 @@ const diffStatPair = scanner("hand-rolled-diff-stat");
 const diffStatSlot = scanner("list-row-diff-stat-slot");
 const kindBadge = scanner("kind-badge-single-source");
 const nullFallback = scanner("null-suspense-fallback");
+const preparingSlotHide = scanner("preparing-slot-hide");
 const bareGroupLabel = scanner("bare-group-label");
 const unguardedDispatcher = scanner("unguarded-binding-dispatcher");
 const titledDisabledTrigger = scanner("titled-disabled-trigger");
@@ -1455,6 +1460,993 @@ test("null-suspense-fallback leaves a real fallback and a forwarded prop alone",
     "<Suspense fallback={compact ? null : <Skeleton />}>{kids}</Suspense>",
   ])
     assert.deepEqual(nullFallback(source), [], `should ignore ${source}`);
+});
+
+/** Every hide utility preparing-slot-hide bans: visibility, each opacity
+ *  below full, display, `sr-only`'s 1px box, and descendant variants of them. */
+const SLOT_HIDE_UTILITIES = [
+  "invisible",
+  "collapse",
+  "[visibility:hidden]",
+  "[visibility:collapse]",
+  "[visibility:hidden_!important]",
+  "opacity-0",
+  "opacity-5",
+  "opacity-50",
+  "opacity-80",
+  "opacity-[0]",
+  "opacity-[.0]",
+  "opacity-[0.0]",
+  "opacity-[0.5]",
+  "opacity-[0%]",
+  "opacity-[50%]",
+  "opacity-[0_!important]",
+  "[opacity:0]",
+  "[opacity:0.5]",
+  "[opacity:50%]",
+  // An opacity the scan cannot read fails closed.
+  "opacity-[var(--x)]",
+  "[opacity:calc(1-var(--y))]",
+  "hidden",
+  "[display:none]",
+  "[display:none!important]",
+  "[content-visibility:hidden]",
+  // A value the scan cannot read: Tailwind v4's variable shorthand, and a
+  // visibility or display value that is not a plain keyword.
+  "opacity-(--slot-o)",
+  "[visibility:var(--v)]",
+  "[display:var(--d)]",
+  "sr-only",
+  // Descendant variants hide the slot's content the same way: intended.
+  "[&_svg]:invisible",
+  "*:hidden",
+  "**:opacity-0",
+];
+/** Tokens a preparing entry may carry: none of them hides. */
+const SLOT_NEVER_HIDES = [
+  "visible",
+  "md:visible",
+  "overflow-hidden",
+  "aria-hidden:flex",
+  "data-[hidden]:block",
+  "hidden-x",
+  "collapse-x",
+  "not-sr-only",
+  "bg-black/0",
+  "text-white/50",
+  "group-hover:opacity-100",
+  "opacity-100",
+  "opacity-[1]",
+  "[opacity:1]",
+  "opacity-[100%]",
+  "[visibility:visible]",
+  "[display:flex]",
+];
+const slotHideSpellings = (utility) => [
+  utility,
+  `md:${utility}`,
+  `data-[x]:${utility}`,
+  `!${utility}`,
+  `${utility}!`,
+  `md:!${utility}`,
+];
+const slotRecord = (value) =>
+  `const SLOT_CLASS: Record<Role, string> = { shown: "h-full", held: "h-full", preparing: ${value} };`;
+/** A one-line slot-host prelude: the vocabulary puts what follows in slot
+ *  context, and its clipped entry keeps the host check satisfied. */
+const SLOT_HOST =
+  'import type { SlotPhase } from "@/features/diff/diff-pane-slots"; const SLOT: Record<SlotPhase, string> = { shown: "h-full", held: "h-full", preparing: "absolute inset-0 [clip-path:inset(50%)]" };';
+const inHost = (source) => `${SLOT_HOST}\n${source}`;
+const assertSlotFlags = (sources, lines = [1]) => {
+  for (const source of sources)
+    assert.deepEqual(preparingSlotHide(source), lines, source);
+};
+const assertSlotPasses = (sources) => {
+  for (const source of sources)
+    assert.deepEqual(preparingSlotHide(source), [], source);
+};
+/** Each source after the host prelude: flagged on its own first line. */
+const assertHostFlags = (sources, lines = [2]) =>
+  assertSlotFlags(sources.map(inHost), lines);
+const assertHostPasses = (sources) => assertSlotPasses(sources.map(inHost));
+
+test("preparing-slot-hide flags every hide utility in a preparing entry", () => {
+  for (const utility of SLOT_HIDE_UTILITIES)
+    assertSlotFlags(
+      slotHideSpellings(utility).map((cls) =>
+        slotRecord(`"absolute inset-0 ${cls}"`),
+      ),
+    );
+  // Every token that only looks like a hide passes, in one entry each.
+  assertSlotPasses(
+    SLOT_NEVER_HIDES.map((cls) => slotRecord(`"absolute inset-0 ${cls}"`)),
+  );
+});
+
+test("preparing-slot-hide reads every preparing key form", () => {
+  assertSlotFlags([
+    'const C = { shown: "", preparing: "absolute invisible" };',
+    'const C = { shown: "", "preparing": "absolute invisible" };',
+    "const C = { shown: '', 'preparing': 'absolute invisible' };",
+    'const C = { shown: "", ["preparing"]: "absolute invisible" };',
+    "const C = { shown: '', ['preparing']: 'absolute invisible' };",
+    'const C = { shown: "", [`preparing`]: "absolute invisible" };',
+    'const C = { shown: "", ["preparing" as const]: "absolute invisible" };',
+    'const C = { shown: "", preparing() { return "absolute invisible"; } };',
+    'const C = { shown: "", get preparing() { return "absolute invisible"; } };',
+  ]);
+});
+
+test("preparing-slot-hide reads a preparing entry's whole class expression", () => {
+  assertSlotFlags([
+    slotRecord('cn("absolute inset-0", x && "opacity-0")'),
+    slotRecord('cn("absolute inset-0", { invisible: live })'),
+    slotRecord('"absolute " + "invisible"'),
+    slotRecord('["absolute", "invisible"]'),
+    slotRecord("`absolute ${x} invisible`"),
+    slotRecord('`absolute ${x ? `invisible` : ""}`'),
+    slotRecord('live ? "absolute" : "absolute invisible"'),
+    slotRecord('clsx("absolute", live ? "" : twMerge("hidden"))'),
+    // `||` and `??` yield their left operand: its classes apply.
+    'const C = { shown: "h-full", preparing: cn((compact ? "invisible" : "") || "absolute [clip-path:inset(50%)]") };',
+    'const C = { shown: "h-full", preparing: cn((compact ? "invisible" : null) ?? "absolute") };',
+  ]);
+  // An unreadable left operand of `||` or `??` fails as unreadable.
+  assertSlotFlags([
+    'function f(base) { return { shown: "h-full", preparing: cn(base || "absolute [clip-path:inset(50%)]") }; }',
+    'function f(extra) { return { shown: "h-full", preparing: cn(extra ?? "absolute") }; }',
+  ]);
+  // A flag-named read in a value position is a value: a member read is
+  // unreadable, and an alias is read through its initializer.
+  assertSlotFlags([
+    'function f(classes) { return { shown: "h-full", preparing: cn(classes.preparing || "absolute [clip-path:inset(50%)]") }; }',
+  ]);
+  assertSlotFlags(
+    [
+      'const hideCls = role === "preparing" && "invisible";\nconst C = { shown: "h-full", preparing: cn(hideCls || "absolute [clip-path:inset(50%)]") };',
+    ],
+    [2],
+  );
+  // A boolean left operand contributes no class.
+  assertSlotPasses([
+    'const C = { shown: "h-full", preparing: cn(live === false || "absolute [clip-path:inset(50%)]") };',
+  ]);
+  // The formatter's multi-line map, reported on the key's line.
+  const wrapped = [
+    "const SLOT_FRAME_CLASS: Record<Role, string> = {",
+    '  shown: "h-full",',
+    '  held: "h-full",',
+    "  // Stacked over the held slot at full size.",
+    "  preparing: cn(",
+    '    "absolute inset-0",',
+    '    "invisible",',
+    "  ),",
+    "};",
+  ].join("\n");
+  assertSlotFlags([wrapped], [5]);
+});
+
+test("preparing-slot-hide flags a class arm guarded by the preparing role", () => {
+  assertHostFlags(
+    [
+      'role === "preparing" && "invisible"',
+      'role == "preparing" && "invisible"',
+      'role === "preparing" ? "absolute invisible" : "h-full"',
+      'role == "preparing" ? "invisible" : ""',
+      '"preparing" === role && "invisible"',
+      '"preparing" == slot.role ? "invisible" : ""',
+      "role === 'preparing' && 'invisible'",
+      "'preparing' === role ? 'invisible' : ''",
+      '(role === "preparing") && "invisible"',
+      '("preparing" === role) ? "invisible" : ""',
+      'role === "preparing" && `absolute ${x} invisible`',
+      'preparing && "invisible"',
+      'preparing ? "absolute invisible" : "h-full"',
+      'isPreparing && "invisible"',
+      'isPreparing ? "invisible" : ""',
+      '(isPreparing) && "invisible"',
+      // && chains after the guard.
+      'role === "preparing" && live && "invisible"',
+      'isPreparing && !reduced && "opacity-0"',
+      // Disjunctions.
+      '(role === "preparing" || role === "held") && "invisible"',
+      'role === "preparing" || role === "held" ? "invisible" : ""',
+      'role !== "preparing" || "invisible"',
+      // Elimination over the other roles.
+      'phase !== "shown" && "invisible"',
+      'role !== "shown" && role !== "held" && "invisible"',
+      'role === "shown" ? "h-full" : role === "held" ? "h-full" : "absolute inset-0 invisible"',
+      // A negated guard's alternate.
+      'role !== "preparing" ? "h-full" : "absolute invisible"',
+      '!isPreparing ? "" : "invisible"',
+      // Mixed negation, double negation, flag comparisons and members.
+      '!(live && role === "preparing") && "invisible"',
+      '!!isPreparing && "invisible"',
+      'isPreparing === true && "invisible"',
+      'isPreparing !== false && "invisible"',
+      '!(isPreparing === false) && "invisible"',
+      'slot.isPreparing && "invisible"',
+      'props.preparing && "invisible"',
+      // Element-access flags.
+      'slot["isPreparing"] && "invisible"',
+      "slot['preparing'] && 'invisible'",
+      "slot[`isPreparing`] && 'invisible'",
+      // Any operand against the literal.
+      '"preparing" === roles[i] && "invisible"',
+      '"preparing" === roleOf(slot) && "invisible"',
+      'role===("preparing") && "invisible"',
+      'slot?.role === "preparing" && "invisible"',
+      // Compound consequents.
+      'role === "preparing" ? cn("absolute", "invisible") : "h-full"',
+      'role === "preparing" && ("absolute invisible")',
+      'isPreparing && ["absolute", "invisible"]',
+      // A template literal role.
+      'role === `preparing` && "invisible"',
+    ].map((expr) => `const c = cn("h-full", ${expr});`),
+  );
+  assertHostFlags([
+    // A bare guard outside any class call is a site when its arm is class code.
+    'const c = role === "preparing" ? "absolute invisible" : "h-full";',
+    // JSX arms.
+    'const x = <>{role === "preparing" ? <div className="absolute invisible" /> : <div />}</>;',
+    // clsx objects: the key's classes apply when the value is true.
+    'const c = cn("h-full", { invisible: role === "preparing" });',
+    'const c = cn("h-full", { "absolute invisible": isPreparing });',
+    // A className position needs no literal arm.
+    "const x = <div className={isPreparing ? hideClass : undefined} />;",
+  ]);
+  // An alias: a const holding a role condition is that condition.
+  assertHostFlags(
+    [
+      'const hiding = role === "preparing";\nconst C = cn("h-full", hiding && "invisible");',
+    ],
+    [3],
+  );
+  assertHostPasses([
+    'const isShown = role === "shown";\nconst C = cn("h-full", isShown && "invisible");',
+    // A repeated reference to one alias is no cycle.
+    'const shown = role === "shown";\nconst C = cn(((shown && compact) || (shown && wide)) && "invisible");',
+    // A true alias cycle terminates, as an unknown condition.
+    'const a = b; const b = a; const C = cn("h-full", a && "invisible");',
+  ]);
+  // A role condition handed to a class helper the scan cannot read.
+  assertHostFlags(
+    [
+      'const slotClass = (p) => (p ? "absolute invisible" : "h-full");\nconst E = () => <div className={slotClass(role === "preparing")} />;',
+    ],
+    [3],
+  );
+  // The role condition may sit anywhere in the helper's arguments.
+  assertHostFlags([
+    'const E = () => <div className={slotClass({ hide: role === "preparing" })} />;',
+  ]);
+  // A cycle through an alias still reads the atom beside it.
+  assertHostFlags([
+    'const a = b || role === "preparing"; const b = a; const C = cn("h-full", a && "invisible");',
+  ]);
+  // An alias the scan cannot resolve fails closed, whatever its arm holds.
+  for (const arm of ['"invisible"', '"absolute"'])
+    assertHostFlags(
+      [
+        `const hiding = role === "preparing";\nfunction g(hiding) { return hiding; }\nconst C = cn("h-full", hiding && ${arm});`,
+      ],
+      [4],
+    );
+  // A role argument outside class code is no class helper.
+  assertHostPasses(['expirePane(h, "preparing");', 'setRole("preparing");']);
+});
+
+test("preparing-slot-hide flags a role branch's literals", () => {
+  assertHostFlags([
+    'function f(role) { switch (role) { case "preparing": return "absolute invisible"; default: return "h-full"; } }',
+    'function f(role) { switch (role) { case "held": case "preparing": return "absolute invisible"; default: return "h-full"; } }',
+    'function f(role) { switch (role) { case "held": return "h-full"; default: return "absolute invisible"; } }',
+    'function f(role) { if (role === "preparing") return "absolute invisible"; return "h-full"; }',
+    'function f(role) { if (role === "shown") { return "h-full"; } else { return "absolute invisible"; } }',
+    // Only the last statement can end a clause: a try never does, and a
+    // labelled break to a label inside the clause leaves only that block.
+    'switch (role) { case "preparing": try { note(); } catch { break; } case "shown": return "invisible"; }',
+    'switch (role) { case "preparing": inner: { break inner; } case "shown": return "invisible"; }',
+    // A clause that does not end falls through into the next one.
+    'const f = (role) => { switch (role) { case "preparing": note(); case "shown": return "invisible"; } return "h-full"; };',
+    // `switch (true)`: each clause's condition is a role guard.
+    'const f = (r) => { switch (true) { case r === "preparing": return "absolute invisible"; default: return "h-full"; } };',
+    'switch (true) { case r === "shown": return "h-full"; default: return "absolute invisible"; }',
+  ]);
+  // Branches whose literals apply to other roles only.
+  assertHostPasses([
+    'function f(role) { switch (role) { case "preparing": return "absolute"; default: return "invisible"; } }',
+    'function f(role) { if (role === "preparing") return "absolute"; else return "invisible"; }',
+    // `break` ends the preparing clause, so nothing falls through.
+    'const f = (role) => { switch (role) { case "preparing": break; case "shown": return "invisible"; } return "h-full"; };',
+    'switch (true) { case r === "held": return "invisible"; default: return "h-full"; }',
+    // Every case is tested before `default`, wherever it sits.
+    'switch (true) { default: return "invisible"; case role === "preparing": return "absolute"; }',
+    // An if/else whose two arms both return ends the clause.
+    'switch (role) { case "preparing": if (a) return "x"; else return "y"; case "shown": return "invisible"; }',
+  ]);
+});
+
+test("preparing-slot-hide flags a class token whose variant names the role", () => {
+  assertHostFlags([
+    'const x = <div className="h-full data-[role=preparing]:invisible" />;',
+    'const c = "h-full data-preparing:hidden";',
+    'const c = cn("h-full", "group-data-[slot=preparing]:opacity-0");',
+    'const c = "h-full data-[state=Preparing]:invisible";',
+  ]);
+  // Inside a slot-shaped map, without the vocabulary.
+  assertSlotFlags([
+    'const C = { shown: "", preparing: "absolute [clip-path:inset(50%)]", note: "data-[role=preparing]:invisible" };',
+  ]);
+  assertHostPasses(['const c = "h-full data-[role=preparing]:block";']);
+});
+
+test("preparing-slot-hide fails class code it cannot read in a preparing slot", () => {
+  assertHostFlags([
+    'import { SLOT_HIDE } from "./slot"; const C = { preparing: SLOT_HIDE };',
+    "const C = { preparing: SLOT_HIDE };",
+    'function f(base) { return { preparing: cn(base, "absolute") }; }',
+    'const C = { preparing: slotClass("preparing") };',
+    'let hide = "absolute"; const C = { preparing: hide };',
+    "const C = { preparing: THEME.preparing };",
+    'const C = { preparing: cn("absolute", ...extra) };',
+    'const c = cn("h-full", isPreparing && hideFor(slot));',
+  ]);
+  // A same-file const is read through: the hide it holds fails as a hide.
+  assertHostFlags([
+    'const HIDE = "invisible"; const C = { shown: "", preparing: HIDE };',
+    'const BASE = "absolute"; const HIDE = cn(BASE, "opacity-0"); const C = { preparing: HIDE };',
+  ]);
+  assertHostPasses([
+    'const BASE = "absolute"; const C = { preparing: BASE };',
+    'const C = { preparing: cn("absolute", live && "z-10", undefined, null, false, "") };',
+  ]);
+  // Any other binding of the name makes a const unresolvable.
+  const clip = 'const HIDE = "absolute [clip-path:inset(50%)]";';
+  const entry = 'const C = { shown: "", preparing: HIDE };';
+  assertHostFlags(
+    [
+      'import { HIDE } from "./x";\nfunction g() { const HIDE = "h-full"; return HIDE; }\nconst C = { shown: "h-full", preparing: HIDE };',
+    ],
+    [4],
+  );
+  assertHostFlags(
+    [
+      'import HIDE from "./x";',
+      'import * as HIDE from "./x";',
+      "const { HIDE } = props;",
+      "const [HIDE] = list;",
+      "try { run(); } catch (HIDE) {}",
+      "function HIDE() {}",
+      "class HIDE {}",
+      "function f(HIDE) {}",
+      "const f = (HIDE) => HIDE;",
+      "let HIDE;",
+    ].map((other) => `${clip} ${other} ${entry}`),
+  );
+  // A destructuring key that binds another name leaves the const readable.
+  assertHostPasses([`${clip} const { HIDE: other } = props; ${entry}`]);
+});
+
+test("preparing-slot-hide fails any other role mention beside a hide", () => {
+  assertHostFlags([
+    'const c = cn("h-full", ["preparing"].includes(role) && "invisible");',
+    'const c = isRole(r, "preparing") && "invisible";',
+    'const m = new Map([["preparing", "absolute invisible"]]);',
+    'const m = Object.fromEntries([["preparing", "absolute invisible"]]);',
+    'const preparing = "absolute invisible"; const C = { shown, held, preparing };',
+    // A flag read the guard grammar did not read.
+    'const c = Boolean(isPreparing) && "invisible";',
+  ]);
+});
+
+test("preparing-slot-hide analyses only slot context", () => {
+  // Outside a slot-host file and a slot-shaped map, nothing is a site:
+  // "preparing" is also a merge status, and `isPreparing` a loading flag.
+  assertSlotPasses([
+    'import { Loader2Icon, CheckIcon } from "lucide-react";\nconst ICONS = { preparing: Loader2Icon, ready: CheckIcon };',
+    "setState({ preparing: isLoading });",
+    "const s = { preparing: loading, ready: done };",
+    'function B({ merge }) { if (merge.state === "preparing") { return <Badge className="hidden md:inline">Preparing</Badge>; } return null; }',
+    'const P = { blocked: "text-destructive", preparing: "opacity-60 animate-pulse", clean: "" };',
+    "const X = ({ className }) => <div>{isPreparing && <Loader className={className} />}</div>;",
+    // A preparing key beside a held or shown key whose value is no class.
+    "setState({ preparing: isLoading, shown: isOpen });",
+    // The same const-keyed maps with only the clip.
+    'const k = "preparing"; export const C = { shown: "h-full", held: "h-full", [k]: "absolute [clip-path:inset(50%)]" };',
+    'const k0 = "preparing"; const k = k0; export const C = { shown: "h-full", held: "h-full", [k]: "absolute [clip-path:inset(50%)]" };',
+    'const c = cn("h-full", isPreparing && "opacity-50");',
+  ]);
+  // A slot shape flags without the vocabulary.
+  assertSlotFlags([
+    'const C = { shown: "h-full", held: "h-full", preparing: "absolute invisible" };',
+    'const C = { preparing: "invisible", shown: "h-full" };',
+    '@Comp({ shown: "h-full", held: "h-full", preparing: "absolute invisible" }) class A {}',
+    // A preparing key read through same-file consts, one hop or two.
+    'const k = "preparing"; export const C = { shown: "h-full", held: "h-full", [k]: "absolute invisible" };',
+    'const k0 = "preparing"; const k = k0; export const C = { shown: "h-full", held: "h-full", [k]: "absolute invisible" };',
+    // A class body takes the same shape test.
+    'class S { shown = "h-full"; preparing = "absolute invisible"; }',
+    // A catch clause's pattern default.
+    'try { a(); } catch ({ c = { shown: "", preparing: "invisible" } }) {}',
+    // Other code the parser keeps: a class's `extends` expression, an enum
+    // initializer and a destructuring default.
+    'class A extends mixin({ shown: "", preparing: "invisible" }) {}',
+    'enum E { A = pick({ shown: "", preparing: "invisible" }) }',
+    'const { c = { shown: "", preparing: "invisible" } } = props;',
+  ]);
+});
+
+test("preparing-slot-hide refuses a file it cannot read", () => {
+  // ts-mask's documented ambiguity: postfix `++` then `/` reads as a regex.
+  assert.throws(
+    () => preparingSlotHide("const z = x++ / 2;"),
+    /preparing-slot-hide: cannot lex <input>: unterminated regex literal/,
+  );
+  // A bracket that never closes is a lex failure, located by line.
+  assert.throws(
+    () => preparingSlotHide('const a = 1;\nconst x = ("preparing";'),
+    /preparing-slot-hide: cannot lex <input>: unclosed `\(` at line 2/,
+  );
+  // A nesting deep enough to exhaust the stack names the file. The depth is
+  // far past any stack budget, so the result never rides V8's frame size; the
+  // lexer and bracket matching are iterative, so the cost stays linear.
+  const check = CHECKS.find((c) => c.name === "preparing-slot-hide");
+  const depth = 50000;
+  const parens = `const x = ${"(".repeat(depth)}"preparing"${")".repeat(depth)};`;
+  const ternary = `const x = ${'a ? "b" : '.repeat(depth)}"preparing";`;
+  for (const deep of [parens, ternary])
+    assert.throws(
+      () => check.scan(view(deep), "src/features/x/deep.ts"),
+      /preparing-slot-hide: cannot read src\/features\/x\/deep\.ts: /,
+    );
+});
+
+test("preparing-slot-hide passes the hosts' shapes and the pinned non-sites", () => {
+  assertSlotPasses([
+    // The real hosts' map values.
+    slotRecord('"absolute inset-0 [clip-path:inset(50%)]"'),
+    // DiffViewer's frame and run-slots' slot.
+    [
+      'import type { SlotPhase } from "@/features/diff/diff-pane-slots";',
+      'const C = { shown: "h-full", held: "h-full", preparing: "absolute inset-0 [clip-path:inset(50%)]" };',
+      "export const F = ({ phase }) => (",
+      "  <div",
+      '    className={cn(SLOT_FRAME_CLASS[phase], PLACEHOLDER_FADE, phase === "held" && "opacity-80 delay-100")}',
+      '    inert={phase !== "shown"}',
+      "  />",
+      ");",
+      'export const R = ({ role }) => <HeldFrame holding={role === "held"} inert={role === "preparing"} className={SLOT_CLASS[role]} />;',
+    ].join("\n"),
+  ]);
+  assertHostPasses([
+    // Negations that exclude the preparing slot.
+    'const c = cn("h-full", !(role === "preparing") && "invisible");',
+    'const c = cn("h-full", !(isPreparing) && "hidden");',
+    'const c = cn("h-full", !("preparing" === role) && "invisible");',
+    'const c = cn("h-full", role !== "preparing" && "invisible");',
+    'const c = cn("h-full", !preparing && "invisible");',
+    'const c = cn("h-full", role != "preparing" ? "invisible" : "");',
+    'const c = cn("h-full", !isPreparing ? "invisible" : "");',
+    'const c = cn("h-full", isPreparing === false && "invisible");',
+    'const c = cn("h-full", !slot["isPreparing"] && "invisible");',
+    // Context propagation: the last arm applies to the shown slot only.
+    'const c = role === "preparing" ? "a" : role === "held" ? "b" : "invisible";',
+    // Entries keyed by another role narrow what their guards can reach.
+    'const C = { held: role === "preparing" && "invisible" };',
+    // Intended: a held-keyed sub-map styles the held slot, not the preparing one.
+    'const C = { held: { preparing: "absolute invisible" } };',
+    // Unknown conditions with no role atom, and a flag as a value.
+    'const c = preparing?.x ? "invisible" : "";',
+    'const c = preparing ?? "invisible";',
+    'const c = ready ? preparing : "invisible";',
+    // Type positions.
+    'interface SlotMode { preparing: "hidden" | "clipped"; shown: "visible" }',
+    'type T = { preparing: "hidden" };',
+    'function f(x: { preparing: "hidden" }) {}',
+    'const C: { preparing: string } = { preparing: "absolute" };',
+    // A label map, a role value, a non-class array and an inert attribute.
+    'const LABELS = { preparing: "Preparing merge…", ready: "Ready" };',
+    'const slot = { key: hold.target, role: "preparing" };\nconst X = () => <div className="hidden md:flex" />;',
+    'const BLOCKING = ["blocked", "preparing", "unknown"] as const;\nconst X = () => <div className="hidden" />;',
+    'const X = () => <><div inert={role === "preparing"} /><span className="hidden @md/staging-pane:flex" /></>;',
+    // A comment naming every banned utility beside a preparing key.
+    [
+      "const SLOT_CLASS = {",
+      '  shown: "h-full",',
+      `  // Never ${SLOT_HIDE_UTILITIES.join(", ")}.`,
+      '  preparing: "absolute inset-0 [clip-path:inset(50%)]", /* not "invisible" */',
+      "};",
+    ].join("\n"),
+    // A non-class arm outside any class position.
+    'const view = phase === "held" ? slotView : target;',
+  ]);
+});
+
+test("preparing-slot-hide lexes JSX text with an apostrophe", () => {
+  // JSX text is blanked, so its apostrophe ends nothing.
+  assertSlotPasses([
+    "const L = { preparing: <span>it's loading</span>, held: <span>held</span> };\nexport const X = () => <div className=\"hidden md:flex\" />;",
+  ]);
+});
+
+test("preparing-slot-hide known gaps stay unread", () => {
+  const bs = String.fromCharCode(92);
+  const held =
+    'const S2 = { shown: "h-full", held: "h-full invisible", preparing: "absolute [clip-path:inset(50%)]" };';
+  // Not handled yet; each is pinned at its current result, so a change here
+  // is deliberate. In a slot-host file, so slot context is no excuse.
+  assertHostPasses([
+    // cva compound variants.
+    'const v = cva("h-full", { compoundVariants: [{ role: "preparing", class: "invisible" }] });',
+    // JSX props named for the role.
+    'const X = () => <Slot role="preparing" className="absolute invisible" />;',
+    'const X = () => <TwoSlotHost preparing="absolute invisible" />;',
+    'const X = () => <TwoSlotHost preparingClassName="absolute invisible" />;',
+    // Enum or constant roles in a comparison.
+    'const c = cn("h-full", role === SlotRole.Preparing && "invisible");',
+    // Control-flow narrowing.
+    'function f(role) { if (role !== "preparing") return "h-full"; return "absolute invisible"; }',
+    // An `inert:` variant.
+    'const c = "absolute inert:invisible";',
+    // Style objects.
+    'const X = () => <div style={{ visibility: "hidden" }} />;',
+    // A flag tested only in a loop condition.
+    'while (isPreparing) { el.className = "invisible"; }',
+    // A helper's result hoisted out of the class position.
+    'const cls = slotClass(role === "preparing");\nconst E = () => <div className={cls} />;',
+    // Collapsed-size hides (size-0, h-0/w-0 with an overflow clip, scale-0,
+    // max-h-0): common layout idioms, so they stay out of the hide set.
+    'const C = { preparing: "absolute size-0 overflow-hidden" };',
+    // A render-site arm that replaces the map entry for the preparing slot
+    // without a hide; a statement-level branch that renders the slot without
+    // a className; an inline clip-path style.
+    'const E = ({ r }) => <div className={r === "preparing" ? "absolute inset-0" : SLOT[r]} />;',
+    'function f(r) { if (r === "preparing") return <div className="absolute" />; }',
+    'function f(r) { if (r === "preparing") return <Skeleton />; return <div className={SLOT[r]} />; }',
+    'const E = ({ r }) => <div className={SLOT[r]} style={{ clipPath: "none" }} />;',
+    // An identifier-escaped key: the identifier lexer stops at the backslash.
+    `const R = { shown: "h-full", ${bs}u0070reparing: "absolute inset-0" };`,
+    // A map-entry key the scan cannot pin to one value is taken as the role
+    // in force: a parameter (with a default, or not the one the guard tests),
+    // a destructured binding, a `let`, an import, a name bound twice, and a
+    // member chain of `.name` reads whose root is never resolved.
+    `${held} function f(role, prev) { return cn(role === "preparing" && S2[prev]); }`,
+    `${held} function g(role, k = "held") { return cn(role === "preparing" && S2[k]); }`,
+    `${held} const { k } = { k: "held" }; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} let k = "held"; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} import { k } from "./keys"; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const k = "held"; function g() { const k = "shown"; return k; } const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const x = { role: "held" }; const c = cn(role === "preparing" && S2[x.role]);`,
+    // A delete of a preparing member; a spread the scan cannot read after a
+    // spread of a slot map.
+    "delete SLOT.preparing;",
+    "const E = { ...SLOT, ...makeOverride() };",
+  ]);
+  // Outside a slot-host file and a role-keyed map.
+  assertSlotPasses([
+    // A slot map whose sibling values are not class literals.
+    "const C = { shown: SHOWN_CLS, preparing: HIDE };",
+    // A class variant naming the role, outside slot context.
+    'export const H = () => <div className="h-full group-data-[slot=preparing]:invisible" />;',
+    // A lone preparing entry.
+    'const C = { preparing: "invisible" };',
+    // A file whose only preparing spelling is escaped: the parse prefilter
+    // reads raw source.
+    `const C = { shown: "h-full", "prep${bs}x61ring": "absolute invisible" };`,
+    // Slot code that is not a role-keyed map (a frame branching on a prop).
+    'const Frame = ({ preparing }) => <div className={preparing ? "absolute invisible" : "h-full"} />;',
+  ]);
+});
+
+test("preparing-slot-hide reads .ts and .tsx only", () => {
+  // Stylesheets (selectors, @apply) are never read: the walked extensions are
+  // pinned, so starting or stopping to read them is a deliberate change.
+  assert.deepEqual(EXTENSIONS, [".ts", ".tsx"]);
+});
+
+test("preparing-slot-hide reads a number key without throwing", () => {
+  // A number key carries its source text, like any other key.
+  assert.deepEqual(
+    preparingSlotHide('const C = { shown: "h-full", preparing: cn({ 1: true }) };'),
+    [],
+  );
+  assert.doesNotThrow(() =>
+    preparingSlotHide(
+      'import type { SlotPhase } from "x";\nconst c = cn({ 0: isPreparing });',
+    ),
+  );
+  // A clsx key reading no hide passes; one reading a hide flags.
+  assertHostPasses(['const c = cn({ 0x1: role === "preparing" });']);
+  assertHostFlags(['const c = cn({ 0x1: role === "preparing", invisible: isPreparing });']);
+});
+
+test("preparing-slot-hide reads a host's render sites for hides only", () => {
+  // Labels, state and spinners keyed on the preparing role are not slot
+  // classes; nothing but a hide fails at a render site.
+  assertHostPasses([
+    'const E = ({ r }) => <button aria-label={r === "preparing" ? "Loading" : "File"} />;',
+    'const E = ({ r }) => <button title={r === "preparing" ? "Loading" : "Run"} />;',
+    'const E = ({ r }) => <div data-state={r === "preparing" ? "closed" : "open"} />;',
+    'const E = ({ r }) => <>{r === "preparing" && <Spinner />}</>;',
+    'const E = ({ r }) => <>{r !== "held" && <Toolbar />}</>;',
+    'const E = ({ r }) => <>{r === "preparing" ? <span className="sr-only">Loading</span> : null}</>;',
+    'const reason = r === "preparing" ? "Loading" : null;',
+    'function label(p: SlotPhase) { if (p === "preparing") return "Loading next file"; return "Current file"; }',
+    'function label(p) { switch (p) { case "preparing": return "Loading"; default: return "Ready"; } }',
+    'const c = cn(SLOT[r], r === "preparing" && "pointer-events-none");',
+    "const E = ({ r }) => <div className={SLOT[r]} />;",
+    'const E = ({ r }) => <div className={r === "preparing" ? SLOT.preparing : SLOT[r]} />;',
+  ]);
+  const bs = String.fromCharCode(92);
+  assertHostFlags([
+    'const c = cn(SLOT[r], r === "preparing" && "invisible");',
+    'const E = ({ r }) => <>{r === "preparing" && <span className="invisible" />}</>;',
+    // Role literals read cooked.
+    `const E = ({ r }) => <div className={r === "prep${bs}x61ring" ? "absolute invisible" : SLOT[r]} />;`,
+    // A read keyed by another role is not the preparing entry.
+    'const c = cn("h-full", role === "preparing" && SLOT.held);',
+  ]);
+});
+
+test("preparing-slot-hide holds a host's keys, writes and stray clips to the shape rule", () => {
+  const bs = String.fromCharCode(92);
+  assertHostFlags([
+    // A slot map by its keys, whatever its sibling values hold.
+    'const S = "h-full"; const R = { shown: S, held: S, preparing: "absolute inset-0" };',
+    // A spread makes a map a slot map too.
+    'const D = { ...SLOT, preparing: "absolute inset-0" };',
+    // Role keys read cooked; an unreadable computed key fails.
+    `const C = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)]", "prep${bs}x61ring": "absolute" };`,
+    'const C = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)]", ["prep" + "aring"]: "absolute" };',
+    'const P = "preparing"; const C = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)]", [P]: "absolute" };',
+    // A map of computed keys the scan cannot read.
+    'const R = { [Role.P]: "absolute", [Role.H]: "h-full" };',
+    'import { k } from "./k"; const R = { ...SLOT, [k]: "absolute" };',
+    'import { P } from "./p"; const R = { shown: "h-full", held: "h-full", [P]: "absolute inset-0" };',
+    // A mixed-case property reaches Tailwind as a working rule.
+    'const R = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)] [cLIP-PATH:none]" };',
+    'const R = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)] [aLL:unset]" };',
+    // No clip-path or `[all:…]` token outside a slot map's entry.
+    'const E = ({ r }) => <div className={SLOT[r] + " md:[clip-path:none]"} />;',
+    'const c = cn(SLOT[r], "[clip-path:none]");',
+    'const c = cn(SLOT[r], "[all:unset]");',
+    // No write to a preparing member.
+    'SLOT.preparing = "absolute inset-0";',
+    'SLOT["preparing"] += " pointer-events-none";',
+    "[SLOT.preparing] = [\"absolute\"];",
+    '({ x: SLOT.preparing } = { x: "absolute" });',
+    '({ x: SLOT.preparing = "absolute" } = {});',
+    '[...SLOT.preparing] = "absolute";',
+    'Object.assign(SLOT, { preparing: "absolute inset-0" });',
+    'Object.assign(SLOT, { ...{ preparing: "absolute" } });',
+    'Object["assign"](SLOT, { preparing: "absolute" });',
+    "Object.assign(SLOT, extra);",
+    'Reflect.set(SLOT, "preparing", "absolute");',
+    'Reflect.defineProperty(SLOT, "preparing", { value: "absolute" });',
+    'Object.defineProperty(SLOT, "preparing", { value: "absolute" });',
+    "SLOT.preparing++;",
+    "SLOT.preparing--;",
+    "++SLOT.preparing;",
+    // JSX attribute strings decode character references.
+    'const x = <>{r === "preparing" && <span className="a&#32;invisible" />}</>;',
+    'const x = <div className="data-[role=preparing]:&#105;nvisible" />;',
+    // In a class attribute, any other named reference is unreadable.
+    'const x = <div className="a&nbsp;b" />;',
+  ]);
+  // A map-entry read keyed by anything but the preparing role or the role
+  // variable is unreadable; a defineProperties descriptor is a write; a
+  // reference named on Object.prototype is no known entity.
+  const held =
+    'const S2 = { shown: "h-full", held: "h-full invisible", preparing: "absolute [clip-path:inset(50%)]" };';
+  assertHostFlags([
+    `${held} const c = cn(role === "preparing" && S2[flag ? "held" : "shown"]);`,
+    `${held} const c = cn(role === "preparing" && S2[pick(role)]);`,
+    // A const of an expression the scan cannot read, or of another role.
+    `${held} const k = flag ? "held" : "shown"; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const k = pick(role); const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const k0 = flag ? "held" : "shown"; const k = k0; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const k0 = "held"; const k = k0; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const k = roles[i]; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} const c = cn(role === "preparing" && S2[roles[i]]);`,
+    'Object.defineProperties(SLOT, { preparing: { value: "absolute" } });',
+    'const x = <div className="h-full a&constructor;b" />;',
+    'const x = <div className="h-full a&toString;b" />;',
+  ]);
+  assertHostPasses([
+    `${held} const E = ({ role }) => <div className={S2[role]} />;`,
+    `${held} const E = ({ slot }) => <div className={S2[slot.role]} />;`,
+    `${held} const c = cn(role === "preparing" ? S2.preparing : S2[role]);`,
+    `${held} const c = cn(role === "preparing" && S2["preparing"]);`,
+    // A const of a `.name` member chain, of "preparing", or of an
+    // unresolved name.
+    `${held} const role = slot.role; const c = cn(role === "preparing" && S2[role]);`,
+    `${held} const k0 = "preparing"; const k = k0; const c = cn(role === "preparing" && S2[k]);`,
+    `${held} function f(r) { const k = r; return cn(r === "preparing" && S2[k]); }`,
+    'const x = <div className="h-full a&amp;b" />;',
+    // Not a character reference (a name starts with a letter): literal text.
+    'const x = <div className="h-full a&__proto__;b" />;',
+  ]);
+  // A write through a const key, a const source, and a const spread override.
+  assertHostFlags(['const P = "preparing";\nSLOT[P] = "absolute";'], [3]);
+  assertHostFlags(['const P = "preparing";\nalias[P] = "absolute";'], [3]);
+  assertHostFlags(
+    ['const E = { preparing: "absolute" };\nObject.assign(SLOT, E);'],
+    [3],
+  );
+  assertHostFlags(
+    ['const OVR = { preparing: "absolute inset-0" };\nconst E = { ...SLOT, ...OVR };'],
+    [3],
+  );
+  // A decoded reference is read for hides in any slot context.
+  assertSlotFlags([
+    'const C = { shown: "h-full", preparing: <span className="a&#32;invisible" /> };',
+  ]);
+  assertHostPasses([
+    '<span className="sr-only">Loading</span>;',
+    'const x = <div title="a &amp; b" />;',
+    // A named reference outside class attributes is not class text.
+    'const x = <p className="text-sm" title="Hidden&nbsp;until ready">x</p>;',
+    'const x = <div title="Loading&hellip;" />;',
+    // A spread of a clipped const map, and ordinary writes and state.
+    'const OK = { preparing: "absolute [clip-path:inset(50%)]" };\nconst E = { ...SLOT, ...OK };',
+    'const drafts = {}; drafts[key] = draft;',
+    "const next = { ...state, [key]: ok ? \"ready\" : \"failed\" };",
+    "Object.assign(target, extra);",
+    'Reflect.set(target, key, "x");',
+    // An unresolvable spread before the explicit key cannot override it.
+    'const E = { ...props, shown: "h-full", preparing: "absolute [clip-path:inset(50%)]" };',
+  ]);
+  // An unresolvable spread after the key can override it.
+  assertHostFlags([
+    'const E = { shown: "h-full", preparing: "absolute [clip-path:inset(50%)]", ...props };',
+  ]);
+});
+
+test("preparing-slot-hide fails closed on its listed residue", () => {
+  // Each pinned flagging: the scan reads these as hides or unreadable.
+  assertSlotFlags([
+    // A label or prose string reading a hide utility inside a site.
+    'const LABELS = { shown: "visible", held: "kept", preparing: "hidden" };',
+    // A non-slot map that happens to key preparing beside shown.
+    'const STATUS = { preparing: "opacity-60", shown: "" };',
+  ]);
+  assertHostFlags([
+    // An unrelated hide in the extent a role mention climbs to.
+    'const pair = [isRole(r, "preparing"), "hidden md:flex"];',
+    // A JSX spread in a preparing class arm.
+    'const x = role === "preparing" ? <div {...props} /> : null;',
+    // A const whose name is bound twice in the file.
+    'const HIDE = "absolute [clip-path:inset(50%)]"; function f() { const HIDE = "h-full"; } const C = { shown: "", preparing: HIDE };',
+    // A role-literal comparison on a non-role value in a slot-host file.
+    'function f(plan) { if (plan.kind === "held") return "h-full"; else return "hidden md:flex"; }',
+    // In a host, any role-keyed map or state object is a slot map; use keys
+    // other than the slot roles, or keep it outside the host file.
+    'const LABELS = { held: "Previous file", shown: "Current file", preparing: "Loading" };',
+    'const COUNTS = { held: 1, shown: 2, preparing: 3 };',
+    // A clip-path animation on a non-slot element, and a clipped render-site
+    // arm: move the element out of the host file, or put the clip in the map
+    // entry.
+    'const E = () => <div className="[clip-path:circle(0)] transition-[clip-path]" />;',
+    'const E = ({ r }) => <div className={r === "preparing" ? "absolute inset-0 [clip-path:inset(50%)]" : SLOT[r]} />;',
+    // A map-entry key read from a const of a call: read the role from a
+    // prop or a destructured binding instead.
+    'const role = useRole(); const c = cn(role === "preparing" && SLOT[role]);',
+    // Object.assign copying a slot map into another object.
+    'const copy = Object.assign({}, SLOT, { shown: "x" });',
+    // A host's merge-status class map keyed `preparing`.
+    'const MERGE = { preparing: "opacity-60 animate-pulse", clean: "" };',
+  ]);
+});
+
+test("preparing-slot-hide reports the line each site starts on", () => {
+  const source = inHost(
+    [
+      "import { cn } from '@/lib/utils';",
+      "",
+      "const SLOT_CLASS = {",
+      '  shown: "h-full",',
+      "  preparing:",
+      "    cond",
+      '      ? "absolute inset-0"',
+      '      : "absolute inset-0 invisible",',
+      '  held: "h-full",',
+      "};",
+      'const other = cn("a", isPreparing',
+      '  && "opacity-0");',
+    ].join("\n"),
+  );
+  assert.deepEqual(preparingSlotHide(source), [6, 12]);
+  const sites = preparingSlotSites(source);
+  assert.deepEqual(
+    sites.map((s) => s.kind),
+    ["entry", "entry", "guard"],
+  );
+});
+
+test("preparing-slot-hide holds a slot host's preparing entries to a plain clipped class string", () => {
+  const check = CHECKS.find((c) => c.name === "preparing-slot-hide");
+  const file = "src/features/x/host.tsx";
+  const run = (source) =>
+    runCheck(check, [file], new Map([[file, view(source)]])).violations;
+  const backslash = String.fromCharCode(92);
+  const lines = (...body) =>
+    [
+      'import type { SlotPhase } from "@/features/diff/diff-pane-slots";',
+      'const BASE = "absolute";',
+      'const MD = "md:";',
+      ...body,
+      "export const F = ({ phase }: { phase: SlotPhase }) => <div className={C[phase]} />;",
+    ].join("\n");
+  // The entry sits on line 4.
+  const entry = (value) =>
+    lines(`const C = { shown: "h-full", held: "h-full", preparing: ${value} };`);
+  for (const value of [
+    '"absolute inset-0 [clip-path:inset(50%)]"',
+    '"absolute " + "[clip-path:inset(50%)]"',
+    "`absolute [clip-path:inset(50%)]`",
+    '"absolute [clip-path:" + "inset(50%)]"',
+    '"absolute " + ("[clip-path:" + "inset(50%)]")',
+    '"absolute " + `[clip-path:inset(50%)]`',
+    '"absolute [clip-path:inset(50%)!important]"',
+    // The important marker may sit at one end, or ride the value.
+    '"absolute [clip-path:inset(50%)]!"',
+    '"absolute ![clip-path:inset(50%)]"',
+    '"absolute [clip-path:inset(50%)_!important]"',
+  ])
+    assert.deepEqual(run(entry(value)), [], value);
+  for (const value of [
+    // Not a plain class string: the remedy is to write one.
+    'cn("absolute", "[clip-path:inset(50%)]")',
+    '`absolute ${"[clip-path:inset(50%)]"}`',
+    'compact ? "absolute [clip-path:inset(50%)]" : "fixed [clip-path:inset(50%)]"',
+    'cn({ "absolute [clip-path:inset(50%)]": true })',
+    'cn({ "absolute [clip-path:inset(50%)]": false })',
+    'cn("absolute", compact && "[clip-path:inset(50%)]")',
+    'compact ? "absolute [clip-path:inset(50%)]" : "absolute"',
+    '"absolute " + (compact ? "[clip-path:inset(50%)]" : "")',
+    '`absolute ${compact && "[clip-path:inset(50%)]"}`',
+    '`absolute ${{ "[clip-path:inset(50%)]": true }}`',
+    '"absolute " + { "[clip-path:inset(50%)]": true }',
+    '"absolute " + ["a", "[clip-path:inset(50%)]"]',
+    '"absolute " + [, "[clip-path:inset(50%)]"]',
+    '"absolute " + ["[clip-path:inset(50%)]"]',
+    "`absolute ${MD}[clip-path:inset(50%)]`",
+    '`absolute ${cn("[clip-path:inset(50%)]")}`',
+    'cn("absolute", "[clip-path:inset(50%)]", wide && "[clip-path:inset(50%)]")',
+    // Plain, but the clip is missing, glued, overridden (by another clip-path
+    // token or an `[all:…]` reset), behind a variant (a descendant one too),
+    // or marked `!` at both ends.
+    '"absolute [clip-path:inset(50%)] [all:unset]!"',
+    '"absolute inset-0"',
+    '"absolute" + "[clip-path:inset(50%)]"',
+    `"absolute${backslash}\n[clip-path:inset(50%)]"`,
+    '"absolute [clip-path:inset(50%)] [clip-path:none]"',
+    '"absolute [clip-path:inset(50%)] md:[clip-path:none]"',
+    '"absolute [clip-path:inset(50%)] not-sr-only"',
+    '"absolute inset-0 md:[clip-path:inset(50%)]"',
+    '"absolute [&_*]:[clip-path:inset(50%)]"',
+    '"absolute ![clip-path:inset(50%)]!"',
+  ])
+    assert.deepEqual(run(entry(value)), [`${file}:4`], value);
+  // An unreadable interpolation also fails the class-expression reader, on
+  // the same line.
+  assert.deepEqual(run(entry("`absolute ${x}[clip-path:inset(50%)]`")), [
+    `${file}:4`,
+  ]);
+  // A hide is read from the cooked text: the continuation joins `invisible`.
+  assert.deepEqual(
+    run(entry(`"absolute [clip-path:inset(50%)] in${backslash}\nvisible"`)),
+    [`${file}:4`],
+  );
+  // Every slot-shaped map counts; the failure lands on the unclipped entry.
+  assert.deepEqual(
+    run(
+      lines(
+        'const A = { shown: "h-full", held: "h-full", preparing: "absolute [clip-path:inset(50%)]" };',
+        'const C = { shown: "h-full", held: "h-full", preparing: "absolute inset-0" };',
+      ),
+    ),
+    [`${file}:5`],
+  );
+  // A spread after the key can override the clip; one before it cannot.
+  assert.deepEqual(
+    run(
+      lines(
+        'const C = { shown: "h-full", held: "h-full", preparing: "absolute [clip-path:inset(50%)]", ...O };',
+      ),
+    ),
+    [`${file}:4`],
+  );
+  assert.deepEqual(
+    run(
+      lines(
+        'const C = { ...BASE, shown: "h-full", preparing: "absolute [clip-path:inset(50%)]" };',
+      ),
+    ),
+    [],
+  );
+  // In a host a map is a slot map by its keys, so its siblings may be consts.
+  assert.deepEqual(
+    run(
+      lines(
+        'const S = "h-full"; const C = { shown: S, held: S, preparing: "absolute [clip-path:inset(50%)]" };',
+      ),
+    ),
+    [],
+  );
+  // A map that is not slot-shaped is exempt, beside a clipped slot map.
+  assert.deepEqual(
+    run(
+      lines(
+        'const LABELS = { preparing: "Loading…", ready: "Ready" };',
+        'const C = { shown: "h-full", held: "h-full", preparing: "absolute [clip-path:inset(50%)]" };',
+      ),
+    ),
+    [],
+  );
+  // A host that renders classes keeps at least one slot-shaped map.
+  assert.deepEqual(
+    run(lines('const C = { shown: "h-full", held: "h-full" };')),
+    [`${file}:1`],
+  );
+  // EntityHoldSlot alone makes a file a host.
+  assert.deepEqual(
+    run(
+      [
+        'import type { EntityHoldSlot } from "@/lib/use-entity-hold";',
+        'const C = { shown: "h-full", held: "h-full", preparing: "absolute inset-0" };',
+        "export const E = ({ slot }: { slot: EntityHoldSlot }) => <div className={C[slot.role]} />;",
+      ].join("\n"),
+    ),
+    [`${file}:2`],
+  );
+  // The vocabulary alone, rendering no classes, is a definition module.
+  assert.deepEqual(
+    run('export type SlotPhase = "shown" | "held" | "preparing";'),
+    [],
+  );
+});
+
+test("preparing-slot-hide premise: the real roles, hosts and sites", () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const read = (file) => readFileSync(join(root, file), "utf8");
+  const members = (file, name) => {
+    const m = new RegExp(`export type ${name} = ([^;]+);`).exec(read(file));
+    assert.ok(m, `${name} moved out of ${file}`);
+    return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).sort();
+  };
+  const roles = [...SLOT_ROLES].sort();
+  assert.deepEqual(members("src/lib/entity-hold.ts", "EntitySlotRole"), roles);
+  assert.deepEqual(
+    members("src/features/diff/diff-pane-slots.ts", "SlotPhase"),
+    roles,
+  );
+  const check = CHECKS.find((c) => c.name === "preparing-slot-hide");
+  assert.ok(check.expectScanned.atLeast >= 500);
+  const hosts = [
+    "src/features/actions/run-slots.tsx",
+    "src/features/diff/DiffViewer.tsx",
+  ];
+  for (const file of hosts) {
+    const source = read(file);
+    const entries = preparingSlotSites(source, file).filter(
+      (s) => s.kind === "entry",
+    );
+    assert.equal(entries.length, 1, `${file}: ${JSON.stringify(entries)}`);
+    assert.ok(entries[0].value.includes("[clip-path:inset(50%)]"), file);
+    assert.deepEqual(check.scan(view(source), file), [], file);
+    // A host restructures a flagged expression; it never takes an exception.
+    assert.ok(!check.allowlist.includes(file), file);
+  }
+  // Equals, so a third host is a deliberate update here.
+  const seen = readdirSync(join(root, "src"), { recursive: true })
+    .map((entry) => `src/${String(entry).split("\\").join("/")}`)
+    .filter((file) => /\.tsx?$/.test(file))
+    .filter(check.appliesTo)
+    .filter((file) => isPreparingSlotHost(read(file), file))
+    .sort();
+  assert.deepEqual(seen, hosts, `slot hosts: ${JSON.stringify(seen)}`);
 });
 
 test("bare-group-label flags an attribute-less Label caption", () => {
