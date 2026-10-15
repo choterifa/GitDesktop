@@ -160,6 +160,11 @@ export type ReviewDeltaState =
 export interface ReviewPromptInput {
   title: string;
   body: string;
+  /** How a blank `body` renders: "empty" prints an explicit "(none …)" line,
+   *  "unreadable" says the description couldn't be obtained. Unset: a blank body
+   *  omits the section (commit reviews and the interactive path pass none).
+   *  Ignored when `body` is non-blank. */
+  bodyState?: "empty" | "unreadable";
   commitSubjects: string[];
   /** The forge's commits read failed or hit a cap, so `commitSubjects` may be
    *  partial. Absent/false ⇒ no disclosure line (prompt unchanged) — local

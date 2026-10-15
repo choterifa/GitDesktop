@@ -1,4 +1,5 @@
 import { forgePrExternalReviews, forgePrView } from "@/lib/git/api";
+import type { PrDetails } from "@/lib/git/types";
 
 /**
  * Lifts the author's "Notes for reviewers" from the newest conversation comment
@@ -40,11 +41,19 @@ export interface ReviewerNotesContext {
   reviewNotesIncomplete?: boolean;
 }
 
+/** `prView` lets a caller that already reads the PR share that one read; it must be
+ *  this PR's origin read, since the author gate reads `pr.author` from it. The
+ *  resolver awaits it inside its own catch, so a rejection still yields `{}`. */
 export async function resolveReviewerNotesContext(
   repoPath: string,
   prNumber: number,
+  prView?: Promise<PrDetails>,
 ): Promise<ReviewerNotesContext> {
-  if (!Number.isInteger(prNumber) || prNumber <= 0) return {};
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    // Never leave a passed read unhandled on the early return.
+    void prView?.catch(() => undefined);
+    return {};
+  }
 
   let items: Awaited<ReturnType<typeof forgePrExternalReviews>>["items"];
   let truncated: boolean;
@@ -54,7 +63,7 @@ export async function resolveReviewerNotesContext(
     // The PR fetch gives us the author login to gate the lift on (see module doc).
     const [reviews, pr] = await Promise.all([
       forgePrExternalReviews(repoPath, prNumber, "origin"),
-      forgePrView(repoPath, prNumber, "origin"),
+      prView ?? forgePrView(repoPath, prNumber, "origin"),
     ]);
     // Disclosed only beside lifted notes. A partial read with NO notes found stays
     // silent by design: notes are author instructions, and an "unseen notes may

@@ -90,6 +90,12 @@ import {
 import { localRefsFresh as refsFresh } from "./pure";
 import { type AutomationRunResult, useAutomationResults } from "./results";
 import {
+  bodyFetchFrom,
+  bodyReadPlan,
+  type ReviewBodyFetch,
+  reviewBody,
+} from "./review-body";
+import {
   loadAutomations,
   loadAutomationsFresh,
   repoAutomationsFor,
@@ -1659,6 +1665,21 @@ async function generateReviewText(
       : undefined;
 
   const isRemotePr = event.kind !== "commit" && event.target.type === "remote";
+  const remoteNumber = isRemotePr
+    ? (event.target as { type: "remote"; number: number }).number
+    : undefined;
+  const { read: readPr, needsBody } = bodyReadPlan({
+    remoteNumber,
+    eventBody: isRemotePr ? event.body : "",
+    hasEventNotes: Boolean(eventNotes),
+  });
+  // ONE PR read shared by the body arm and the notes resolver. The body arm
+  // awaits it under its own catch whenever it exists, and prefers it over the
+  // event's body, which can be stale.
+  const prView =
+    readPr && remoteNumber !== undefined
+      ? forgePrView(event.repoPath, remoteNumber, "origin")
+      : undefined;
   // Repo-level review context: the doc-surface roster + the repo's instructions
   // file. Both read the LOCAL working tree — whatever branch is checked out (see
   // `repoInstructionsClause`, guardrail 3) — and apply to commit and local-PR
@@ -1670,12 +1691,14 @@ async function generateReviewText(
     resolveDocSurfacesContext(event.repoPath),
     readRepoInstructions(event.repoPath).catch(() => null),
   ]);
-  // Resolve external + own + (when not event-carried) reviewer-notes context in
-  // parallel — all three are independent, best-effort remote harvests.
-  const [external, own, resolvedNotes]: [
+  // Resolve external + own + (when not event-carried) reviewer-notes context and
+  // the description in parallel — best-effort remote harvests; the notes and
+  // description arms share one PR read.
+  const [external, own, resolvedNotes, fetchedBody]: [
     ExternalContext,
     OwnCommentsContext,
     ReviewerNotesContext,
+    ReviewBodyFetch | undefined,
   ] = isRemotePr
     ? await Promise.all([
         resolveExternalContext(
@@ -1700,14 +1723,12 @@ async function generateReviewText(
           },
         ),
         // Skip the fetch when the event already carries the notes.
-        eventNotes
+        eventNotes || remoteNumber === undefined
           ? Promise.resolve({})
-          : resolveReviewerNotesContext(
-              event.repoPath,
-              (event.target as { type: "remote"; number: number }).number,
-            ),
+          : resolveReviewerNotesContext(event.repoPath, remoteNumber, prView),
+        bodyFetchFrom(prView, needsBody),
       ])
-    : [{}, {}, {}];
+    : [{}, {}, {}, undefined];
   const [docs, repoInstructions] = await repoContext;
   if (signal.aborted) return null;
 
@@ -1715,10 +1736,18 @@ async function generateReviewText(
   // resolved read, not the event payload, so it must not ride along when the event wins.
   const notes: ReviewerNotesContext = eventNotes ?? resolvedNotes;
 
+  // Commit reviews have no description: an empty body with no state omits the
+  // section.
+  const description =
+    event.kind === "commit"
+      ? { body: "", bodyState: undefined }
+      : reviewBody(event.body, fetchedBody);
+
   const { system, prompt } = buildReviewPrompt(
     {
       title: event.title,
-      body: event.kind === "commit" ? "" : event.body,
+      body: description.body,
+      bodyState: description.bodyState,
       commitSubjects: event.kind === "commit" ? [] : event.commitSubjects,
       commitsUnknown:
         event.kind === "commit" ? undefined : event.commitsUnknown,

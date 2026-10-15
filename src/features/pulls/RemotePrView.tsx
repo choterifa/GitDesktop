@@ -2280,8 +2280,9 @@ export function RemotePrView({
   // eligibility the external catch-up path enforces, so both paths behave identically.
   // That guard, not claim dedup, is what prevents a double review: a manual panel
   // review saves via `saveReview` WITHOUT taking an automation claim, so claim dedup
-  // can't see it. Event shape mirrors sync.ts; the marker-comment lift recovers
-  // reviewer notes, so none ride the event.
+  // can't see it. The event carries the loaded description as a fallback for the
+  // runner's fresh read; the marker-comment lift recovers reviewer notes, so none
+  // ride the event.
   async function fireReadyReview() {
     if (!pr) return;
     const headSha = prHeadSha(pr);
@@ -2296,9 +2297,9 @@ export function RemotePrView({
       // end short of it, and a wrong head here re-fires pr-sync's paid review.
       headSha,
       title: pr.title,
-      // No body/commit subjects on this path — the PR diff is the source of
-      // truth (catch-up + pr-sync fire them empty the same way).
-      body: "",
+      // The loaded description rides the event; commit subjects stay empty, as
+      // on the catch-up and pr-sync paths.
+      body: pr.body,
       commitSubjects: [],
       target: { type: "remote", number },
     });
