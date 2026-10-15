@@ -1114,9 +1114,9 @@ review via its subscription login. The full list is under
 
 - **Markdown everywhere you write**: Write/Preview tabs and a formatting
   toolbar (`Ctrl`/`⌘`+`B / I / K`) on every comment, reply, and
-  release-notes field, rendered to match GitHub's own styling: task lists,
-  heading hierarchy, and syntax-highlighted code in ~190 languages (light
-  and dark).
+  release-notes field, rendered to match GitHub's own styling for task
+  lists and heading hierarchy, with code blocks syntax-highlighted in ~190
+  languages using the same colors as diffs and blame (light and dark).
 - **Mention & reference autocomplete**: on GitHub and GitLab repos, type
   `@` in a comment box, reply, edit, diff line comment, release notes, or a
   local PR or issue's description and comments to pick a person and `#` to

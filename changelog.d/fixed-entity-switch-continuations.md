@@ -4,6 +4,6 @@
   stays open and you stay where you are. A tag delete, reset, cherry-pick, or
   branch delete that finishes after you switch repositories leaves the new
   repository's dialogs and selection alone. Saving a release edit, a task, or
-  a review trim, renaming a branch, or creating a branch or tag from a commit
+  a review trim, renaming a branch, or creating a branch or tag
   closes only the editor it came from, so a dialog you reopened meanwhile, or
   the next task you started typing, stays as it is.

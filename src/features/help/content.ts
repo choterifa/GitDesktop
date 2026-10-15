@@ -145,7 +145,8 @@ Click the **⋮** menu next to the repo name for repo-wide actions:
 - **Insights** (analytics), **manage files**, **submodules**, the **remote URL**,
   **branch rules**, **git hooks**, **notifications** for this repository,
   {{ai}}**automations**, {{/ai}}**repository settings**, an **alias**, copy the repo
-  path, copy the branch name, copy the HEAD SHA, and remove the repo from the list.
+  path, copy the branch name, copy the HEAD SHA, remove the **upstream remote** on a
+  clone of a fork, and remove the repo from the list.
 
 ## Submodules
 
