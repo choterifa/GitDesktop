@@ -42,13 +42,19 @@ import {
 import { clipTitle } from "@/lib/clip-title";
 import { copyText } from "@/lib/clipboard";
 import { isDirtyTreeRefusal, presentError } from "@/lib/error-summary";
-import { forgeDetectForkPrForBranch } from "@/lib/git/api";
+import { forgeDetectForkPrForBranch, gitBranches } from "@/lib/git/api";
 import { normPath } from "@/lib/git/path";
+import {
+  headTrackingMatchesRow,
+  rowTrackingMatches,
+} from "@/lib/git/push-tracking";
 import {
   branchRewriteStatusOptions,
   forgeFeatureReady,
   REMOTE_BRANCHES_STALE_TIME,
   remoteBranchesOptions,
+  repoKeys,
+  repoStatusOptions,
   useBranchAhead,
   useBranchDivergence,
   useBranches,
@@ -81,7 +87,13 @@ import {
   useUpdateBranchFrom,
   useUserWorktrees,
 } from "@/lib/git/queries";
-import type { Branch, ForkPrMatch, RemoteBranch } from "@/lib/git/types";
+import { isSessionBranchName } from "@/lib/git/ref-name";
+import type {
+  Branch,
+  BranchHead,
+  ForkPrMatch,
+  RemoteBranch,
+} from "@/lib/git/types";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
 import { secondaryClickLabel } from "@/lib/hotkeys/binding";
 import { dispatchAction, useHotkeyAction } from "@/lib/hotkeys/hotkeys";
@@ -719,6 +731,24 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // A detached HEAD has no branch name to key on and keeps the literal.
   const namedRef =
     renameTarget ?? (createOpen ? (currentName ?? "HEAD") : null);
+  // The rename target's live upstream BRANCH, for the dialog's note: read off the
+  // merge ref (never the short upstream string), so a gone, local (`.`, which
+  // git reports as the remote name) or non-branch upstream gives no note.
+  const renameRow =
+    renameTarget === null
+      ? undefined
+      : branches.data?.find((b) => b.name === renameTarget);
+  const renameTargetUpstream =
+    renameRow &&
+    !renameRow.upstreamGone &&
+    renameRow.upstreamRemote &&
+    renameRow.upstreamRemote !== "." &&
+    renameRow.upstreamRemoteRef?.startsWith("refs/heads/")
+      ? {
+          remote: renameRow.upstreamRemote,
+          branch: renameRow.upstreamRemoteRef.slice("refs/heads/".length),
+        }
+      : null;
   // The same ref in rev form: a branch by its full ref (a bare name resolves to a
   // same-named tag first); the detached literal stays as it is.
   const namedRev =
@@ -1789,7 +1819,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // `disabled` expression tests them. Null where the label already carries the
   // reason — a row must not say it twice.
   const renameCurrentBlockedReason =
-    headUnread ?? "HEAD is detached — there's no current branch to rename.";
+    headUnread ??
+    (currentName && isSessionBranchName(currentName)
+      ? "Agent-session branches can't be renamed — renaming one breaks the session's Resume."
+      : "HEAD is detached — there's no current branch to rename.");
   const deleteCurrentBlockedReason = (() => {
     if (!currentName)
       return (
@@ -1881,76 +1914,176 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // and a non-actionable invocation gives an honest info toast rather than
   // silence.
   const currentBranch = branches.data?.find((b) => b.isCurrent);
+  // Held while either push-to-origin route confirms its branch: a second press
+  // during the read would otherwise start a second read and push twice. It guards
+  // only that read: an operation started meanwhile runs alongside the push, which
+  // names its branch explicitly.
+  const pushHotkeyChecking = useRef(false);
+  function refuseWhileListCatchesUp(pushIn: string) {
+    toast.info("The branch list is catching up — try again in a moment.");
+    void queryClient.invalidateQueries({
+      queryKey: repoKeys.branches(pushIn),
+    });
+  }
+  // The branch list refreshes on focus and after in-app actions, never on the
+  // status poll, so its current row can lag a checkout or tracking change made
+  // outside the app; a fresh status read confirms HEAD before this route acts.
+  async function pushCurrentBranchToOrigin(listed: Branch) {
+    if (pushHotkeyChecking.current) return;
+    // Every value the continuation acts on, pinned before the read: the repo, and
+    // the listed row whose name and destination facts decide the push. The fresh
+    // read confirms both, since the backend re-reads tracking when it pushes.
+    const pushIn = repoPath;
+    pushHotkeyChecking.current = true;
+    let fresh: BranchHead;
+    try {
+      // The factory's queryFn straight, never fetchQuery: that joins an
+      // in-flight poll, which may have been spawned before the press.
+      fresh = (await repoStatusOptions(pushIn).queryFn()).branch;
+    } catch {
+      toast.info("Couldn't confirm the current branch — nothing was pushed.");
+      return;
+    } finally {
+      pushHotkeyChecking.current = false;
+    }
+    // `push` follows the live repo, so a switch during the read refuses.
+    if (
+      refuseIfSwitched(pushIn, "nothing was pushed", "before the push started")
+    )
+      return;
+    // Structural sharing keeps an unchanged row's identity across refetches, so a
+    // different live row means the list moved under the decision during the read.
+    const liveRow = queryClient
+      .getQueryData<Branch[]>(repoKeys.branches(pushIn))
+      ?.find((b) => b.isCurrent);
+    if (
+      fresh.name !== listed.name ||
+      liveRow !== listed ||
+      !headTrackingMatchesRow(fresh, listed)
+    ) {
+      refuseWhileListCatchesUp(pushIn);
+      return;
+    }
+    pushBranchToOrigin(listed, false);
+  }
+  // Opening the list doesn't refetch it, so the highlighted row's tracking can
+  // be just as stale; a fresh branch-list read confirms it before this route acts.
+  async function pushListedBranchToOrigin(row: Branch) {
+    if (pushHotkeyChecking.current) return;
+    const pushIn = repoPath;
+    pushHotkeyChecking.current = true;
+    let freshRows: Branch[];
+    try {
+      // The api read straight, never fetchQuery: that can join a refetch spawned
+      // before the press.
+      freshRows = await gitBranches(pushIn);
+    } catch {
+      toast.info("Couldn't confirm the branch — nothing was pushed.");
+      return;
+    } finally {
+      pushHotkeyChecking.current = false;
+    }
+    if (
+      refuseIfSwitched(pushIn, "nothing was pushed", "before the push started")
+    )
+      return;
+    const freshRow = freshRows.find((b) => b.name === row.name);
+    if (!freshRow || !rowTrackingMatches(freshRow, row)) {
+      refuseWhileListCatchesUp(pushIn);
+      return;
+    }
+    pushBranchToOrigin(row, true);
+  }
+  // `fromRow`: the highlighted row of the open list, rather than the current
+  // branch; it picks where the different-name toast sends the user.
+  function pushBranchToOrigin(branch: Branch, fromRow: boolean) {
+    const tracksOrigin =
+      branch.upstreamRemote === "origin" && !branch.upstreamGone;
+    const tracksOtherKnownRemote =
+      !!branch.upstream &&
+      !branch.upstreamGone &&
+      !!branch.upstreamRemote &&
+      branch.upstreamRemote !== "origin" &&
+      remoteNames.includes(branch.upstreamRemote);
+    // The upstream's exact branch name, from its merge ref: the short upstream
+    // string can't be split (remote names may contain `/`), and a non-branch
+    // upstream (`refs/pull/N/head`) is no cross-name push.
+    const upstreamBranch = branch.upstreamRemoteRef?.startsWith("refs/heads/")
+      ? branch.upstreamRemoteRef.slice("refs/heads/".length)
+      : null;
+    if (
+      tracksOrigin &&
+      upstreamBranch !== null &&
+      upstreamBranch !== branch.name
+    ) {
+      // An origin push of this branch would land on a differently-named
+      // branch, which this origin-scoped shortcut never decides for the user.
+      toast.info(
+        fromRow
+          ? `${branch.name} tracks ${branch.upstream}, which has a different name — push it from its context menu`
+          : `${branch.name} tracks ${branch.upstream}, which has a different name — use the sync bar's Push instead`,
+      );
+    } else if (
+      tracksOrigin &&
+      branch.upstreamAhead > 0 &&
+      branch.upstreamBehind === 0
+    ) {
+      doPushBranch(branch);
+    } else if (!branch.upstream || branch.upstreamGone) {
+      // `enabled` guarantees origin exists, so this publish destination is safe.
+      doPushBranch(branch, "origin");
+    } else if (
+      tracksOrigin &&
+      branch.upstreamAhead > 0 &&
+      branch.upstreamBehind > 0
+    ) {
+      // Genuinely diverged: commits on BOTH sides. Behind-only is not
+      // divergence — it gets its own arm below.
+      toast.info(
+        `${branch.name} has diverged — update it from its upstream first`,
+      );
+    } else if (tracksOrigin && branch.upstreamBehind > 0) {
+      // Behind only: nothing local to push; the remedy is a pull, so say so.
+      toast.info(`${branch.name} is behind ${branch.upstream} — pull first`);
+    } else if (tracksOrigin) {
+      toast.info(`${branch.name} has nothing to push`);
+    } else if (branch.upstream && !branch.upstreamRemote) {
+      // Tracks a LOCAL branch (`git branch --track x main`):
+      // `%(upstream:remotename)` is empty → null upstreamRemote. There's
+      // nothing remote-related to say — and the context menu is the same
+      // authority (it offers neither Push nor Publish for these).
+      toast.info(
+        `${branch.name} tracks a local branch (${branch.upstream}), not a remote`,
+      );
+    } else if (tracksOtherKnownRemote) {
+      toast.info(
+        `${branch.name} tracks ${branch.upstreamRemote} — push it from its context menu`,
+      );
+    } else {
+      // Tracked, but the upstream's remote is no longer configured.
+      toast.info(`${branch.name} tracks a remote that's no longer configured`);
+    }
+  }
   useHotkeyAction(
     "push-to-origin",
     () => {
       // Target: the highlighted row when the list is open, else the current
       // branch. An open list with a highlight that resolves to no local branch
       // (a remote-only row) is a real miss, not a fallback.
-      let branch: Branch | undefined;
       if (open && activeBranch) {
-        branch = branches.data?.find((b) => b.name === activeBranch);
-        if (!branch) {
+        const row = branches.data?.find((b) => b.name === activeBranch);
+        if (!row) {
           toast.info("Only local branches can be pushed from here");
           return;
         }
-      } else {
-        branch = currentBranch;
+        void pushListedBranchToOrigin(row);
+        return;
       }
-      if (!branch) {
+      if (!currentBranch) {
         toast.info("No branch to push");
         return;
       }
-      const tracksOrigin =
-        branch.upstreamRemote === "origin" && !branch.upstreamGone;
-      const tracksOtherKnownRemote =
-        !!branch.upstream &&
-        !branch.upstreamGone &&
-        !!branch.upstreamRemote &&
-        branch.upstreamRemote !== "origin" &&
-        remoteNames.includes(branch.upstreamRemote);
-      if (
-        tracksOrigin &&
-        branch.upstreamAhead > 0 &&
-        branch.upstreamBehind === 0
-      ) {
-        doPushBranch(branch);
-      } else if (!branch.upstream || branch.upstreamGone) {
-        // `enabled` guarantees origin exists, so this publish destination is safe.
-        doPushBranch(branch, "origin");
-      } else if (
-        tracksOrigin &&
-        branch.upstreamAhead > 0 &&
-        branch.upstreamBehind > 0
-      ) {
-        // Genuinely diverged: commits on BOTH sides. Behind-only is not
-        // divergence — it gets its own arm below.
-        toast.info(
-          `${branch.name} has diverged — update it from its upstream first`,
-        );
-      } else if (tracksOrigin && branch.upstreamBehind > 0) {
-        // Behind only: nothing local to push; the remedy is a pull, so say so.
-        toast.info(`${branch.name} is behind ${branch.upstream} — pull first`);
-      } else if (tracksOrigin) {
-        toast.info(`${branch.name} has nothing to push`);
-      } else if (branch.upstream && !branch.upstreamRemote) {
-        // Tracks a LOCAL branch (`git branch --track x main`):
-        // `%(upstream:remotename)` is empty → null upstreamRemote. There's
-        // nothing remote-related to say — and the context menu is the same
-        // authority (it offers neither Push nor Publish for these).
-        toast.info(
-          `${branch.name} tracks a local branch (${branch.upstream}), not a remote`,
-        );
-      } else if (tracksOtherKnownRemote) {
-        toast.info(
-          `${branch.name} tracks ${branch.upstreamRemote} — push it from its context menu`,
-        );
-      } else {
-        // Tracked, but the upstream's remote is no longer configured.
-        toast.info(
-          `${branch.name} tracks a remote that's no longer configured`,
-        );
-      }
+      void pushCurrentBranchToOrigin(currentBranch);
     },
     !busy &&
       !offlineHold &&
@@ -1962,7 +2095,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   useHotkeyAction(
     "rename-branch",
     () => currentName && openRename(currentName),
-    Boolean(currentName),
+    Boolean(currentName) && !isSessionBranchName(currentName ?? ""),
   );
   useHotkeyAction(
     "delete-branch",
@@ -3096,10 +3229,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
               <div className="border-t py-1">
                 <MenuRow onClick={openCreate}>New branch…</MenuRow>
                 <MenuRow
-                  disabled={!currentName}
+                  disabled={!currentName || isSessionBranchName(currentName)}
                   reason={renameCurrentBlockedReason}
                   onClick={() => {
-                    if (!currentName) return;
+                    if (!currentName || isSessionBranchName(currentName))
+                      return;
                     openRename(currentName);
                   }}
                 >
@@ -3288,6 +3422,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       <RenameBranchDialog
         repoPath={repoPath}
         target={renameTarget}
+        targetUpstream={renameTargetUpstream}
         currentName={currentName}
         onClose={() => setRenameTarget(null)}
         aiEnabled={aiEnabled}

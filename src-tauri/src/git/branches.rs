@@ -174,7 +174,7 @@ pub async fn git_branches(repo_path: String) -> AppResult<Vec<Branch>> {
         &[
             "for-each-ref",
             "refs/heads",
-            "--format=%(refname)%00%(upstream:short)%00%(HEAD)%00%(committerdate:iso8601-strict)%00%(upstream:track)%00%(upstream:remotename)",
+            "--format=%(refname)%00%(upstream:short)%00%(HEAD)%00%(committerdate:iso8601-strict)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref)",
         ],
         DEFAULT_TIMEOUT,
     )
@@ -184,7 +184,8 @@ pub async fn git_branches(repo_path: String) -> AppResult<Vec<Branch>> {
     let mut branches = Vec::new();
     for line in text.lines() {
         let mut parts = line.split('\0');
-        let (Some(refname), upstream, head, date, track, upstream_remote) = (
+        let (Some(refname), upstream, head, date, track, upstream_remote, upstream_remote_ref) = (
+            parts.next(),
             parts.next(),
             parts.next(),
             parts.next(),
@@ -212,6 +213,9 @@ pub async fn git_branches(repo_path: String) -> AppResult<Vec<Branch>> {
             upstream_behind,
             upstream_gone,
             upstream_remote: upstream_remote.filter(|r| !r.is_empty()).map(str::to_string),
+            upstream_remote_ref: upstream_remote_ref
+                .filter(|r| !r.is_empty())
+                .map(str::to_string),
         });
     }
     Ok(branches)
@@ -383,13 +387,49 @@ fn archive_config_busy(name: &str, archived: bool) -> AppError {
     ))
 }
 
+/// The reserved prefix for GitDesktop agent-session branches. Every branch surface
+/// (GUI lists, pickers, worktree guards) filters `gd/session/*`; deleting or renaming
+/// one breaks session Resume, so the branch-mutating MCP tools refuse it
+/// (`mcp_server::write_git::ensure_not_session_branch`), `list_branches` filters it
+/// out, and the rename core refuses renames into or out of it. Mirrors the
+/// `starts_with("gd/session/")` checks in `crate::git::worktree` / `crate::sessions`.
+pub(crate) const SESSION_BRANCH_PREFIX: &str = "gd/session/";
+
+/// What a completed rename reports beyond success.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameBranchOutcome {
+    /// Set when the local-PR migration could not complete after git renamed the
+    /// branch — the rename itself succeeded. Shown verbatim in the GUI success
+    /// toast's description and appended to the MCP text.
+    pub warning: Option<String>,
+}
+
+/// Refuses a rename into or out of the agent-session namespace, compared
+/// case-insensitively: a case-insensitive filesystem can land `GD/Session/x` inside
+/// an existing `gd/session/` ref folder.
+fn refuse_session_rename(old_name: &str, new_name: &str) -> AppResult<()> {
+    let in_session = |name: &str| name.to_ascii_lowercase().starts_with(SESSION_BRANCH_PREFIX);
+    if in_session(old_name) {
+        return Err(AppError::InvalidArgument(format!(
+            "\"{old_name}\" is an agent-session branch — renaming it would break its session's Resume."
+        )));
+    }
+    if in_session(new_name) {
+        return Err(AppError::InvalidArgument(format!(
+            "\"{new_name}\" is in gd/session/, which is reserved for agent sessions — choose another name."
+        )));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn git_rename_branch(
     state: State<'_, AppState>,
     repo_path: String,
     old_name: String,
     new_name: String,
-) -> AppResult<()> {
+) -> AppResult<RenameBranchOutcome> {
     git_rename_branch_core(&state, repo_path, old_name, new_name).await
 }
 
@@ -398,13 +438,34 @@ pub(crate) async fn git_rename_branch_core(
     repo_path: String,
     old_name: String,
     new_name: String,
-) -> AppResult<()> {
+) -> AppResult<RenameBranchOutcome> {
     validate_ref_name(&old_name)?;
     validate_ref_name(&new_name)?;
+    refuse_session_rename(&old_name, &new_name)?;
     // `branch -m` does NOT refuse a branch checked out elsewhere — it retargets that
     // worktree's HEAD silently, which under a running update means renaming the branch
     // out from under it.
     crate::git::update_marker::refuse_if_branch_updating(state, &repo_path, &old_name).await?;
+    // Ordering and store atomicity are separate locks. The rename lock is per repository
+    // identity and spans the git rename and both app-data moves, so chained renames (a→b,
+    // b→c) from any process apply their moves in order. It is an OS file lock because it
+    // must outlive git's waits and timeouts with no stale age a waiter could evict it by; the
+    // OS frees it if its holder dies. Each move takes its store's own lock pair only for its
+    // write, never across git. Contention refuses before git runs; an unusable lock file
+    // falls back to in-process ordering (`lock_for_rename` says why).
+    let keyed = match crate::git::repo::repo_identity(&repo_path).await {
+        Ok(identity) => {
+            let ordered = crate::local_prs::lock_for_rename(&identity).await?;
+            Ok((identity, ordered))
+        }
+        // No identity means no key and no lock; both moves need that identity too, so
+        // each skips, logged, and the local-PR one warns.
+        Err(e) => Err(e),
+    };
+    // The lock's wait reopens the window the check above guards.
+    crate::git::update_marker::refuse_if_branch_updating(state, &repo_path, &old_name).await?;
+    #[cfg(test)]
+    rename_phase(RenamePhase::BeforeGit).await;
     let repo = repo_path.as_str();
     let (old_section, new_section) = (format!("branch.{old_name}"), format!("branch.{new_name}"));
     run_git_mutating_config_write(
@@ -424,6 +485,8 @@ pub(crate) async fn git_rename_branch_core(
         },
     )
     .await?;
+    #[cfg(test)]
+    rename_phase(RenamePhase::BeforeMoves).await;
     // Carry the branch's reviewer note over to the new name, keyed by the same identity
     // the MCP deposit path uses. Strictly after the `?` and best-effort: the rename has
     // already happened, so a store failure must never be reported as a failed rename.
@@ -431,15 +494,67 @@ pub(crate) async fn git_rename_branch_core(
     // `rename_branch` tool); a terminal `git branch -m` has no hook, the same accepted
     // gap as the commit-draft migration. Cold-start test mode is out of reach too — the
     // GUI aliases its store file there (`storeName` in src/lib/test-mode.ts).
-    let note_result = async {
-        let identity = crate::git::repo::repo_identity(&repo_path).await?;
-        crate::review_notes::rename_branch(&identity, &old_name, &new_name).await
-    }
-    .await;
+    let note_result = match &keyed {
+        Ok((identity, _)) => crate::review_notes::rename_branch(identity, &old_name, &new_name)
+            .await
+            .map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
     if let Err(e) = note_result {
         eprintln!("gitdesktop: reviewer-note rename failed (branch renamed anyway): {e}");
     }
-    Ok(())
+    // Open local PRs follow the rename, under the same best-effort rule and the same two
+    // gaps (terminal renames; a cold-start instance's aliased store). A failed write may
+    // have counted nothing, so the warning names no number.
+    let pr_result = match &keyed {
+        Ok((identity, ordered)) => {
+            crate::local_prs::rename_branch(ordered, identity, &repo_path, &old_name, &new_name)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    };
+    drop(keyed);
+    let warning = match pr_result {
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("gitdesktop: local-PR rename migration failed (branch renamed anyway): {e}");
+            Some(format!(
+                "Some local pull requests may still point at {old_name}."
+            ))
+        }
+    };
+    Ok(RenameBranchOutcome { warning })
+}
+
+/// Where a rename can be held from a test: rename lock taken but git not yet run, and git
+/// done but neither app-data move run.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RenamePhase {
+    BeforeGit,
+    BeforeMoves,
+}
+
+#[cfg(test)]
+type RenamePhaseHook = std::sync::Arc<
+    dyn Fn(RenamePhase) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Awaited at each [`RenamePhase`] of the rename it is scoped to, so a test can hold
+    /// that rename there while a second one races it.
+    static RENAME_PHASE_HOOK: RenamePhaseHook;
+}
+
+#[cfg(test)]
+async fn rename_phase(phase: RenamePhase) {
+    if let Ok(wait) = RENAME_PHASE_HOOK.try_with(|hook| hook(phase)) {
+        wait.await;
+    }
 }
 
 /// If `name` is checked out in a LINKED worktree (one other than `repo_path`
@@ -1857,7 +1972,7 @@ fn is_session_holder(
 ) -> bool {
     use crate::git::worktree::normalize_wt_path;
     let holder = normalize_wt_path(holder);
-    branch.starts_with("gd/session/")
+    branch.starts_with(SESSION_BRANCH_PREFIX)
         || session_paths.iter().any(|p| normalize_wt_path(p) == holder)
         || app_data_root.is_some_and(|root| holder.starts_with(&format!("{root}/")))
 }
@@ -2468,14 +2583,16 @@ mod tests {
         divergence_out_of_range, git_branch_merge_states, git_branches,
         git_checkout_remote_branch_core, git_create_branch_core, git_default_branch,
         git_delete_branch_core, git_rename_branch_core, is_config_lock_contention,
-        merge_diverged_in_worktree, parse_cherry_counts, parse_upstream_track, update_branch_from,
-        update_worktree_path, validate_branch_name, validate_ref_name, BranchRewriteStatus,
-        MergePair, UpdatePins, RENAMED_CONFIG_LEFT_BEHIND, UPSTREAM_WRITE_FAILED,
+        merge_diverged_in_worktree, parse_cherry_counts, parse_upstream_track,
+        refuse_session_rename, update_branch_from, update_worktree_path, validate_branch_name,
+        validate_ref_name, BranchRewriteStatus, MergePair, RenameBranchOutcome, UpdatePins,
+        RENAMED_CONFIG_LEFT_BEHIND, UPSTREAM_WRITE_FAILED,
     };
     use super::{
         branch_tip_sha, current_branch_name, is_session_holder, name_paths, update_in_holder,
         worktree_holding_branch, HolderMerge, UpdateBranchOutcome,
     };
+    use super::{RenamePhase, RenamePhaseHook, RENAME_PHASE_HOOK};
     use crate::error::AppError;
     use crate::git::runner::{
         acquire_repo_lock, hold_config_lock, release_config_lock_before_attempt, run_git,
@@ -2483,6 +2600,7 @@ mod tests {
     };
     use crate::state::AppState;
     use std::collections::HashSet;
+    use std::sync::Arc;
     use std::time::Duration;
 
     // Full decision table for the create-branch argv: checkout × start_point ×
@@ -3163,8 +3281,15 @@ mod tests {
     /// `review_notes::store_path`, whose cfg(test) arm keeps them off the developer's
     /// real store; the identity key is this fixture's own git dir, so the shared test
     /// store file can't collide with another test's entries.
+    // Every test that reaches the rename core holds the local-PR store's serializing guard
+    // across its awaits: the core's lock file and moves resolve through that store's
+    // process-wide override (each `#[tokio::test]` owns a current-thread runtime).
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn rename_carries_the_reviewer_note_to_the_new_branch() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
         let (_base, base) = temp_base("rename-review-note");
         let repo = base.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
@@ -3200,8 +3325,10 @@ mod tests {
         );
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn rename_succeeds_without_migrating_notes_when_identity_is_unavailable() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
         let (_base, base) = temp_base("rename-identity-error");
         let repo = base.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
@@ -3238,6 +3365,533 @@ mod tests {
         );
         assert_eq!(crate::review_notes::note_body(&identity, "renamed"), None);
         assert_eq!(crate::review_notes::note_body(&repo, "renamed"), None);
+    }
+
+    /// Both directions refused, any case, the old name first; ordinary names pass.
+    #[test]
+    fn rename_refuses_the_agent_session_namespace_both_ways() {
+        let refusal = |old: &str, new: &str| match refuse_session_rename(old, new) {
+            Err(AppError::InvalidArgument(m)) => m,
+            other => panic!("{old} -> {new}: expected a refusal, got {other:?}"),
+        };
+        assert_eq!(
+            refusal("gd/session/abc", "feature"),
+            "\"gd/session/abc\" is an agent-session branch — renaming it would break its session's Resume."
+        );
+        assert_eq!(
+            refusal("feature", "gd/session/abc"),
+            "\"gd/session/abc\" is in gd/session/, which is reserved for agent sessions — choose another name."
+        );
+        assert_eq!(
+            refusal("feature", "GD/Session/x"),
+            "\"GD/Session/x\" is in gd/session/, which is reserved for agent sessions — choose another name."
+        );
+        assert!(refusal("Gd/SESSION/a", "gd/session/b")
+            .starts_with("\"Gd/SESSION/a\" is an agent-session"));
+        for (old, new) in [
+            ("feature", "renamed"),
+            ("gd/sessions/x", "gd/session"),
+            ("feat/x", "feat/y"),
+        ] {
+            assert!(refuse_session_rename(old, new).is_ok(), "{old} -> {new}");
+        }
+    }
+
+    /// The guard runs before git: a refused rename leaves the branch where it was.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_session_rename_is_refused_before_git_runs() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let (_base, base) = temp_base("rename-session");
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", "feature"]).await;
+        let state = AppState::default();
+        let err = git_rename_branch_core(
+            &state,
+            repo_s.clone(),
+            "feature".into(),
+            "GD/Session/x".into(),
+        )
+        .await
+        .expect_err("renaming into the namespace is refused");
+        assert!(matches!(err, AppError::InvalidArgument(_)), "{err:?}");
+        assert!(run(&repo_s, &["branch", "--list", "feature"])
+            .await
+            .contains("feature"));
+    }
+
+    #[test]
+    fn rename_outcome_serializes_its_warning_in_camel_case() {
+        let some = RenameBranchOutcome {
+            warning: Some("Some local pull requests may still point at feat/x.".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&some).unwrap(),
+            r#"{"warning":"Some local pull requests may still point at feat/x."}"#
+        );
+        let none = RenameBranchOutcome { warning: None };
+        assert_eq!(serde_json::to_string(&none).unwrap(), r#"{"warning":null}"#);
+    }
+
+    /// Open local PRs follow a real rename through the core; closed ones and the reply's
+    /// warning stay as they were.
+    // The serializing guard spans the awaits on purpose — it keeps the store override
+    // installed for the whole body (each `#[tokio::test]` owns a current-thread runtime).
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn rename_carries_open_local_prs_to_the_new_branch() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_base, base) = temp_base("rename-local-prs");
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", "feat/x"]).await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        let open = crate::local_prs::create(&identity, "Open", "", "main", "feat/x")
+            .await
+            .unwrap();
+        let closed = crate::local_prs::create(&identity, "Closed", "", "main", "feat/x")
+            .await
+            .unwrap();
+        let (open_id, closed_id) = (
+            open["id"].as_str().unwrap().to_string(),
+            closed["id"].as_str().unwrap().to_string(),
+        );
+        crate::local_prs::set_status(&identity, &closed_id, "closed")
+            .await
+            .unwrap();
+
+        let state = AppState::default();
+        let outcome =
+            git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into())
+                .await
+                .expect("rename succeeds");
+        assert_eq!(outcome.warning, None);
+        assert_eq!(
+            crate::local_prs::get(&identity, &open_id).unwrap()["head"],
+            "feat/y"
+        );
+        assert_eq!(
+            crate::local_prs::get(&identity, &closed_id).unwrap()["head"],
+            "feat/x"
+        );
+    }
+
+    /// A migration that cannot run never fails the completed rename; it rides back as the
+    /// warning both surfaces show.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_failed_local_pr_migration_returns_the_warning() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let (_base, base) = temp_base("rename-local-prs-fail");
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", "feat/x"]).await;
+        let state = AppState::default();
+        let outcome = crate::git::repo::TEST_IDENTITY_ERROR
+            .scope(
+                || AppError::Timeout(30),
+                git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into()),
+            )
+            .await
+            .expect("the rename itself succeeds");
+        assert_eq!(
+            outcome.warning.as_deref(),
+            Some("Some local pull requests may still point at feat/x.")
+        );
+        assert!(run(&repo_s, &["branch", "--list", "feat/y"])
+            .await
+            .contains("feat/y"));
+    }
+
+    /// A hook that, at `at`, signals `reached` and then waits (bounded) for `released`:
+    /// a second rename racing unserialized finishes inside that window, a serialized one
+    /// cannot start its git step until the held rename has released its rename lock.
+    fn hold_rename_at(
+        at: RenamePhase,
+        reached: Arc<tokio::sync::Notify>,
+        released: Arc<tokio::sync::Notify>,
+    ) -> RenamePhaseHook {
+        Arc::new(move |phase| {
+            let (reached, released) = (reached.clone(), released.clone());
+            Box::pin(async move {
+                if phase == at {
+                    reached.notify_one();
+                    let _ = tokio::time::timeout(Duration::from_secs(1), released.notified()).await;
+                }
+            })
+        })
+    }
+
+    /// Renames `a → b` held at `at`, starts `b → c` once it is held there, and asserts the
+    /// chain lands whole: the branch, its open local PR, and its reviewer note all on `c`.
+    /// The caller holds the local-PR store override.
+    async fn assert_chained_renames_serialize(at: RenamePhase, tag: &str) {
+        let (_base, base) = temp_base(tag);
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", "a"]).await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        let pr = crate::local_prs::create(&identity, "Chained", "", "main", "a")
+            .await
+            .unwrap();
+        let pr_id = pr["id"].as_str().unwrap().to_string();
+        crate::review_notes::set(&identity, "a", "follow the chain")
+            .await
+            .unwrap();
+
+        let reached = Arc::new(tokio::sync::Notify::new());
+        let released = Arc::new(tokio::sync::Notify::new());
+        let state = AppState::default();
+        let first = RENAME_PHASE_HOOK.scope(
+            hold_rename_at(at, reached.clone(), released.clone()),
+            git_rename_branch_core(&state, repo_s.clone(), "a".into(), "b".into()),
+        );
+        let second = async {
+            reached.notified().await;
+            let out = git_rename_branch_core(&state, repo_s.clone(), "b".into(), "c".into()).await;
+            released.notify_one();
+            out
+        };
+        let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::join!(first, second)
+        })
+        .await
+        .expect("neither rename deadlocks");
+        first.expect("a -> b succeeds");
+        second.expect("b -> c succeeds once a -> b is done");
+
+        assert!(run(&repo_s, &["branch", "--list", "c"]).await.contains('c'));
+        assert!(run(&repo_s, &["branch", "--list", "a", "b"])
+            .await
+            .trim()
+            .is_empty());
+        assert_eq!(
+            crate::local_prs::get(&identity, &pr_id).unwrap()["head"],
+            "c",
+            "the local PR follows the whole chain"
+        );
+        assert_eq!(
+            crate::review_notes::note_body(&identity, "c").as_deref(),
+            Some("follow the chain")
+        );
+        assert_eq!(crate::review_notes::note_body(&identity, "b"), None);
+        assert_eq!(crate::review_notes::note_body(&identity, "a"), None);
+    }
+
+    /// The second rename starts in the first one's gap (git done, moves pending): its
+    /// git step must wait, or its moves find nothing under `b` and the first's land on a
+    /// name that no longer exists.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rename_started_in_anothers_gap_waits_for_its_moves() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        assert_chained_renames_serialize(RenamePhase::BeforeMoves, "rename-chain-gap").await;
+    }
+
+    /// The second rename starts while the first holds the rename lock but has not run git:
+    /// it must queue behind the whole first rename, not race its git step.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rename_started_before_anothers_git_step_queues_behind_it() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        assert_chained_renames_serialize(RenamePhase::BeforeGit, "rename-chain-pre-git").await;
+    }
+
+    /// A repo holding branch `feat/x`, for the rename-lock tests below.
+    async fn repo_with_feat_x(tag: &str) -> (tempfile::TempDir, String) {
+        let (base_dir, base) = temp_base(tag);
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", "feat/x"]).await;
+        (base_dir, repo_s)
+    }
+
+    /// A rename lock another process holds (a handle of the test's own stands in) makes a
+    /// rename wait out its budget, then refuse as busy BEFORE git runs. The hold's file is
+    /// backdated past the 10 s age the store lock evicts by; nothing reads an OS lock's
+    /// age, so the holder keeps it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rename_lock_held_elsewhere_waits_then_refuses_before_git() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_base, repo_s) = repo_with_feat_x("rename-lock-busy").await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        let held = crate::local_prs::tests::hold_rename_lock_elsewhere(&identity);
+        held.set_modified(std::time::SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
+
+        let wait = Duration::from_millis(400);
+        let started = std::time::Instant::now();
+        let state = AppState::default();
+        let err = crate::local_prs::RENAME_LOCK_WAIT
+            .scope(
+                wait,
+                git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into()),
+            )
+            .await
+            .expect_err("a held rename lock refuses the rename");
+        assert!(started.elapsed() >= wait, "refused before its wait ran out");
+        assert!(
+            matches!(&err, AppError::Busy { holder } if holder == "another branch rename"),
+            "{err:?}"
+        );
+        assert!(run(&repo_s, &["branch", "--list", "feat/x"])
+            .await
+            .contains("feat/x"));
+        assert!(run(&repo_s, &["branch", "--list", "feat/y"])
+            .await
+            .trim()
+            .is_empty());
+        assert!(
+            !crate::local_prs::tests::rename_lock_takeable(&identity, Duration::ZERO),
+            "the aged hold is still its holder's"
+        );
+        drop(held);
+        assert!(crate::local_prs::tests::rename_lock_takeable(
+            &identity,
+            Duration::from_secs(5)
+        ));
+    }
+
+    /// A local-PR write from another task lands while a rename is held before its git
+    /// step, with the store's cross-process lock free: the rename lock orders renames
+    /// only, so no store writer in any process queues behind a rename's git work.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_local_pr_write_during_a_rename_is_not_held_behind_its_git_step() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_base, repo_s) = repo_with_feat_x("rename-lock-store-free").await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+
+        let reached = Arc::new(tokio::sync::Notify::new());
+        let released = Arc::new(tokio::sync::Notify::new());
+        let state = AppState::default();
+        let rename = RENAME_PHASE_HOOK.scope(
+            hold_rename_at(RenamePhase::BeforeGit, reached.clone(), released.clone()),
+            git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into()),
+        );
+        let writer = async {
+            reached.notified().await;
+            let store = crate::local_prs::store_path().unwrap();
+            let store_lock_free = tokio::task::spawn_blocking(move || {
+                crate::store_lock::lock_store(&store).acquired()
+            })
+            .await
+            .unwrap();
+            let written = tokio::time::timeout(
+                Duration::from_secs(5),
+                crate::local_prs::create(&identity, "During", "", "main", "feat/x"),
+            )
+            .await;
+            released.notify_one();
+            (store_lock_free, written)
+        };
+        let (renamed, (store_lock_free, written)) =
+            tokio::time::timeout(Duration::from_secs(30), async {
+                tokio::join!(rename, writer)
+            })
+            .await
+            .expect("neither side hangs");
+        renamed.expect("the rename succeeds");
+        assert!(
+            store_lock_free,
+            "the store lock is not held across the rename's git step"
+        );
+        let pr = written
+            .expect("the write completes during the rename")
+            .unwrap();
+        assert_eq!(
+            crate::local_prs::get(&identity, pr["id"].as_str().unwrap()).unwrap()["head"],
+            "feat/y",
+            "written before the move, so the move carried it"
+        );
+    }
+
+    /// The rename lock is free again however a rename ends: a success, a git failure, and
+    /// a success whose local-PR move failed on a malformed store.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn the_rename_lock_is_released_after_every_outcome() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_base, repo_s) = repo_with_feat_x("rename-lock-release").await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        let state = AppState::default();
+        let takeable =
+            || crate::local_prs::tests::rename_lock_takeable(&identity, Duration::from_secs(5));
+
+        git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into())
+            .await
+            .expect("the rename succeeds");
+        assert!(takeable(), "released after a success");
+
+        let err = git_rename_branch_core(&state, repo_s.clone(), "missing".into(), "other".into())
+            .await
+            .expect_err("git refuses a missing branch");
+        assert!(matches!(err, AppError::Git { .. }), "{err:?}");
+        assert!(takeable(), "released after a git failure");
+
+        std::fs::write(crate::local_prs::store_path().unwrap(), "{ not json").unwrap();
+        let outcome =
+            git_rename_branch_core(&state, repo_s.clone(), "feat/y".into(), "feat/z".into())
+                .await
+                .expect("a failed move never fails the rename");
+        assert!(outcome.warning.is_some(), "the move failed");
+        assert!(takeable(), "released after a failed move");
+    }
+
+    /// The rename lock is per repository: with repo A's held (its in-process mutex and its
+    /// file), a rename in repo B completes inside its own wait budget, and A's stays held.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn renames_in_two_repositories_never_contend() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_a_base, repo_a) = repo_with_feat_x("rename-lock-repo-a").await;
+        let (_b_base, repo_b) = repo_with_feat_x("rename-lock-repo-b").await;
+        let identity_a = crate::git::repo::repo_identity(&repo_a).await.unwrap();
+        let held_a = crate::local_prs::lock_for_rename(&identity_a)
+            .await
+            .unwrap();
+
+        let wait = Duration::from_secs(5);
+        let started = std::time::Instant::now();
+        let state = AppState::default();
+        crate::local_prs::RENAME_LOCK_WAIT
+            .scope(
+                wait,
+                git_rename_branch_core(&state, repo_b.clone(), "feat/x".into(), "feat/y".into()),
+            )
+            .await
+            .expect("repo A's held lock never queues repo B's rename");
+        assert!(started.elapsed() < wait, "B never waited out its budget");
+        assert!(run(&repo_b, &["branch", "--list", "feat/y"])
+            .await
+            .contains("feat/y"));
+        assert!(
+            !crate::local_prs::tests::rename_lock_takeable(&identity_a, Duration::ZERO),
+            "A's lock is still held"
+        );
+        drop(held_a);
+    }
+
+    /// A lock file that can't be opened never refuses the rename: git renames the branch,
+    /// and the local-PR move, whose store in that same directory can't be read either,
+    /// returns its warning. Both paths are occupied by directories, which no platform opens
+    /// as a file (a path under a FILE reads as not-found on Windows, an empty store).
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unusable_rename_lock_file_renames_and_warns() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        let (_base, repo_s) = repo_with_feat_x("rename-lock-unusable").await;
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        std::fs::create_dir_all(crate::local_prs::tests::rename_lock_file(&identity)).unwrap();
+        std::fs::create_dir_all(crate::local_prs::store_path().unwrap()).unwrap();
+
+        let state = AppState::default();
+        let outcome =
+            git_rename_branch_core(&state, repo_s.clone(), "feat/x".into(), "feat/y".into())
+                .await
+                .expect("an unusable lock file never refuses the rename");
+        assert_eq!(
+            outcome.warning.as_deref(),
+            Some("Some local pull requests may still point at feat/x.")
+        );
+        assert!(run(&repo_s, &["branch", "--list", "feat/y"])
+            .await
+            .contains("feat/y"));
+        assert!(run(&repo_s, &["branch", "--list", "feat/x"])
+            .await
+            .trim()
+            .is_empty());
+    }
+
+    /// A rename that passed the update check, then waited on the rename lock, re-checks
+    /// once it holds the lock: an update of its branch that started during the wait refuses
+    /// it before git runs. The rename is driven until it holds its in-process mutex, which
+    /// it takes only after the early check, while another handle holds the file.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rename_that_waited_refuses_an_update_started_during_the_wait() {
+        use crate::git::update_marker as marker;
+        let _serialized_store = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override_store = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
+        // A branch name no other test uses: the marker root override is process-wide.
+        let branch = "rename-waits-update";
+        let (_base, base) = temp_base("rename-lock-wait-update");
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_s = repo.to_string_lossy().into_owned();
+        init_repo(&repo_s, "r.txt").await;
+        run(&repo_s, &["branch", branch]).await;
+        let (_serialized, _override, root) = holder_marker_root(&repo_s);
+        let identity = crate::git::repo::repo_identity(&repo_s).await.unwrap();
+        let held = crate::local_prs::tests::hold_rename_lock_elsewhere(&identity);
+
+        let state = AppState::default();
+        let mut rename = std::pin::pin!(crate::local_prs::RENAME_LOCK_WAIT.scope(
+            Duration::from_secs(20),
+            git_rename_branch_core(&state, repo_s.clone(), branch.into(), "renamed".into()),
+        ));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !crate::local_prs::tests::rename_mutex_held(&identity) {
+            let polled = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(rename.as_mut(), cx))
+            })
+            .await;
+            assert!(polled.is_pending(), "the rename waits on the held lock");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the rename never reached the lock"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let _live = marker::UpdateMarker::create_for(&root.join("gd-update-live"), branch)
+            .expect("the marker mints");
+        drop(held);
+
+        let err = tokio::time::timeout(Duration::from_secs(30), rename)
+            .await
+            .expect("the rename settles once the lock is free")
+            .expect_err("an update that started during the wait refuses the rename");
+        assert_eq!(
+            err.to_string(),
+            marker::branch_update_refusal(branch).to_string()
+        );
+        assert!(!run(&repo_s, &["branch", "--list", branch])
+            .await
+            .trim()
+            .is_empty());
+        assert!(run(&repo_s, &["branch", "--list", "renamed"])
+            .await
+            .trim()
+            .is_empty());
     }
 
     // --- Rewrite-aware divergence (`git_branch_rewrite_status`). ---
@@ -5666,6 +6320,9 @@ mod tests {
     #[tokio::test]
     async fn a_holder_update_holds_its_marker_against_a_rename_and_a_second_update() {
         use crate::git::update_marker as marker;
+        // The store guard first, then the marker root's: the order every test taking both
+        // uses.
+        let _serialized_store = crate::local_prs::tests::store_dir_lock();
         let (_guard, repo_s, main, _holder, porcelain) =
             held_branch_repo("held-marker", "held-marker").await;
         let (_serialized, _override, root) = holder_marker_root(&repo_s);
@@ -6244,8 +6901,12 @@ mod tests {
 
     /// A rename that loses the config lock still carries the branch's settings to the
     /// new name, through the repair's retry.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn a_rename_that_loses_the_config_lock_still_moves_the_branch_settings() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
         let (old, new) = ("cfg-lock-rename", "cfg-lock-renamed");
         let (_base, repo, repo_s) =
             repo_with_branch_settings("cfg-lock-rename", old, "unused").await;
@@ -6273,8 +6934,12 @@ mod tests {
 
     /// A lock held through the repair's retry surfaces git's own half-done error, so a
     /// rename whose settings stayed behind is never reported as a success.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn a_rename_whose_repair_also_loses_keeps_gits_error() {
+        let _serialized = crate::local_prs::tests::store_dir_lock();
+        let store_dir = tempfile::tempdir().unwrap();
+        let _override = crate::local_prs::tests::StoreDirOverride::set(store_dir.path());
         let (old, new) = ("cfg-lock-rename-held", "cfg-lock-rename-held2");
         let (_base, repo, repo_s) =
             repo_with_branch_settings("cfg-lock-rename-held", old, "unused").await;

@@ -684,6 +684,9 @@ The branch name in the header opens the **branch switcher** ({{kbd:show-branches
   just the one you're on. Basing on a remote branch (e.g. \`origin/epic/…\`) starts from the
   remote tip and leaves the new branch with **no upstream**, so its first push publishes it
   under its own name — pairs with pushing a branch without switching to it (below).
+  Renaming changes only the local name: a branch already on a remote keeps its name there
+  (the dialog notes it when that applies). Names under \`gd/session/\` are reserved
+  for agent sessions.
 - **Clean up branches** — from the switcher's menu or the command palette — opens a bulk
   sweep of stale branches: those **merged** into the default branch — directly, or, where
   the repository's forge connection can supply them, through a recent pull request, so
@@ -757,8 +760,11 @@ The branch name in the header opens the **branch switcher** ({{kbd:show-branches
   {{kbd:push-to-origin}} is the keyboard shortcut for pushing to **origin** specifically:
   with the **branches** list open it targets the **highlighted** branch, otherwise the
   **current** one, and pushes or publishes it to origin. A branch that tracks a different
-  remote, has diverged, or has nothing to push says so in a short message — for those, use
-  the branch's context menu.
+  remote, has diverged, or has nothing to push says so in a short message; for those, use
+  the branch's context menu. One that tracks a branch with a different name says so too:
+  push the current branch with **Push** in the sync bar, or a highlighted one from its
+  context menu. If a branch or what it tracks just changed outside the app, the shortcut
+  may ask you to press it again while the branch list catches up.
 - The **Remote** section lists branches on your remotes you haven't checked out locally
   yet — click one to check it out (creating a local tracking branch), or {{secondaryclick}} to
   **Delete on _origin_…**, a server-side delete that removes the branch from the remote for
@@ -915,7 +921,13 @@ right on the **Push** and **Pull** buttons.
 - **Pull** ({{kbd:pull}}) is fast-forward only by design — it won't create surprise merge
   commits; the menu's caret offers rebase and merge for reconciling a diverged branch.
 - **Push** ({{kbd:push}}) sends your commits. For a branch with no upstream yet, you'll
-  see **Publish branch** instead.
+  see **Publish branch** instead. When the branch tracks a remote branch with a different
+  name (after renaming a pushed branch, say) and Git would refuse a plain push, **Push**
+  opens a small menu: push to the branch it tracks, or publish under its own name and
+  track that. When Git knows the tracked branch is the remote's default branch, only the
+  publish item appears. While the names differ there's no force push: a diverged branch
+  is reconciled from the **Pull** menu first. Setups that route pushes elsewhere keep a
+  plain **Push**.
 
 ## Publish a local repo
 
@@ -1666,7 +1678,8 @@ written into the repo. When you're ready, **promote** a local PR to a real pull 
 on GitHub or Bitbucket, or a merge request on GitLab, in one click, history preserved.
 On a GitHub or GitLab repo the description and comment box complete **@** mentions and
 **#** references (**!** merge requests too on GitLab) like the hosted ones, and render
-them as links you can click through.
+them as links you can click through. Rename a branch in GitDesktop (in the app or through
+its MCP server) and open local PRs whose head or base used the old name follow it.
 
 Its Conversation is the same **date-sorted activity feed** as the hosted PRs: it opens with
 a **created** marker, interleaves the branch's **pushed commits** (grouped, each short SHA

@@ -38,10 +38,14 @@
 //! OS-level file lock, which fails open. `atomic_write` gives torn-file safety; the
 //! locks give lost-update safety. The GUI's plugin-store writes hold the same
 //! cross-process lock through [`crate::store_lock_commands`]; cold-start instances are
-//! the exception, writing a `coldstart-*` alias no second process touches.
+//! the exception, writing a `coldstart-*` alias no second process touches. Branch
+//! renames are ordered per repository by a separate [`RenameLock`], which refuses on
+//! contention instead of failing open.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -81,6 +85,139 @@ fn prs_lock() -> &'static Mutex<()> {
     PRS_LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// How often a waiting rename re-tries the OS lock.
+const RENAME_LOCK_POLL: Duration = Duration::from_millis(25);
+
+/// What a rename refused for contention reports it queued behind.
+const RENAME_BUSY_HOLDER: &str = "another branch rename";
+
+/// Orders one repository's branch renames, in this process and across processes, from
+/// before a rename's git step until both of its app-data moves have written. It holds no
+/// store lock. Field order is release order: the OS file lock, then the in-process mutex.
+/// The file is `None` when its location was unusable: ordering is then in-process only.
+pub(crate) struct RenameLock {
+    _file: Option<std::fs::File>,
+    _in_process: tokio::sync::OwnedMutexGuard<()>,
+}
+
+/// One repository's in-process rename mutex, keyed by its identity. Same-process renames
+/// queue here, fairly, before contending for the file, whose OS lock would order them
+/// only by polling. Entries are never removed: one per repository renamed in this process.
+fn rename_mutex(identity: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static RENAME_MUTEXES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+        OnceLock::new();
+    RENAME_MUTEXES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(identity.to_string())
+        .or_default()
+        .clone()
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Replaces [`lock_for_rename`]'s wait budget for the rename it is scoped to.
+    pub(crate) static RENAME_LOCK_WAIT: Duration;
+}
+
+/// Take `identity`'s [`RenameLock`] within the repo lock's wait bound, or refuse with
+/// [`AppError::Busy`]: contention refuses before git runs, since a rename run unordered
+/// can land its moves on a dead name. A lock file opened read-only still orders. Only an
+/// unusable one (an unusable app-data dir, a file that can't be opened at all, a lock
+/// error other than contention) falls back to in-process ordering: a directory at fault
+/// leaves the moves' store beside it unusable too.
+pub(crate) async fn lock_for_rename(identity: &str) -> AppResult<RenameLock> {
+    #[cfg(test)]
+    let wait = RENAME_LOCK_WAIT
+        .try_with(|wait| *wait)
+        .unwrap_or(crate::git::runner::LOCK_WAIT_TIMEOUT);
+    #[cfg(not(test))]
+    let wait = crate::git::runner::LOCK_WAIT_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + wait;
+    let busy = || AppError::Busy {
+        holder: RENAME_BUSY_HOLDER.to_string(),
+    };
+    let in_process = tokio::time::timeout_at(deadline, rename_mutex(identity).lock_owned())
+        .await
+        .map_err(|_| busy())?;
+    let path = match rename_lock_path(identity) {
+        Ok(path) => path,
+        Err(e) => return Ok(in_process_only(in_process, e)),
+    };
+    // A file another account left read-only still locks: neither flock nor LockFileEx
+    // needs write access.
+    let file = match open_rename_lock(&path) {
+        Ok(file) => file,
+        Err(rw) => match std::fs::OpenOptions::new().read(true).open(&path) {
+            Ok(file) => file,
+            Err(ro) => {
+                let why = format!("{}: {rw}; read-only: {ro}", path.display());
+                return Ok(in_process_only(in_process, why));
+            }
+        },
+    };
+    // Polled here, not on a blocking thread: `try_lock` never blocks, and a dropped
+    // caller then leaves no poller behind to take the lock after it is gone.
+    loop {
+        match file.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(RENAME_LOCK_POLL).await;
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Err(busy()),
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Ok(in_process_only(in_process, lock_file_failure(&path, e)));
+            }
+        }
+    }
+    Ok(RenameLock {
+        _file: Some(file),
+        _in_process: in_process,
+    })
+}
+
+/// The degraded [`RenameLock`]: logged once, never refused (see [`lock_for_rename`]).
+fn in_process_only(
+    in_process: tokio::sync::OwnedMutexGuard<()>,
+    why: impl std::fmt::Display,
+) -> RenameLock {
+    eprintln!("gitdesktop: branch-rename lock file unusable, ordering in this process only: {why}");
+    RenameLock {
+        _file: None,
+        _in_process: in_process,
+    }
+}
+
+fn lock_file_failure(path: &Path, e: std::io::Error) -> String {
+    format!("{}: {e}", path.display())
+}
+
+/// `identity`'s lock file, beside the store so both processes resolve it through the same
+/// seam, and never the store's own `.lock`, which a waiter evicts by age. Hashed with the
+/// build-stable [`crate::automation_claims::fnv1a_64`], so every build names it alike.
+fn rename_lock_path(identity: &str) -> AppResult<PathBuf> {
+    Ok(store_path()?.with_file_name(format!(
+        "branch-rename-{:016x}.lock",
+        crate::automation_claims::fnv1a_64(identity.as_bytes())
+    )))
+}
+
+/// Opens (creating it and its directory when absent) the lock file. It is never deleted:
+/// the OS lock on it is the whole signal, released when the holding handle closes,
+/// including by the holder's exit, so no age can make a live hold look abandoned.
+fn open_rename_lock(path: &Path) -> std::io::Result<std::fs::File> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
 /// In-process test override, consulted by [`store_path`] before the real app-data
 /// resolution — the ONLY seam a test may use to reach this store, and the reason an
 /// in-crate test can drive the public write fns without touching the developer's own
@@ -99,22 +236,40 @@ fn swap_test_store_dir(dir: Option<PathBuf>) -> Option<PathBuf> {
     std::mem::replace(&mut *slot, dir)
 }
 
-/// Resolve the absolute path of the `local-prs.json` the frontend store writes.
-/// Mirrors `tauri-plugin-store` v2's `BaseDirectory::AppData` resolution
-/// (`dirs::data_dir()/<identifier>`) — see the module contract. Under `cfg(test)` an
-/// installed [`TEST_STORE_DIR`] wins.
+/// Pure resolution of the store's directory, in precedence order (mirroring
+/// `review_notes::resolve_store_base`):
+/// 1. an installed test override ([`TEST_STORE_DIR`]);
+/// 2. under `cfg!(test)`, a temp subdir, so no in-crate test can reach the user's real
+///    store (the branch-rename migration runs for real under `cargo test`);
+/// 3. otherwise the real app-data dir (`dirs::data_dir()/<identifier>`), mirroring
+///    `tauri-plugin-store` v2's `BaseDirectory::AppData` — see the module contract.
+pub(crate) fn resolve_store_dir(
+    test_override: Option<PathBuf>,
+    is_test: bool,
+) -> AppResult<PathBuf> {
+    match test_override {
+        Some(dir) => Ok(dir),
+        None if is_test => Ok(std::env::temp_dir().join("gd-local-prs-test")),
+        None => {
+            let data = dirs::data_dir().ok_or_else(|| {
+                AppError::Command("could not resolve the app-data directory".to_string())
+            })?;
+            Ok(data.join(APP_IDENTIFIER))
+        }
+    }
+}
+
+/// Resolve the absolute path of the `local-prs.json` the frontend store writes — see
+/// [`resolve_store_dir`] for how the directory is chosen.
 pub fn store_path() -> AppResult<PathBuf> {
     #[cfg(test)]
-    if let Some(dir) = TEST_STORE_DIR
+    let test_override = TEST_STORE_DIR
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
-    {
-        return Ok(dir.join(STORE_FILE));
-    }
-    let data = dirs::data_dir()
-        .ok_or_else(|| AppError::Command("could not resolve the app-data directory".to_string()))?;
-    Ok(data.join(APP_IDENTIFIER).join(STORE_FILE))
+        .clone();
+    #[cfg(not(test))]
+    let test_override = None;
+    Ok(resolve_store_dir(test_override, cfg!(test))?.join(STORE_FILE))
 }
 
 /// Read the whole store file as a JSON object. A missing file is an empty object;
@@ -432,6 +587,71 @@ fn fold_legacy_key(store: &mut Map<String, Value>, identity: &str, legacy: &str)
     true
 }
 
+/// Repoint OPEN local PRs' `head`/`base` from `from` to `to` under `identity`, after
+/// folding any legacy checkout-path key ([`consolidate`]'s fold) so records minted under
+/// an old path are not missed. Closed/merged records keep their history. Runs inside the
+/// caller's `_ordered` rename lock, which it never takes, and holds this store's own lock
+/// pair only for its read-modify-write, as every writer here does.
+/// Returns how many records changed.
+pub(crate) async fn rename_branch(
+    _ordered: &RenameLock,
+    identity: &str,
+    legacy: &str,
+    from: &str,
+    to: &str,
+) -> AppResult<u32> {
+    let (identity, legacy, from, to) = (
+        identity.to_string(),
+        legacy.to_string(),
+        from.to_string(),
+        to.to_string(),
+    );
+    crate::store_lock::locked_store_task(move || rename_branch_sync(&identity, &legacy, &from, &to))
+        .await
+}
+
+/// The locked read-modify-write behind [`rename_branch`], on the caller's own thread:
+/// fold, then rename, in one pass. A repo with no entry is the common case, so a missing
+/// key is `Ok(0)`.
+fn rename_branch_sync(identity: &str, legacy: &str, from: &str, to: &str) -> AppResult<u32> {
+    let path = store_path()?;
+    let _guard = prs_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let _store_lock = crate::store_lock::lock_store(&path);
+    let mut store = read_store(&path)?;
+    let folded = fold_legacy_key(&mut store, identity, legacy);
+    let changed =
+        existing_key(&store, identity).map_or(0, |key| rename_refs_in(&mut store, &key, from, to));
+    if folded || changed > 0 {
+        write_store(&path, &store)?;
+    }
+    Ok(changed)
+}
+
+/// The pure edit behind [`rename_branch`]: in `key`'s array, every record whose
+/// `status` is `"open"` gets an exact-match `head` and/or `base` of `from` set to `to`,
+/// edited as `Value` maps so unknown fields survive. Returns how many records changed;
+/// a non-array entry or non-object record is left alone.
+fn rename_refs_in(store: &mut Map<String, Value>, key: &str, from: &str, to: &str) -> u32 {
+    let Some(list) = store.get_mut(key).and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut changed = 0;
+    for pr in list.iter_mut().filter_map(Value::as_object_mut) {
+        if pr.get("status").and_then(Value::as_str) != Some("open") {
+            continue;
+        }
+        let mut touched = false;
+        for field in ["head", "base"] {
+            if pr.get(field).and_then(Value::as_str) == Some(from) {
+                pr.insert(field.to_string(), Value::String(to.to_string()));
+                touched = true;
+            }
+        }
+        changed += u32::from(touched);
+    }
+    changed
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -464,10 +684,10 @@ pub(crate) mod tests {
     /// Points the store at `dir` for as long as it's held and restores the prior override
     /// on drop — panics included, so a failing test can't leave one standing for whichever
     /// test is next through the lock.
-    struct StoreDirOverride(Option<PathBuf>);
+    pub(crate) struct StoreDirOverride(Option<PathBuf>);
 
     impl StoreDirOverride {
-        fn set(dir: &Path) -> Self {
+        pub(crate) fn set(dir: &Path) -> Self {
             Self(swap_test_store_dir(Some(dir.to_path_buf())))
         }
     }
@@ -658,6 +878,289 @@ pub(crate) mod tests {
         // Unchanged.
         assert_eq!(store[identity].as_array().unwrap().len(), 1);
         assert_eq!(store.len(), 1);
+    }
+
+    /// Negative control for the `cfg(test)` default: with no override installed, the
+    /// store resolves to the temp subdir, never under the real app-data dir — while the
+    /// production arm still resolves exactly where the store plugin writes.
+    #[test]
+    fn store_path_under_test_never_resolves_to_the_real_app_data_dir() {
+        let _serialized = store_dir_lock();
+        let path = store_path().unwrap();
+        assert_eq!(
+            path,
+            std::env::temp_dir()
+                .join("gd-local-prs-test")
+                .join(STORE_FILE)
+        );
+        let real_root = dirs::data_dir().expect("app-data dir");
+        assert!(
+            !path.starts_with(&real_root),
+            "{} is under the real app-data dir",
+            path.display()
+        );
+        assert_eq!(
+            resolve_store_dir(None, false).unwrap(),
+            real_root.join(APP_IDENTIFIER)
+        );
+        let over = PathBuf::from("C:/tmp/x");
+        assert_eq!(resolve_store_dir(Some(over.clone()), true).unwrap(), over);
+    }
+
+    fn pr(id: &str, status: &str, base: &str, head: &str) -> Value {
+        json!({ "id": id, "status": status, "base": base, "head": head })
+    }
+
+    #[test]
+    fn rename_refs_in_moves_open_heads_and_bases_only() {
+        let key = "C:/repo/.git";
+        let mut store = Map::new();
+        store.insert(
+            key.to_string(),
+            json!([
+                pr("head-match", "open", "main", "feat/x"),
+                pr("base-match", "open", "feat/x", "topic"),
+                pr("both-match", "open", "feat/x", "feat/x"),
+                pr("no-match", "open", "main", "feat/xy"),
+                pr("closed", "closed", "main", "feat/x"),
+                pr("merged", "merged", "feat/x", "feat/x"),
+                { "id": "extra", "status": "open", "base": "main", "head": "feat/x",
+                  "futureField": { "keep": [1, 2] } },
+            ]),
+        );
+        store.insert(
+            "C:/other/.git".to_string(),
+            json!([pr("other", "open", "main", "feat/x")]),
+        );
+
+        assert_eq!(rename_refs_in(&mut store, key, "feat/x", "feat/y"), 4);
+        let arr = store[key].as_array().unwrap();
+        let get = |id: &str| arr.iter().find(|p| p["id"] == id).unwrap().clone();
+        assert_eq!(get("head-match")["head"], "feat/y");
+        assert_eq!(get("head-match")["base"], "main");
+        assert_eq!(get("base-match")["base"], "feat/y");
+        assert_eq!(get("base-match")["head"], "topic");
+        assert_eq!(get("both-match")["base"], "feat/y");
+        assert_eq!(get("both-match")["head"], "feat/y");
+        assert_eq!(get("no-match")["head"], "feat/xy");
+        assert_eq!(get("closed")["head"], "feat/x");
+        assert_eq!(get("merged")["base"], "feat/x");
+        assert_eq!(get("merged")["head"], "feat/x");
+        assert_eq!(get("extra")["head"], "feat/y");
+        assert_eq!(get("extra")["futureField"], json!({ "keep": [1, 2] }));
+        // Another repo's records are untouched.
+        assert_eq!(store["C:/other/.git"][0]["head"], "feat/x");
+    }
+
+    #[test]
+    fn rename_refs_in_counts_zero_when_nothing_matches() {
+        let key = "C:/repo/.git";
+        let mut store = Map::new();
+        store.insert(key.to_string(), json!([pr("a", "open", "main", "topic")]));
+        let before = store.clone();
+        assert_eq!(rename_refs_in(&mut store, key, "feat/x", "feat/y"), 0);
+        assert_eq!(store, before);
+        assert_eq!(
+            rename_refs_in(&mut store, "C:/missing/.git", "main", "x"),
+            0
+        );
+    }
+
+    /// Seeds a store whose open PR lives under a LEGACY checkout-path key, the shape a
+    /// worktree-opened repo left before identity keying.
+    fn legacy_keyed_store(dir: &Path, legacy: &str, identity: &str) {
+        let mut store = Map::new();
+        store.insert(
+            legacy.to_string(),
+            json!([pr("legacy-pr", "open", "main", "feat/x")]),
+        );
+        store.insert(
+            identity.to_string(),
+            json!([pr("identity-pr", "open", "feat/x", "topic")]),
+        );
+        write_store(&dir.join(STORE_FILE), &store).unwrap();
+    }
+
+    /// End to end through the rename lock and the locked move: the legacy-keyed record is
+    /// folded in first, so both PRs follow the rename. The negative control runs the same
+    /// fixture through the rename step alone and misses the legacy record, which is what
+    /// makes the fold load-bearing.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn rename_branch_consolidates_legacy_keys_first() {
+        let _serialized = store_dir_lock();
+        let (tmp, _unused) = tmp_store();
+        let _override = StoreDirOverride::set(tmp.path());
+        let (legacy, identity) = ("C:/wt/harbor", "C:/ProjectRepos/demo/harbor/.git");
+
+        legacy_keyed_store(tmp.path(), legacy, identity);
+        let ordered = lock_for_rename(identity).await.unwrap();
+        assert_eq!(
+            rename_branch(&ordered, identity, legacy, "feat/x", "feat/y")
+                .await
+                .unwrap(),
+            2
+        );
+        let back = list(identity).unwrap();
+        let get = |id: &str| back.iter().find(|p| p["id"] == id).unwrap().clone();
+        assert_eq!(get("legacy-pr")["head"], "feat/y");
+        assert_eq!(get("identity-pr")["base"], "feat/y");
+        assert!(!read_store(&store_path().unwrap())
+            .unwrap()
+            .contains_key(legacy));
+
+        legacy_keyed_store(tmp.path(), legacy, identity);
+        let mut raw = read_store(&store_path().unwrap()).unwrap();
+        assert_eq!(rename_refs_in(&mut raw, identity, "feat/x", "feat/y"), 1);
+        assert_eq!(
+            raw[legacy][0]["head"], "feat/x",
+            "missed without consolidate"
+        );
+    }
+
+    /// A held rename lock leaves the store's own locks free: a write from another task
+    /// lands at once, and the move under the lock takes the store pair without waiting on
+    /// the lock it runs inside. The timeouts turn a hang into a red test.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_held_rename_lock_leaves_store_writes_free_and_the_move_never_relocks() {
+        let _serialized = store_dir_lock();
+        let (tmp, _unused) = tmp_store();
+        let _override = StoreDirOverride::set(tmp.path());
+        let identity = "C:/ProjectRepos/demo/ordered/.git";
+        create(identity, "Before", "", "main", "feat/x")
+            .await
+            .unwrap();
+
+        let ordered = lock_for_rename(identity).await.unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            create(identity, "During", "", "main", "feat/x"),
+        )
+        .await
+        .expect("a store write never waits on the rename lock")
+        .unwrap();
+        let changed = tokio::time::timeout(
+            Duration::from_secs(10),
+            rename_branch(&ordered, identity, identity, "feat/x", "feat/y"),
+        )
+        .await
+        .expect("the move never waits on the lock it runs inside")
+        .unwrap();
+        assert_eq!(changed, 2, "both writes landed before the move");
+        drop(ordered);
+        assert!(rename_lock_takeable(identity, Duration::from_secs(5)));
+    }
+
+    /// An app-data dir that cannot hold the lock file still yields the lock, which keeps
+    /// ordering this process's renames of that repository, and only that repository's.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unwritable_lock_dir_falls_back_to_in_process_ordering() {
+        let _serialized = store_dir_lock();
+        let (tmp, _unused) = tmp_store();
+        let blocker = tmp.path().join("not-a-dir");
+        std::fs::write(&blocker, "a file where the app-data dir should be").unwrap();
+        let _override = StoreDirOverride::set(&blocker.join("app-data"));
+        let (identity, other) = ("C:/ProjectRepos/demo/fallback/.git", "C:/elsewhere/.git");
+
+        let ordered = lock_for_rename(identity)
+            .await
+            .expect("an unusable lock file never refuses");
+        let second = RENAME_LOCK_WAIT
+            .scope(Duration::from_millis(100), lock_for_rename(identity))
+            .await
+            .err()
+            .expect("the same repository's next rename still queues");
+        assert!(
+            matches!(&second, AppError::Busy { holder } if holder == RENAME_BUSY_HOLDER),
+            "{second:?}"
+        );
+        let unrelated = RENAME_LOCK_WAIT
+            .scope(Duration::from_millis(100), lock_for_rename(other))
+            .await;
+        assert!(unrelated.is_ok(), "another repository's rename is not held");
+        drop(ordered);
+        assert!(
+            rename_mutex(identity).try_lock().is_ok(),
+            "released on drop"
+        );
+    }
+
+    /// A lock file that can't be opened for writing still orders across processes. On
+    /// Unix, root bypasses the permission check, so there the read-write open succeeds and
+    /// the assertions hold all the same.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_read_only_lock_file_still_orders_across_processes() {
+        let _serialized = store_dir_lock();
+        let (tmp, _unused) = tmp_store();
+        let _override = StoreDirOverride::set(tmp.path());
+        let identity = "C:/ProjectRepos/demo/read-only-lock/.git";
+        let path = rename_lock_path(identity).unwrap();
+        drop(open_rename_lock(&path).unwrap());
+        let set_readonly = |readonly: bool| {
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_readonly(readonly);
+            std::fs::set_permissions(&path, perms).unwrap();
+        };
+        set_readonly(true);
+
+        let ordered = lock_for_rename(identity).await.unwrap();
+        let held = !rename_lock_takeable(identity, Duration::ZERO);
+        drop(ordered);
+        let freed = rename_lock_takeable(identity, Duration::from_secs(5));
+        // Before any assert: Windows can't delete a read-only file with its tempdir.
+        set_readonly(false);
+        assert!(held, "the read-only handle holds the cross-process lock");
+        assert!(freed, "released on drop");
+    }
+
+    /// `identity`'s lock file, for a test that has to occupy its path.
+    pub(crate) fn rename_lock_file(identity: &str) -> PathBuf {
+        rename_lock_path(identity).unwrap()
+    }
+
+    /// Whether this process holds `identity`'s in-process rename mutex: a rename that has
+    /// it is past its own pre-lock steps and is waiting on, or holding, the file.
+    pub(crate) fn rename_mutex_held(identity: &str) -> bool {
+        rename_mutex(identity).try_lock().is_err()
+    }
+
+    /// Takes `identity`'s rename lock through a handle of the test's own, the stand-in for
+    /// another process's live hold; dropping the handle releases it. Waits out a
+    /// concurrent rename that still holds it.
+    pub(crate) fn hold_rename_lock_elsewhere(identity: &str) -> std::fs::File {
+        let held = open_rename_lock(&rename_lock_path(identity).unwrap()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while held.try_lock().is_err() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the rename lock never came free"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        held
+    }
+
+    /// Whether a fresh handle can take `identity`'s rename lock within `wait` (`ZERO` probes
+    /// once). Polled because on Linux a released flock can read held for a moment, while a
+    /// concurrently spawned child has yet to exec.
+    pub(crate) fn rename_lock_takeable(identity: &str, wait: Duration) -> bool {
+        let path = rename_lock_path(identity).unwrap();
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let probe = open_rename_lock(&path)
+                .or_else(|_| std::fs::File::open(&path))
+                .unwrap();
+            match probe.try_lock() {
+                Ok(()) => return true,
+                Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => return false,
+            }
+        }
     }
 
     #[test]
