@@ -12,6 +12,227 @@ under `changelog.d/` (see its README); those are assembled here at release time 
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-10-15
+
+### Changed
+
+- Filtered merge-request and issue lists on GitLab load their pages concurrently, so
+  narrow filters answer much faster.
+- Code blocks in markdown (comments, PR bodies, READMEs) now use the same syntax
+  palette as diffs and blame, so colors match everywhere.
+- Every open pull request now shows its merge status in one line under the
+  header, from the conflict check to its result, so you can see where it stands
+  against its base at a glance.
+- Publishing a local pull request or issue can no longer leave both copies open:
+  the local one closes first and links to its replacement once that's created,
+  and it reopens automatically if creating the remote one fails. Publishing to
+  Jira, like publishing to your forge, waits with a reason while you're offline.
+- Removing the upstream remote now works from the repository menu and command
+  palette — handy on clones of forks where repository settings are
+  admin-locked.
+
+### Fixed
+
+- Switching accounts or signing in as someone else now shows pull requests, issues,
+  reactions, and boards as the new account sees them, right away.
+- When files are kept out of AI context, notices and empty states name the
+  real reason: your AI ignore patterns, or file names that aren't readable
+  text. This covers commit messages, squash and reword messages, PR
+  descriptions, branch names, reviews, automated reviews, and conflict
+  resolution, and the AI is told the two causes apart. In **Manage files… → AI
+  excluded**, a file whose name contains a real U+FFFD character now shows the
+  rule that applies to it.
+- The AI provider test shows a clean one-line result, and its copy button now
+  captures the full provider message.
+- Review history, pending review drafts, automation rules, runs, results and
+  dismissals, local pull requests and issues, saved tasks, per-repository
+  notification overrides, Jira links, branch rules, saved pull request and
+  issue panel filters, the origin or upstream view choice, and agent numbering
+  all save safely when two GitDesktop windows or instances write at the same
+  time.
+- Publishing to Bitbucket now confirms the repository was created even when
+  the network drops while reading the response, and spells out the next step.
+- Projects changes you make while offline show as waiting until you reconnect:
+  the project and view dialogs, status updates, bulk changes, and an issue or
+  pull request's projects and project fields say they're waiting instead of
+  saving, and the board's toolbar names each project or view change still on
+  its way. Creating a project, creating or duplicating a view, closing or
+  reopening a project, and archiving, removing, or converting board items wait
+  with a reason while you're offline, and work again as soon as you reconnect.
+- Personal branch rules saved in one worktree apply in the repository's other
+  worktrees as soon as you switch to them.
+- The Changes pane shows its message ("Select a file to see its changes" or
+  "No changes to review") as soon as a repository opens.
+- A CI run cancel or re-run still on its way, including one pressed while
+  offline, shows as waiting with its reason everywhere that run appears: the
+  runs list menu, the run's own page, and a pull request's checks, even after
+  you move to another run and back, so a second press can't send it twice.
+  **Run workflow** and **Run pipeline** wait with a reason while you're
+  offline, and the button names what else it needs: a workflow, a workflow
+  with a manual trigger, or a branch or tag.
+- Closing or reopening a pull request, issue or discussion along with a comment
+  now stays in the repository you started in. If you switch repositories while
+  the comment posts, the close or reopen stops and a note tells you the comment
+  went out.
+- Code comments in light-mode syntax highlighting are easier to read — the
+  comment color now meets WCAG AA contrast on added lines and conflict tints.
+- When you switch or close the repository while one of its confirmations is
+  open, the prompt now closes as cancelled and a short note says what it
+  didn't do.
+- The conflict banner keeps its status readable and every action in view in the sidebar:
+  when they don't fit side by side, the buttons move to a second line, and with AI
+  features on **Resolve all with AI** shows as a compact sparkle icon that names itself
+  on hover.
+- Moving between pull requests, issues or workflow runs now lands in one clean
+  step, and History keeps a commit's comment list steady while you move between
+  commits.
+- Creating a branch from an issue's Development section always names the
+  branch after the issue on screen and links it to that same issue.
+- Clicking another file in the Changes list swaps the diff in one step, and
+  switching commits in History keeps the commit comments box in place.
+- AI ignore patterns now work normally in repositories that set git's
+  `diff.noprefix`, `diff.mnemonicPrefix`, or custom diff prefixes: commit
+  messages, branch names, PR descriptions, and reviews see every change your
+  patterns don't hide.
+- If a release you started from a tag's own page, or a promotion, edit, delete,
+  reset, or cherry-pick, finishes after you've moved on to another tag, pull
+  request, issue, discussion, branch, or commit, the dialog you opened there
+  stays open and you stay where you are. A tag delete, reset, cherry-pick, or
+  branch delete that finishes after you switch repositories leaves the new
+  repository's dialogs and selection alone. Saving a release edit, a task, or
+  a review trim, renaming a branch, or creating a branch or tag
+  closes only the editor it came from, so a dialog you reopened meanwhile, or
+  the next task you started typing, stays as it is.
+- While a new pull request, issue, branch, or release is being created, or a
+  branch rename, squash, or repository publish is running, Generate waits for it
+  to finish, so the draft you submitted stays as sent.
+- The repository header holds its shape while a repository loads and while it
+  fetches: the sync buttons stay in place and wait until the branch is known,
+  and in narrow windows the branch name stays readable beside the CI status.
+- A hunk in the Changes diff keeps its **Stage hunk** (or **Unstage hunk**)
+  and **Discard…** buttons right above it after you expand the hidden context
+  around it, in both unified and split views.
+- The hunk buttons in the Changes diff (**Stage hunk** or **Unstage hunk**, and
+  **Discard…**) stay on their hunk while the diff refreshes, and act only on the
+  lines on screen. After you stage, unstage or discard, the buttons wait for the
+  refreshed diff, and a double-click or a held key acts only once.
+- Issue and discussion actions pressed while offline now wait with a reason
+  or show as waiting. Pinning, locking and unlocking a conversation, changing a
+  Jira issue's status, and creating a linked branch name why they're held in
+  the menu or button. Due dates, confidentiality, time tracking, related
+  issues, sub-issues and relationships show their change as waiting until it
+  saves, even after you switch to another issue and back. A Jira issue created
+  offline stays in its dialog as waiting and is sent once you're back online.
+- The Discussions, Actions, pull request and issue lists keep their size while
+  they load, and the All / Mine buttons above the pull request and issue lists
+  are in place from the start wherever your host offers them.
+- Insights, the Projects board and Settings → Accounts hold their layout while
+  data loads, and switching Insights between 52 weeks and All time keeps the
+  current charts on screen until the new ones are ready.
+- Menu items that become unavailable while the menu is open now keep focus and
+  explain themselves, instead of dropping focus to the menu.
+- Merges, fast-forward and merge pulls, and updates of the branch you have checked
+  out keep your ignored files: when incoming commits would replace one (a private
+  config or local build output, say), GitDesktop stops before touching your files
+  and names them, or the first few and a count, so you can move them aside.
+- Every new discussion starts in the repository you're viewing, with that
+  repository's categories: switching repositories closes the New discussion
+  dialog.
+- Changes waiting for a connection now say they'll send once you're back
+  online, instead of reading as unavailable.
+- Changes you make while offline are sent to the repository, pull request, or
+  issue you made them in once you're back online, even if you've moved on, and
+  changes that finish saving after you switch refresh the one you made them in.
+  If you switch repositories while one of the following waits on a dialog or
+  an earlier step, it stops and says so instead of acting on the new
+  repository: in the branch menu, resetting, deleting, publishing, updating,
+  merging, rebasing, or switching branches, and discarding, stashing, or
+  popping stashed changes; in the sync bar, resetting to the upstream, force
+  pushing, or publishing; pushing a branch to a contributor's fork;
+  discarding or stashing in the Changes list; checking out, reverting, or
+  cherry-picking a commit from History, a commit's details, or Compare; in
+  History, undoing the last commit, resetting, cherry-picking onto a branch,
+  or deleting a tag; on a tag's page, checking out the tag, uploading,
+  downloading, or deleting a release asset, or uploading the manifest when you
+  save a release; in a conflicted file, accepting all current or incoming
+  changes, or marking it resolved; and removing a submodule.
+- Label edits, forks from Explore, review submissions, tag pushes, and stack
+  changes stay visibly waiting when you move away and come back while they're
+  still saving, so a second press can't send the same change twice. A tag push
+  shows on its own tag in History and on that tag's page, and **Create stack**
+  and **Add to stack** wait with a reason while you're offline.
+- On a branch with no commits yet, **Publish branch** waits for your first
+  commit and says so.
+- On a repository that isn't published yet, the forge tabs wait for your
+  accounts to be checked before showing setup steps, then offer
+  **Publish repository…** when an account can publish, and say when you're
+  offline.
+- A release you're drafting for an existing tag keeps its title and notes when
+  you switch away from the app and back.
+- Typed tag names stick in the release dialog — new tags validate as you type,
+  and a previous tag that doesn't exist now says generated notes will ignore it.
+- Remote URLs with an `@` in the repository path now keep the `@` in the path, so repository links and host routing stay exact.
+- Switching repositories lands in one step when you open one from the recent
+  list, the folder picker, a drop onto the window, a clone, a new repository, or
+  a worktree: the branch, changes, and sync buttons appear together, and
+  repositories you visited recently reopen faster.
+- Re-run options on GitHub workflow runs older than 30 days stay in place with
+  a note that GitHub can't re-run them, on the runs list, the run's own page,
+  and a pull request's checks.
+- A pull request conflict resolution started in one checkout of a repository is
+  offered to continue from any of its other checkouts, and finished or abandoned
+  resolve worktrees are cleaned up no matter which checkout started them.
+- Reverting or cherry-picking a merge commit now asks which parent counts as the
+  mainline, with the usual choice preselected.
+- Saving branch rules or repository automations waits until your current
+  settings have loaded, so every save starts from the rules you already have.
+- Saving hooks, tasks, automations, branch rules, and syntax settings, switching
+  GitHub accounts, staging or discarding diff hunks and lines, and checking out,
+  reverting, or cherry-picking from Compare always confirm or report a failure,
+  even if you switch tabs or repositories or close Settings while they finish.
+  Archiving a local pull request or issue keeps it selected until the archive
+  succeeds, a refused pull is always reported, and **Push tag** can't run twice
+  at once. Saving comments or labels on a local pull request or issue, or a
+  diff view or language choice, reports a failure, and a comment that fails to
+  post keeps the text you typed.
+- Discarding an agent session now tells you when its branch was kept because it
+  gained commits.
+- Recent repositories, their aliases and repository metadata now save safely
+  when several GitDesktop windows or instances write at the same time.
+- An open Settings form follows a repository relocation: MCP server scopes and
+  overrides for that repository point at its new location when you save, and an
+  untouched form stays free of unsaved changes.
+- A failed star, protected-branch change, or project link now restores the
+  repository or item you changed, and GitLab time tracking and Jira status
+  updates that finish after you switch repositories land in the one you made
+  them in.
+- Keyboard shortcuts and command-palette actions now follow their button's
+  state the moment it changes, so pressing Push again right after a push starts
+  does nothing.
+- 'View on GitHub' and repository links now work while signed out of GitHub, matching
+  GitLab and Bitbucket.
+- The branch menu opens with its remote branches already listed, the CI status
+  keeps its place in the header while a branch's result loads, and file names
+  in the Changes list and the commit dialog stay put as line counts arrive.
+- The command palette, **Run a task…**, and the welcome screen keep their
+  search box in one place: the palette opens near the top of the window and
+  only its list grows or shrinks as you type, and the welcome screen's
+  repository filter stays put while you type and while your repositories load.
+- The sync bar's **Force push**, **Reset to _origin/…_**, and **Publish branch**
+  stay with the repository you started them in: switching repositories while one
+  waits on its confirmation, or on the check for a fork pull request's branch,
+  cancels it. Publishing always sends the branch you clicked, and **Force push**
+  won't run if you switched branches while its confirmation was open.
+- Switching a task from this repository to **All repositories** now saves its
+  script's full path, so it keeps running the same file from every repository;
+  **Keep relative** under the field restores the portable form. The run dialog's
+  missing-script warning now says whether the path is a full one or a relative
+  one looked up in the open repository.
+- Updating a branch from the branch list works even when another worktree has it
+  checked out, and if one of your worktrees can't take the update, the message
+  offers to open it. Each branch updates on its own, so several can run at once,
+  and the list stays open in the same order while they do.
+
 ## [0.13.4] - 2026-10-08
 
 ### Changed
@@ -4781,7 +5002,8 @@ built on Tauri 2; every GitHub feature runs through the GitHub CLI (`gh`).
 - Diff-renderer exceptions are caught by an error boundary instead of taking
   down the whole app.
 
-[Unreleased]: https://github.com/theBGuy/GitDesktop/compare/v0.13.4...HEAD
+[Unreleased]: https://github.com/theBGuy/GitDesktop/compare/v0.13.5...HEAD
+[0.13.5]: https://github.com/theBGuy/GitDesktop/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/theBGuy/GitDesktop/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/theBGuy/GitDesktop/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/theBGuy/GitDesktop/compare/v0.13.1...v0.13.2
