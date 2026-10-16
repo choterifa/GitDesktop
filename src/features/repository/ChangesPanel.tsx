@@ -15,6 +15,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -74,6 +75,7 @@ import {
 import { useConfirm } from "@/lib/stores/confirm";
 import { useConflictResolve } from "@/lib/stores/conflict-resolve";
 import { refuseIfSwitched } from "@/lib/stores/notifications";
+import { useStashReapplyMarker } from "@/lib/stores/stash-reapply-marker";
 import { useUiStore } from "@/lib/stores/ui";
 import { ignoreToast, toastError } from "@/lib/toast";
 import { useRetained } from "@/lib/use-retained";
@@ -339,6 +341,18 @@ export function ChangesPanel({
   const filterRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLElement | null>(null);
   const viewToggleRef = useRef<HTMLButtonElement>(null);
+  // A silent focus landing for a clean tree, where no toolbar renders.
+  const markerLandingRef = useRef<HTMLSpanElement>(null);
+  // Where focus goes when the banner's reapply rows unmount under it: the
+  // tree-view toggle while the toolbar is mounted, else the landing span.
+  const landingRef = useMemo(
+    () => ({
+      get current(): HTMLElement | null {
+        return viewToggleRef.current ?? markerLandingRef.current;
+      },
+    }),
+    [],
+  );
   // A cursor row a horizontal jump could not focus because the virtualizer had
   // not mounted it yet; claimed once the scroll brings it in.
   const pendingFocusKey = useRef<string | null>(null);
@@ -1278,6 +1292,8 @@ export function ChangesPanel({
       setStashScope(null);
       return;
     }
+    // A new stash buries the recorded backup, so its offer can only refuse.
+    useStashReapplyMarker.getState().clearFor(stashScope.repo);
     const finish = () => {
       setStashScope(null);
       setSelectedKeys(new Set());
@@ -1558,7 +1574,13 @@ export function ChangesPanel({
     // one-shot opacity fade is the existing tw-animate-css idiom, lighter than
     // wrapping this whole tree in a motion component). Reduced-motion-safe.
     <div className="flex min-h-0 flex-1 flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-      <ConflictBanner repoPath={repoPath} conflictedPaths={conflictedPaths} />
+      <ConflictBanner
+        repoPath={repoPath}
+        conflictedPaths={conflictedPaths}
+        statusUpdatedAt={status.dataUpdatedAt}
+        landingRef={landingRef}
+      />
+      <span ref={markerLandingRef} tabIndex={-1} className="outline-none" />
 
       {entries.length === 0 ? (
         <ChangesEmptyState

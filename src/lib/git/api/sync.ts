@@ -39,8 +39,15 @@ export type AutostashOutcome =
   | { kind: "reapplied" }
   /** The operation succeeded but the pop failed; the stash is kept.
    *  `conflicted` = the pop left unmerged paths to resolve, rather than
-   *  refusing outright. */
-  | { kind: "reapplyConflicted"; stderr: string; conflicted: boolean }
+   *  refusing outright. `stashSha` = the kept backup entry's full object id;
+   *  null unless the pop left conflicts and `refs/stash` read the same id before
+   *  and after it. */
+  | {
+      kind: "reapplyConflicted";
+      stderr: string;
+      conflicted: boolean;
+      stashSha: string | null;
+    }
   /** The operation failed cleanly and the changes were restored. */
   | { kind: "opFailedRestored"; stderr: string }
   /** The operation failed and the stash is kept. `inProgress` = it left
