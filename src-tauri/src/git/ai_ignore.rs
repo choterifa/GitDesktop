@@ -27,11 +27,13 @@
 
 use std::collections::HashSet;
 use std::io::Write;
-use std::path::PathBuf;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::sync::Arc;
 
 use serde::Serialize;
 use tempfile::TempPath;
-use tokio::sync::OnceCell;
+use tokio::sync::Mutex;
 
 use crate::error::{AppError, AppResult};
 use crate::git::runner::{run_git, run_git_raw, run_git_raw_input_bytes, DEFAULT_TIMEOUT};
@@ -105,43 +107,118 @@ async fn repo_ignorecase(repo_path: &str) -> bool {
     .unwrap_or(false)
 }
 
-/// An empty throwaway repo, created once per process, that [`filter_ignored`]
-/// runs `check-ignore` inside.
+struct CachedNeutralRepo {
+    dir: Arc<tempfile::TempDir>,
+    #[cfg(unix)]
+    uid: u32,
+}
+
+/// The empty throwaway repo [`run_check_ignore`] runs `check-ignore` inside. The
+/// AI patterns must be the ONLY rules in play: the user's repo would add its own
+/// `.gitignore` files, which over-report (a committed-but-gitignored lockfile
+/// declared AI-ignored, with no bypass in the conflict UI) and name paths no AI
+/// pattern named. Cached across calls, since `is_ai_ignored` runs per conflicted
+/// file.
 ///
-/// The AI-ignore patterns must be the ONLY rules in play: running in the user's
-/// repo would add that repo's `.gitignore` files, which both over-reports (a
-/// committed-but-gitignored lockfile declared AI-ignored, with no bypass in the
-/// conflict UI) and reports paths no AI pattern named. An empty work tree leaves
-/// `core.excludesFile` as the only active source. Reused across calls because
-/// `is_ai_ignored` runs per conflicted file; only a successful init is cached
-/// (`get_or_try_init` leaves the cell empty on error).
+/// Re-validated before every use: temp cleaners delete EMPTY directories, and a
+/// fresh `git init` leaves `.git/objects` and `.git/refs` empty for good, since
+/// `check-ignore` writes neither. A damaged repo is replaced at a fresh path. A
+/// repo git rejects (exit 128) is dropped too, so the next call builds a fresh one
+/// even when the damage is something these checks cannot see. The lock covers
+/// only validate-or-replace; each call holds its `Arc` until git exits, so a
+/// replacement never deletes an in-flight call's repo.
 ///
 /// `TempDir` rather than a pid-derived name: in a shared `/tmp` a guessable path
 /// lets a local attacker pre-create `.git/info/exclude` holding `!secrets.env`,
 /// which outranks `core.excludesFile` and fails the conflict gate OPEN. TempDir
-/// creates exclusively, with owner-only permissions; it lives in a static, so the
-/// OS temp reaper rather than `Drop` eventually removes it.
-static NEUTRAL_REPO: OnceCell<tempfile::TempDir> = OnceCell::const_new();
-
-async fn neutral_repo() -> AppResult<PathBuf> {
-    let dir = NEUTRAL_REPO
-        .get_or_try_init(|| async {
-            let dir = tempfile::Builder::new()
-                .prefix("gd-aiignore-")
-                .tempdir()
-                .map_err(AppError::Io)?;
-            let path = dir.path().to_string_lossy().into_owned();
-            run_git(Some(&path), &["init", "-q"], DEFAULT_TIMEOUT).await?;
-            // A user's `init.templateDir` can seed `.git/info/exclude`, which
-            // outranks `core.excludesFile` and would join the ruleset.
-            tokio::fs::write(dir.path().join(".git/info/exclude"), "")
-                .await
-                .map_err(AppError::Io)?;
-            Ok::<tempfile::TempDir, AppError>(dir)
-        })
-        .await?;
-    Ok(dir.path().to_path_buf())
+/// creates exclusively; on Unix it is asked for owner-only permissions, and on
+/// Windows the root inherits the temp folder's ACL (per-user by default). A
+/// replacement never reuses a deleted, now-guessable path, and on Unix a root
+/// that is no longer this user's owner-only directory counts as damaged. These
+/// checks stand in for git's ownership check, which the pinned spawn skips.
+struct NeutralRepo {
+    slot: Mutex<Option<CachedNeutralRepo>>,
 }
+
+impl NeutralRepo {
+    const fn new() -> Self {
+        Self {
+            slot: Mutex::const_new(None),
+        }
+    }
+
+    async fn get(&self) -> AppResult<Arc<tempfile::TempDir>> {
+        let mut slot = self.slot.lock().await;
+        if let Some(repo) = slot.as_ref() {
+            let dir = &repo.dir;
+            #[cfg(unix)]
+            let root_valid = tokio::fs::symlink_metadata(dir.path())
+                .await
+                .is_ok_and(|m| m.is_dir() && m.uid() == repo.uid && m.mode() & 0o077 == 0);
+            #[cfg(not(unix))]
+            let root_valid = true;
+            let git = dir.path().join(".git");
+            if root_valid
+                && tokio::fs::metadata(git.join("HEAD"))
+                    .await
+                    .is_ok_and(|m| m.is_file())
+                && tokio::fs::metadata(git.join("objects"))
+                    .await
+                    .is_ok_and(|m| m.is_dir())
+                && tokio::fs::metadata(git.join("refs"))
+                    .await
+                    .is_ok_and(|m| m.is_dir())
+            {
+                return Ok(Arc::clone(dir));
+            }
+        }
+        let repo = tokio::task::spawn_blocking(|| -> std::io::Result<CachedNeutralRepo> {
+            let mut builder = tempfile::Builder::new();
+            builder.prefix("gd-aiignore-");
+            #[cfg(unix)]
+            builder.permissions(std::fs::Permissions::from_mode(0o700));
+            let dir = builder.tempdir()?;
+            #[cfg(unix)]
+            let metadata = std::fs::symlink_metadata(dir.path())?;
+            Ok(CachedNeutralRepo {
+                dir: Arc::new(dir),
+                #[cfg(unix)]
+                uid: metadata.uid(),
+            })
+        })
+        .await
+        .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))?
+        .map_err(AppError::Io)?;
+        let path = repo.dir.path().to_string_lossy().into_owned();
+        run_git(Some(&path), &["init", "-q", "--template="], DEFAULT_TIMEOUT).await?;
+        // An empty template keeps a user's `init.templateDir` from seeding a
+        // `.git/info/exclude`, which would outrank `core.excludesFile`. It also leaves no
+        // `info/` (measured, git 2.51.1), so the backstop exclude makes its directory first.
+        tokio::fs::create_dir_all(repo.dir.path().join(".git/info"))
+            .await
+            .map_err(AppError::Io)?;
+        tokio::fs::write(repo.dir.path().join(".git/info/exclude"), "")
+            .await
+            .map_err(AppError::Io)?;
+        let dir = Arc::clone(&repo.dir);
+        *slot = Some(repo);
+        Ok(dir)
+    }
+
+    /// Drops the cached repo only while it is still `dir`: a call that ran against an
+    /// older repo must not evict the fresh one another call has built since.
+    async fn forget(&self, dir: &Arc<tempfile::TempDir>) {
+        let mut slot = self.slot.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|repo| Arc::ptr_eq(&repo.dir, dir))
+        {
+            *slot = None;
+        }
+    }
+}
+
+static NEUTRAL_REPO: NeutralRepo = NeutralRepo::new();
 
 /// `check-ignore` over `paths` with `lines` as the only rules in play, returning
 /// its raw `-z` stdout BYTES and the excludes-file path exactly as
@@ -155,10 +232,10 @@ async fn neutral_repo() -> AppResult<PathBuf> {
 /// the user's patterns were written against. Pattern LINES stay text — they come
 /// from settings the user typed.
 ///
-/// The one spawn path of the AI-ignore engine: every property below is part of
+/// The AI-ignore engine's one entry point: every property below is part of
 /// the privacy boundary, so no caller re-derives one.
 ///
-/// Matching runs in [`neutral_repo`] rather than the user's repo, so their AI
+/// Matching runs in [`NeutralRepo`] rather than the user's repo, so their AI
 /// patterns are the only rules in play — but `repo_path` still decides case
 /// folding: `core.ignorecase` is read from it and forced onto the invocation, so
 /// the answer follows the user's repo instead of whatever filesystem the temp
@@ -172,25 +249,61 @@ async fn neutral_repo() -> AppResult<PathBuf> {
 ///
 /// The excludes file carries that boundary too, so it must be unguessable and
 /// exclusively created: an emptied or substituted list reports NOTHING ignored.
-/// It is created with `O_EXCL` inside [`neutral_repo`]'s owner-only directory and
-/// written through that same handle, never re-opened by name — so no other user
-/// can pre-create the path, and nothing can be swapped in between the write and
-/// git's read. Removed explicitly below on both arms, with the handle's own drop
-/// as a backstop.
+/// It is created with `O_EXCL` inside [`NeutralRepo`]'s directory (owner-only on
+/// Unix, a per-user temp folder by default on Windows) and written through that
+/// same handle, never re-opened by name — so no other user can pre-create the
+/// path, and nothing can be swapped in between the write and git's read. Removed
+/// explicitly on both arms in [`run_check_ignore_in_dir`], with the handle's own
+/// drop as a backstop.
 async fn run_check_ignore(
     repo_path: &str,
     paths: &[Vec<u8>],
     lines: &[&str],
     verbose: bool,
 ) -> AppResult<(Vec<u8>, String)> {
+    run_check_ignore_in(&NEUTRAL_REPO, repo_path, paths, lines, verbose).await
+}
+
+/// [`run_check_ignore`] against a given [`NeutralRepo`], so a test can own its
+/// instance instead of sharing the process-wide static.
+/// Drops the instance's repo when git rejects it (exit 128), so the next call
+/// starts fresh.
+async fn run_check_ignore_in(
+    repo: &NeutralRepo,
+    repo_path: &str,
+    paths: &[Vec<u8>],
+    lines: &[&str],
+    verbose: bool,
+) -> AppResult<(Vec<u8>, String)> {
+    let dir = repo.get().await?;
+    let neutral = dir.path().to_string_lossy().into_owned();
+    let result = run_check_ignore_in_dir(&neutral, repo_path, paths, lines, verbose).await;
+    if matches!(&result, Err(AppError::Git { code: 128, .. })) {
+        repo.forget(&dir).await;
+    }
+    result
+}
+
+/// [`run_check_ignore`]'s spawn, in a `neutral` dir the caller validated and keeps
+/// alive (its `Arc`) for the whole call. It validates nothing itself. The pinned
+/// `--git-dir`/`--work-tree` makes a repo damaged after validation fail closed
+/// instead of being answered by a repo above it; it also skips git's
+/// `safe.directory` ownership check, so [`NeutralRepo`]'s validation is what
+/// vouches for whose repo this is.
+async fn run_check_ignore_in_dir(
+    neutral: &str,
+    repo_path: &str,
+    paths: &[Vec<u8>],
+    lines: &[&str],
+    verbose: bool,
+) -> AppResult<(Vec<u8>, String)> {
     let icase = repo_ignorecase(repo_path).await;
-    let neutral = neutral_repo().await?.to_string_lossy().into_owned();
 
     let mut body = lines.join("\n");
     body.push('\n');
     // Created and written through one exclusive handle, inside the neutral repo's
-    // own directory — see the security note on this function.
-    let dir = neutral.clone();
+    // own directory — see the security note on `run_check_ignore`.
+    let dir = neutral.to_owned();
     let excludes_file = tokio::task::spawn_blocking(move || -> std::io::Result<TempPath> {
         let mut file = tempfile::Builder::new()
             .prefix("excludes-")
@@ -214,11 +327,17 @@ async fn run_check_ignore(
             stdin.push(0);
         }
         let case = format!("core.ignorecase={icase}");
+        // Pin both paths so damage after validation fails closed instead of
+        // discovering an ancestor repo whose rules could expose ignored files.
+        let git_dir = format!("--git-dir={}/.git", neutral.replace('\\', "/"));
+        let work_tree = format!("--work-tree={}", neutral.replace('\\', "/"));
         let mut args: Vec<&str> = vec![
             "-c",
             &config,
             "-c",
             &case,
+            &git_dir,
+            &work_tree,
             "check-ignore",
             "--no-index",
             "--stdin",
@@ -228,7 +347,7 @@ async fn run_check_ignore(
             args.push("--verbose");
         }
         let out =
-            run_git_raw_input_bytes(Some(&neutral), &args, Some(&stdin), DEFAULT_TIMEOUT).await?;
+            run_git_raw_input_bytes(Some(neutral), &args, Some(&stdin), DEFAULT_TIMEOUT).await?;
         // 0 = at least one path matched a rule, 1 = none did (not an error).
         if out.code > 1 {
             return Err(AppError::Git {
@@ -257,8 +376,8 @@ async fn run_check_ignore(
 /// `paths` are repo-relative, forward-slashed. Empty `paths`, or an `exclude`
 /// carrying no positive line (see [`actionable_lines_indexed`]), short-circuits
 /// to `[]` without spawning git; so does "nothing matched" (check-ignore's exit
-/// code 1, which is not an error). The spawn itself, and the security properties
-/// around it, live in [`run_check_ignore`].
+/// code 1, which is not an error). The entry point and its security properties
+/// live in [`run_check_ignore`].
 ///
 /// A `String` can only spell a name that decoded cleanly, so callers holding a
 /// name's real bytes want [`filter_ignored_bytes`], which this delegates to.
@@ -1316,6 +1435,250 @@ mod tests {
             run_git(Some(&repo), &args, DEFAULT_TIMEOUT).await.unwrap();
         }
         (dir, repo)
+    }
+
+    /// Missing objects and refs make git reject the cached repo; the next call
+    /// replaces it and still hides exactly the path matched by the AI pattern.
+    #[tokio::test]
+    async fn neutral_repo_swept_directories_heal() {
+        let (_caller, repo_path) = seed_repo("swept").await;
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap().path().to_path_buf();
+        tokio::fs::remove_dir_all(old.join(".git/objects"))
+            .await
+            .unwrap();
+        tokio::fs::remove_dir_all(old.join(".git/refs"))
+            .await
+            .unwrap();
+        assert!(old.join(".git/HEAD").is_file());
+        assert!(old.join(".git/config").is_file());
+
+        let path = old.to_string_lossy().replace('\\', "/");
+        let git_dir = format!("--git-dir={path}/.git");
+        let work_tree = format!("--work-tree={path}");
+        let raw = run_git_raw_input_bytes(
+            Some(&path),
+            &[
+                &git_dir,
+                &work_tree,
+                "check-ignore",
+                "--no-index",
+                "--stdin",
+                "-z",
+            ],
+            Some(b"a.env\0b.txt\0"),
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(raw.code, 128, "{}", raw.stderr);
+        assert!(
+            raw.stderr.contains("not a git repository"),
+            "{}",
+            raw.stderr
+        );
+
+        let (stdout, _) = run_check_ignore_in(
+            &repo,
+            &repo_path,
+            &[b"a.env".to_vec(), b"b.txt".to_vec()],
+            &["*.env"],
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stdout, b"a.env\0");
+        assert_ne!(repo.get().await.unwrap().path(), old);
+    }
+
+    /// A deleted root is replaced at a fresh path before the next check-ignore.
+    #[tokio::test]
+    async fn neutral_repo_deleted_directory_heals() {
+        let (_caller, repo_path) = seed_repo("deleted").await;
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap().path().to_path_buf();
+        tokio::fs::remove_dir_all(&old).await.unwrap();
+
+        let (stdout, _) = run_check_ignore_in(
+            &repo,
+            &repo_path,
+            &[b"a.env".to_vec(), b"b.txt".to_vec()],
+            &["*.env"],
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stdout, b"a.env\0");
+        assert_ne!(repo.get().await.unwrap().path(), old);
+    }
+
+    /// A repo missing HEAD is replaced at a fresh path before check-ignore.
+    #[tokio::test]
+    async fn neutral_repo_missing_head_heals() {
+        let (_caller, repo_path) = seed_repo("missing-head").await;
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap().path().to_path_buf();
+        tokio::fs::remove_file(old.join(".git/HEAD")).await.unwrap();
+
+        let (stdout, _) = run_check_ignore_in(
+            &repo,
+            &repo_path,
+            &[b"a.env".to_vec(), b"b.txt".to_vec()],
+            &["*.env"],
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stdout, b"a.env\0");
+        assert_ne!(repo.get().await.unwrap().path(), old);
+    }
+
+    /// Git rejection fails the current call closed and forces a fresh repo next time.
+    #[tokio::test]
+    async fn neutral_repo_rejected_by_git_is_replaced() {
+        let (_caller, repo_path) = seed_repo("rejected").await;
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap().path().to_path_buf();
+        tokio::fs::write(old.join(".git/HEAD"), "garbage\n")
+            .await
+            .unwrap();
+        let paths = [b"a.env".to_vec(), b"b.txt".to_vec()];
+
+        let result = run_check_ignore_in(&repo, &repo_path, &paths, &["*.env"], false).await;
+        assert!(
+            matches!(result, Err(AppError::Git { code: 128, .. })),
+            "expected Git exit 128, got {result:?}"
+        );
+
+        let (stdout, _) = run_check_ignore_in(&repo, &repo_path, &paths, &["*.env"], false)
+            .await
+            .unwrap();
+        assert_eq!(stdout, b"a.env\0");
+        assert_ne!(repo.get().await.unwrap().path(), old);
+    }
+
+    /// A late rejection of an older repo leaves the newer cached one in place.
+    #[tokio::test]
+    async fn neutral_repo_stale_forget_keeps_newer_repo() {
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap();
+        repo.forget(&old).await;
+        let fresh = repo.get().await.unwrap();
+        assert!(!Arc::ptr_eq(&old, &fresh));
+        repo.forget(&old).await;
+        assert!(Arc::ptr_eq(&repo.get().await.unwrap(), &fresh));
+    }
+
+    /// Non-owner-only roots are replaced before matching the next AI pattern.
+    /// The uid arm is the attacker case, not reproducible without a second user.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn neutral_repo_non_private_directory_heals() {
+        let (_caller, repo_path) = seed_repo("permissions").await;
+        let repo = NeutralRepo::new();
+        let old = repo.get().await.unwrap().path().to_path_buf();
+        assert_eq!(
+            tokio::fs::symlink_metadata(&old).await.unwrap().mode() & 0o777,
+            0o700
+        );
+        tokio::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        let (stdout, _) = run_check_ignore_in(
+            &repo,
+            &repo_path,
+            &[b"a.env".to_vec(), b"b.txt".to_vec()],
+            &["*.env"],
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stdout, b"a.env\0");
+        assert_ne!(repo.get().await.unwrap().path(), old);
+    }
+
+    /// The outer `.gitignore`'s `!*.env` turns discovery into a fail-open;
+    /// the pinned `--git-dir` prevents that fallback after damage.
+    #[tokio::test]
+    async fn neutral_repo_nested_damage_fails_closed() {
+        let (outer, repo_path) = seed_repo("nested").await;
+        tokio::fs::write(outer.path().join(".gitignore"), "!*.env\n")
+            .await
+            .unwrap();
+        let child_dir = tempfile::Builder::new()
+            .prefix("neutral-")
+            .tempdir_in(outer.path())
+            .unwrap();
+        let child = child_dir.path().to_path_buf();
+        let neutral = child.to_string_lossy().into_owned();
+        run_git(
+            Some(&neutral),
+            &["init", "-q", "--template="],
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        tokio::fs::create_dir_all(child.join(".git/info"))
+            .await
+            .unwrap();
+        tokio::fs::write(child.join(".git/info/exclude"), "")
+            .await
+            .unwrap();
+        tokio::fs::remove_dir_all(child.join(".git/objects"))
+            .await
+            .unwrap();
+        tokio::fs::remove_dir_all(child.join(".git/refs"))
+            .await
+            .unwrap();
+
+        let result = run_check_ignore_in_dir(
+            &neutral,
+            &repo_path,
+            &[b"a.env".to_vec(), b"b.txt".to_vec()],
+            &["*.env"],
+            false,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(AppError::Git { code: 128, .. })),
+            "expected Git exit 128, got {result:?}"
+        );
+    }
+
+    /// Eight parallel first uses share one initialized repo and all hide a.env.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn neutral_repo_concurrent_first_use_shares_one_repo() {
+        let (_caller, repo_path) = seed_repo("concurrent").await;
+        let repo = Arc::new(NeutralRepo::new());
+        let barrier = Arc::new(tokio::sync::Barrier::new(8));
+        let mut calls = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let repo = Arc::clone(&repo);
+            let barrier = Arc::clone(&barrier);
+            let repo_path = repo_path.clone();
+            calls.spawn(async move {
+                barrier.wait().await;
+                let dir = repo.get().await.unwrap();
+                let (stdout, _) = run_check_ignore_in(
+                    &repo,
+                    &repo_path,
+                    &[b"a.env".to_vec(), b"b.txt".to_vec()],
+                    &["*.env"],
+                    false,
+                )
+                .await
+                .unwrap();
+                assert_eq!(stdout, b"a.env\0");
+                dir
+            });
+        }
+        let first = calls.join_next().await.unwrap().unwrap();
+        while let Some(call) = calls.join_next().await {
+            let dir = call.unwrap();
+            assert_eq!(dir.path(), first.path());
+            assert!(Arc::ptr_eq(&dir, &first));
+        }
     }
 
     /// An escaped-trailing-space file is hidden from a real branch diff on EVERY
