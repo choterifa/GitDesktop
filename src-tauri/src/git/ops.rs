@@ -9,8 +9,9 @@ use crate::git::history::validate_hash;
 use crate::git::ignored_guard::{self, ignored_files_in_the_way};
 use crate::git::runner::{
     acquire_repo_lock, run_git, run_git_mutating, run_git_mutating_raw, run_git_raw,
-    run_git_raw_index_retry, run_git_raw_input, run_git_worktree_admin, DEFAULT_TIMEOUT,
-    LOCK_WAIT_TIMEOUT, NETWORK_LOCK_WAIT_TIMEOUT, NETWORK_TIMEOUT, WORKTREE_OP_TIMEOUT,
+    run_git_raw_env, run_git_raw_index_retry, run_git_raw_input, run_git_worktree_admin,
+    DEFAULT_TIMEOUT, LOCK_WAIT_TIMEOUT, NETWORK_LOCK_WAIT_TIMEOUT, NETWORK_TIMEOUT,
+    WORKTREE_OP_TIMEOUT,
 };
 use crate::git::types::{FileDiff, RepoOpState, RewriteStep, StashEntry, TagInfo};
 use crate::state::AppState;
@@ -246,8 +247,13 @@ pub(crate) fn rebase_marker_present(repo: &str) -> bool {
 }
 
 /// True when an interactive rebase is paused at an `edit` instruction (the last
-/// executed todo line is `edit`/`e`), as opposed to a conflict.
+/// executed todo line is `edit`/`e`), as opposed to a conflict. git writes
+/// `rebase-merge/amend` only at a completed edit stop: an `edit` line that itself
+/// failed (a held index.lock, a conflict) leaves the same `done` without it.
 fn rebase_stopped_for_edit(git_dir: &Path) -> bool {
+    if !git_dir.join("rebase-merge/amend").exists() {
+        return false;
+    }
     let Ok(done) = std::fs::read_to_string(git_dir.join("rebase-merge/done")) else {
         return false;
     };
@@ -265,8 +271,8 @@ fn rebase_stopped_for_edit(git_dir: &Path) -> bool {
 ///
 /// A multi-commit `cherry-pick -n` that conflicts leaves the sequencer with NO
 /// `CHERRY_PICK_HEAD` (measured, git 2.51.1: `--no-commit` never writes one), so
-/// the todo's verb is the only signal for that window — the app's own
-/// squash/fixup engine creates it. An unreadable or empty todo reads as
+/// the todo's verb is the only signal for that window — a user's own
+/// multi-commit pick leaves it. An unreadable or empty todo reads as
 /// cherry-pick, matching the best-effort probes around it. Interactive rebase
 /// uses `rebase-merge/git-rebase-todo` instead, so it can never land here.
 fn sequencer_reverting(git_dir: &Path) -> Option<bool> {
@@ -4533,20 +4539,32 @@ pub async fn git_conflict_preview(
 /// Rewrites the unpushed tip of the current branch (`base..HEAD`) — one commit per
 /// step, in step order. The interactive-rebase vocabulary maps onto step shape: one
 /// hash + no message = **pick**; one hash + message = **reword**; many hashes +
-/// message = **squash**; many hashes + no message = **fixup** (reuses the leader
-/// commit's message and authorship via `commit -C`). Omitting a commit **drops** it.
-/// Refuses on a dirty tree or merge commits in range. If any step fails — a conflict,
-/// a squash that leaves nothing to commit, a timeout — the branch is rolled back to
-/// its pre-run tip. The rollback is best-effort; when it fails the returned
-/// error names what was left behind and how to recover.
+/// message = **squash**; many hashes + no message = **fixup** (keeps the leader
+/// commit's message); every step keeps its leader's authorship. A commit is dropped only when
+/// listed in `dropped`; any other omission refuses. Steps plus `dropped` must cover
+/// `base..HEAD` exactly once, so a commit that landed after the plan was made is
+/// refused rather than lost.
+/// Refuses on a dirty tree, a paused operation or merge commits in range. Runs as git's
+/// own `rebase -i` over the generated todo, so it applies all at once: if any step
+/// fails — a conflict, a squash that leaves nothing to commit, a timeout —
+/// `rebase --abort` returns the branch to its pre-run tip. When the abort itself
+/// fails, the returned error names that tip and the remedy.
 #[tauri::command]
 pub async fn git_rewrite_commits(
     state: State<'_, AppState>,
     repo_path: String,
     base: String,
     steps: Vec<RewriteStep>,
+    dropped: Option<Vec<String>>,
 ) -> AppResult<()> {
-    rewrite_commits(&state, &repo_path, &base, &steps).await
+    rewrite_commits(
+        &state,
+        &repo_path,
+        &base,
+        &steps,
+        dropped.as_deref().unwrap_or(&[]),
+    )
+    .await
 }
 
 pub(crate) async fn rewrite_commits(
@@ -4554,30 +4572,66 @@ pub(crate) async fn rewrite_commits(
     repo_path: &str,
     base: &str,
     steps: &[RewriteStep],
+    dropped: &[String],
 ) -> AppResult<()> {
     rewrite_commits_with_timeouts(
         state,
         repo_path,
         base,
         steps,
-        DEFAULT_TIMEOUT,
+        dropped,
+        replay_timeout(steps, dropped),
         DEFAULT_TIMEOUT,
     )
     .await
 }
 
-/// [`rewrite_commits`] with the git timeouts injectable. `pick_timeout` bounds ONLY
-/// the replay loop's `cherry-pick` calls; `rollback_timeout` only the funnel's
-/// `reset --hard orig`. The guards, the initial rewind onto `base`, the multi-hash
-/// step's `commit` and the best-effort abort keep `DEFAULT_TIMEOUT`, so a zero value
-/// exercises one failure arm at a time instead of failing before the first mutation.
+/// Both rewrite entry points' refusal when the plan no longer matches the branch and
+/// nothing was changed: the coverage check, the rebase start's missing-commits stop
+/// and its start-tip gate all use it.
+const UNCOVERED_RANGE_REFUSAL: &str =
+    "the branch changed after this plan was made, so nothing was rewritten — start over";
+
+/// Refuses a rewrite plan that doesn't list every commit of `in_range` (the
+/// `base..HEAD` set) exactly once across `steps` and `dropped`. Shared by both
+/// rewrite entry points so the replay and the interactive rebase refuse alike.
+fn check_plan_covers_range(
+    in_range: &std::collections::HashSet<String>,
+    steps: &[RewriteStep],
+    dropped: &[String],
+) -> AppResult<()> {
+    let mut listed = std::collections::HashSet::new();
+    for h in steps.iter().flat_map(|s| &s.hashes).chain(dropped) {
+        // A listed commit outside the live range means the branch moved (an amend,
+        // a reset) since the plan was read.
+        if !in_range.contains(h) {
+            return Err(AppError::InvalidArgument(UNCOVERED_RANGE_REFUSAL.into()));
+        }
+        if !listed.insert(h.as_str()) {
+            return Err(AppError::InvalidArgument(format!(
+                "{h} is listed more than once in the rewrite plan"
+            )));
+        }
+    }
+    if in_range.iter().any(|h| !listed.contains(h.as_str())) {
+        return Err(AppError::InvalidArgument(UNCOVERED_RANGE_REFUSAL.into()));
+    }
+    Ok(())
+}
+
+/// [`rewrite_commits`] with the git timeouts injectable. `rebase_timeout` bounds ONLY
+/// the `rebase --continue` that replays the plan; `abort_timeout` only the failure
+/// path's `rebase --abort` (and the start's abort of a missing-commits stop). Every
+/// other git call keeps `DEFAULT_TIMEOUT`, so a zero value exercises one failure arm
+/// at a time instead of failing before the rebase starts.
 pub(crate) async fn rewrite_commits_with_timeouts(
     state: &AppState,
     repo_path: &str,
     base: &str,
     steps: &[RewriteStep],
-    pick_timeout: std::time::Duration,
-    rollback_timeout: std::time::Duration,
+    dropped: &[String],
+    rebase_timeout: std::time::Duration,
+    abort_timeout: std::time::Duration,
 ) -> AppResult<()> {
     validate_hash(base)?;
     if steps.is_empty() {
@@ -4594,29 +4648,51 @@ pub(crate) async fn rewrite_commits_with_timeouts(
         // message), so no message requirement here — pick/reword/squash/fixup
         // are all expressible.
     }
+    for h in dropped {
+        validate_hash(h)?;
+    }
 
-    // One hold across gate → capture → replay → rollback: the rollback hard-resets to
-    // the `orig` captured up here, so a commit another caller lands mid-replay would be
-    // destroyed, and between `reset --hard base` and the picks the branch sits rewound
-    // where a concurrent read sees a truncated history. Lock-free runners only while
-    // held (see `run_git_mutating`).
+    // One hold across read → rebase → rollback covers this process's in-app ops; the MCP
+    // server's separate AppState lock and the lock-free edit path are outside it, and
+    // the start-tip gate catches what the hold misses. A poll can briefly show a paused
+    // rebase's banner (the `break` pause). Commits another git process makes WHILE the
+    // rebase runs are unsupported, as in any `git rebase`: a rollback may drop them (the
+    // reflog keeps them). Lock-free runners only while held (see `run_git_mutating`).
     let domain = state.working_tree_lock(repo_path).await;
     let guard = acquire_repo_lock(&domain, LOCK_WAIT_TIMEOUT, "a history rewrite").await?;
 
-    // reset --hard would destroy uncommitted work — refuse instead.
-    let status = run_git(
-        Some(repo_path),
-        &["status", "--porcelain"],
-        DEFAULT_TIMEOUT,
-    )
-    .await?;
+    // Before the scratch-dir clear below: a paused op's rebase would lose the message
+    // files its pending `exec` lines read.
+    if op_in_progress(repo_path).await {
+        return Err(AppError::InvalidArgument(MID_OP_REFUSAL.into()));
+    }
+    // git rebase refuses a dirty tree too, but a clear message here is nicer.
+    let status = run_git(Some(repo_path), &["status", "--porcelain"], DEFAULT_TIMEOUT).await?;
     if !status.stdout_lossy().trim().is_empty() {
         return Err(AppError::InvalidArgument(
             "the working tree has uncommitted changes — commit or stash them first".into(),
         ));
     }
 
-    let range = format!("{base}..HEAD");
+    // HEAD is read once (the range, the coverage check, the journal anchor and the
+    // start-tip gate all use it), and the branch the rebase must start on is read in
+    // this same entry; the journal makes its own best-effort ref read.
+    let orig = run_git(
+        Some(repo_path),
+        &["rev-parse", "--verify", "HEAD"],
+        DEFAULT_TIMEOUT,
+    )
+    .await?
+    .stdout_lossy()
+    .trim()
+    .to_string();
+    let head_name = read_head_name(repo_path).await?;
+    // Every post-start probe reads the filesystem under the repo's OWN git dir, so
+    // no failed git spawn can decide "nothing in progress".
+    let git_dir = absolute_git_dir(repo_path)
+        .await
+        .ok_or_else(|| AppError::InvalidArgument("couldn't resolve the git dir".into()))?;
+    let range = format!("{base}..{orig}");
     let merges = run_git(
         Some(repo_path),
         &["rev-list", "--merges", &range],
@@ -4635,24 +4711,12 @@ pub(crate) async fn rewrite_commits_with_timeouts(
             .lines()
             .map(str::to_string)
             .collect();
-    for step in steps {
-        for h in &step.hashes {
-            if !in_range.contains(h) {
-                return Err(AppError::InvalidArgument(format!(
-                    "{h} is not an unpushed commit on this branch"
-                )));
-            }
-        }
-    }
-
-    let orig = run_git(Some(repo_path), &["rev-parse", "HEAD"], DEFAULT_TIMEOUT)
-        .await?
-        .stdout_lossy()
-        .trim()
-        .to_string();
+    // The plan must cover `orig`'s range; a tip that moves after this read is caught
+    // at the rebase start (`start_planned_rebase`).
+    check_plan_covers_range(&in_range, steps, dropped)?;
 
     // Journal a pending entry AFTER the guards + `orig` capture, BEFORE the first
-    // mutation (`reset --hard`). Best-effort: a journal failure returns None and
+    // mutation (the rebase). Best-effort: a journal failure returns None and
     // the op proceeds unchanged. Runs under the lock (app-data I/O, not git) because
     // the `orig` anchor it records is only valid while this hold is unbroken.
     let original_ref = journal_original_ref(repo_path).await;
@@ -4667,126 +4731,54 @@ pub(crate) async fn rewrite_commits_with_timeouts(
     )
     .await;
 
+    let expected = PlanStart {
+        tip: orig.clone(),
+        head_name,
+    };
     let op_result: AppResult<()> = async {
-        // Every failure class — the initial rewind, a conflict, a timeout — leaves
-        // through the one rollback funnel below, so none of them strands the branch
-        // rewound at `base` unless the rollback itself fails, which the error says.
-        let mut failure: Option<AppError> =
-            run_git(Some(repo_path), &["reset", "--hard", base], DEFAULT_TIMEOUT)
-                .await
-                .err();
-        // A rewind that failed never reached the replay, so the detail lines
-        // below have to describe THAT state: no pick ran (the user copy hedges
-        // the branch position — a killed reset can still have moved it).
-        let rewound = failure.is_none();
-        if failure.is_none() {
-            // Raw plus `check_code`, never a mutating runner: this loop runs inside
-            // the compound's own working-tree hold. Failures land on either stream —
-            // a conflicted pick splits `could not apply` (stderr) from its `CONFLICT (…`
-            // file list (stdout), and `commit` reports a squash that left nothing to
-            // commit on stdout alone — so a stderr-only error would carry half a
-            // message, or none at all.
-            'steps: for step in steps {
-                let single_pick = step.hashes.len() == 1 && step.message.is_none();
-                if single_pick {
-                    let args = ["cherry-pick", step.hashes[0].as_str()];
-                    if let Err(e) = run_git_raw(Some(repo_path), &args, pick_timeout)
-                        .await
-                        .and_then(check_code)
-                    {
-                        failure = Some(e);
-                        break 'steps;
-                    }
-                } else {
-                    let mut args = vec!["cherry-pick", "-n"];
-                    args.extend(step.hashes.iter().map(String::as_str));
-                    if let Err(e) = run_git_raw(Some(repo_path), &args, pick_timeout)
-                        .await
-                        .and_then(check_code)
-                    {
-                        failure = Some(e);
-                        break 'steps;
-                    }
-                    let message = step.message.as_deref().map(str::trim).unwrap_or("");
-                    // With a message → squash/reword. Without → fixup: reuse the first
-                    // (leader) commit's message and authorship.
-                    let commit_args: Vec<&str> = if message.is_empty() {
-                        vec!["commit", "-C", step.hashes[0].as_str()]
-                    } else {
-                        vec!["commit", "-m", message]
-                    };
-                    if let Err(e) = run_git_raw(Some(repo_path), &commit_args, DEFAULT_TIMEOUT)
-                        .await
-                        .and_then(check_code)
-                    {
-                        failure = Some(e);
-                        break 'steps;
-                    }
-                }
-            }
-        }
+        let (_, todo_path) = write_rebase_todo(&git_dir, TodoRoute::Replay, steps, dropped).await?;
+        let envs = rebase_editor_env(&todo_path);
+        let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        start_planned_rebase(
+            repo_path,
+            &git_dir,
+            base,
+            &expected,
+            &envs,
+            DEFAULT_TIMEOUT,
+            abort_timeout,
+        )
+        .await?;
 
-        if let Some(err) = failure {
-            // Roll back: abort any in-progress pick, then return the branch to its
-            // pre-run tip. The abort stays best-effort and outside the verdict —
-            // `reset --hard` clears the unmerged index and CHERRY_PICK_HEAD, but a
-            // multi-hash step's `.git/sequencer` survives it and only `--abort`
-            // clears it, which is why the recovery text names that command: while
-            // it is there the repo still reads as mid-op (see `op_state`). The
-            // reset itself is captured: the error must not promise a rollback that
-            // didn't happen.
-            let _ = run_git(
-                Some(repo_path),
-                &["cherry-pick", "--abort"],
-                DEFAULT_TIMEOUT,
-            )
-            .await;
-            // The replay never leaves the branch, so there is no return-switch to
-            // verify: this one reset is the whole rollback verdict.
-            let reset_ok = run_git(
-                Some(repo_path),
-                &["reset", "--hard", &orig],
-                rollback_timeout,
-            )
-            .await
-            .is_ok();
-            // Every verdict leads with one short line naming the outcome, details
-            // and remedies below it, git's own output last: the frontend collapses
-            // a message whose first line is git conflict output into "operation
-            // paused", which is the one thing these arms are not.
-            let cause = if rewound {
-                "Usually a conflict, or a squash/fixup that left nothing to commit."
-            } else {
-                "The rewind onto the base commit failed, so nothing was replayed."
-            };
-            let damage = if rewound {
-                format!("Your branch may be left partly rewritten; its tip before this run was {orig}.")
-            } else {
-                format!("Your branch should still be at its original tip {orig}.")
-            };
-            let recovery = format!(
-                "The rewrite failed and its automatic rollback also failed.\n{damage}\nRun git cherry-pick --abort if a pick is still in progress, or git reset --hard {orig} to restore it."
-            );
-            return Err(match err {
-                AppError::Git { code, stderr } if reset_ok => AppError::Git {
-                    code,
-                    stderr: format!(
-                        "The rewrite couldn't be applied and was rolled back — your branch is unchanged.\n{cause}\n{stderr}"
-                    ),
-                },
-                AppError::Git { code, stderr } => AppError::Git {
-                    code,
-                    stderr: format!("{recovery}\n{stderr}"),
-                },
-                other if reset_ok => other,
-                // Timeout carries only a u64 and GitNotFound carries nothing, so a
-                // variant-preserving wrap isn't available for every arm — one
-                // `Command` carrying the whole explanation beats a scheme where
-                // which variant survives depends on the failure class.
-                other => AppError::Command(format!("{recovery}\n{other}")),
-            });
+        // Lock-free raw runner: this runs inside the compound's own working-tree hold.
+        // A stop splits git's report across both streams (a conflicted pick's
+        // `could not apply` on stderr, its `CONFLICT (…` list on stdout; the empty
+        // amend on stderr), so every message below carries the full failure text.
+        let resumed = run_git_raw_env(
+            Some(repo_path),
+            &REBASE_CONTINUE_ARGS,
+            &CONTINUE_EDITOR_ENV,
+            rebase_timeout,
+        )
+        .await;
+        let rebasing = rebase_in_progress(&git_dir);
+        let failure = match resumed {
+            Ok(out) if out.code == 0 && !rebasing => return Ok(()),
+            Ok(out) if rebasing => RebaseFailure::Git(out),
+            Err(e) if rebasing => RebaseFailure::Other(e),
+            // Nothing in progress after a failed continue: the kill landed after git
+            // finished, so what happened is read off the branch.
+            Ok(_) | Err(_) => return classify_finished_rebase(repo_path, &expected).await,
+        };
+        match abort_planned_rebase(repo_path, &git_dir, abort_timeout).await {
+            Ok(()) => Err(rolled_back_error(failure)),
+            Err(report) => Err(failed_abort_error(
+                &git_dir,
+                &expected,
+                &report,
+                Some(failure),
+            )),
         }
-        Ok(())
     }
     .await;
 
@@ -4806,15 +4798,29 @@ pub(crate) async fn rewrite_commits_with_timeouts(
 /// Rewrites the unpushed tip via a **real, resumable** `git rebase -i` — used when
 /// the plan contains an `edit` (the atomic replay engine can't pause). Generates
 /// the todo (pick/edit the leader, fixup the folds, reword/squash messages via a
-/// non-interactive `exec … commit --amend -F`) and injects it with
-/// `sequence.editor`, so no editor ever opens. Stopping at an `edit` (or at a
+/// non-interactive `exec … commit --amend -F`) and swaps it in through
+/// `GIT_SEQUENCE_EDITOR`, so no editor ever opens. Stopping at an `edit` (or at a
 /// conflict before one) leaves the rebase in progress for the banner to take over —
-/// a normal outcome, not an error.
+/// a normal outcome, not an error. Steps plus `dropped` must cover `base..HEAD`
+/// exactly once; anything else refuses, since the generated todo replaces git's.
 #[tauri::command]
 pub async fn git_rebase_edit(
     repo_path: String,
     base: String,
     steps: Vec<RewriteStep>,
+    dropped: Option<Vec<String>>,
+) -> AppResult<()> {
+    git_rebase_edit_with_timeout(repo_path, base, steps, dropped, DEFAULT_TIMEOUT).await
+}
+
+/// [`git_rebase_edit`] with the timeout of the `rebase --continue` that runs the plan
+/// after the start-tip gate injectable; every other git call keeps `DEFAULT_TIMEOUT`.
+pub(crate) async fn git_rebase_edit_with_timeout(
+    repo_path: String,
+    base: String,
+    steps: Vec<RewriteStep>,
+    dropped: Option<Vec<String>>,
+    continue_timeout: std::time::Duration,
 ) -> AppResult<()> {
     validate_hash(&base)?;
     if steps.is_empty() {
@@ -4828,17 +4834,15 @@ pub async fn git_rebase_edit(
             validate_hash(h)?;
         }
     }
-    // CRITICAL: refuse if a sequencer op is already mid-flight, BEFORE the
-    // scratch-dir clear below — otherwise it would delete the in-flight rebase's
-    // pending message files (its `exec ... -F msg` lines would then fail on
-    // --continue, losing the message), and the post-run check would mask it as
-    // success.
-    // Shares [`op_state`]'s detection rather than re-listing markers: the
-    // hand-rolled copy this replaces missed the sequencer-only and revert windows.
+    let dropped = dropped.unwrap_or_default();
+    for h in &dropped {
+        validate_hash(h)?;
+    }
+    // Refuse while a sequencer op is mid-flight, BEFORE the scratch-dir clear below:
+    // it would delete that rebase's pending message files, and its `exec … -F msg`
+    // lines would fail on --continue. [`op_state`]'s detection is the one marker set.
     if op_in_progress(&repo_path).await {
-        return Err(AppError::InvalidArgument(
-            "Can't edit history while a merge, rebase, cherry-pick or revert is in progress — finish or abort it from the banner first.".into(),
-        ));
+        return Err(AppError::InvalidArgument(MID_OP_REFUSAL.into()));
     }
     // git rebase refuses a dirty tree too, but a clear message here is nicer.
     let status = run_git(
@@ -4852,23 +4856,40 @@ pub async fn git_rebase_edit(
             "the working tree has uncommitted changes — commit or stash them first".into(),
         ));
     }
+    // HEAD is read once (the range, the coverage check, the journal anchor and the
+    // start-tip gate all use it), and the branch the rebase must start on is read in
+    // this same entry; the journal makes its own best-effort ref read.
+    let original_sha = run_git(
+        Some(&repo_path),
+        &["rev-parse", "--verify", "HEAD"],
+        DEFAULT_TIMEOUT,
+    )
+    .await?
+    .stdout_lossy()
+    .trim()
+    .to_string();
+    let head_name = read_head_name(&repo_path).await?;
+    // Every post-start probe reads the filesystem under the repo's OWN git dir, so
+    // no failed git spawn can decide "nothing in progress".
+    let git_dir = absolute_git_dir(&repo_path)
+        .await
+        .ok_or_else(|| AppError::InvalidArgument("couldn't resolve the git dir".into()))?;
+    let range = format!("{base}..{original_sha}");
+    let in_range: std::collections::HashSet<String> =
+        run_git(Some(&repo_path), &["rev-list", &range], DEFAULT_TIMEOUT)
+            .await?
+            .stdout_lossy()
+            .lines()
+            .map(str::to_string)
+            .collect();
+    check_plan_covers_range(&in_range, &steps, &dropped)?;
 
     // Journal a pending entry AFTER the guards, BEFORE the first side effect
     // (scratch-dir setup / the rebase itself). Best-effort: a journal failure
     // returns None and the op proceeds unchanged. A paused rebase returns Ok, so
     // `finish` marks it "done" (git tracks the paused state); only a real Err is
     // "failed". `git_oplog_check` sees `rebasing` true only if the PROCESS died.
-    let original_sha = run_git(Some(&repo_path), &["rev-parse", "HEAD"], DEFAULT_TIMEOUT)
-        .await
-        .ok()
-        .map(|o| o.stdout_lossy().trim().to_string())
-        .unwrap_or_default();
-    // An empty sha means an unborn HEAD (or a failed read), which journals no branch.
-    let original_ref = if original_sha.is_empty() {
-        None
-    } else {
-        journal_original_ref(&repo_path).await
-    };
+    let original_ref = journal_original_ref(&repo_path).await;
     let label = format!("Interactive rebase onto {base}");
     let op_id = crate::oplog::begin(
         &repo_path,
@@ -4880,75 +4901,58 @@ pub async fn git_rebase_edit(
     )
     .await;
 
+    let expected = PlanStart {
+        tip: original_sha.clone(),
+        head_name,
+    };
     let op_result: AppResult<()> = async {
-        // Scratch dir inside .git for the generated todo + message files. The
-        // message files are referenced by `exec` lines that run on each --continue,
-        // so they must outlive this call — clear stale ones up front instead.
-        let dir = git_dir_path(&repo_path, "gd-rebase-edit")
-            .await
-            .ok_or_else(|| AppError::InvalidArgument("couldn't resolve the git dir".into()))?;
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| AppError::InvalidArgument(format!("couldn't create scratch dir: {e}")))?;
-
-        let mut todo = String::new();
-        for (i, step) in steps.iter().enumerate() {
-            todo.push_str(if step.edit { "edit " } else { "pick " });
-            todo.push_str(&step.hashes[0]);
-            todo.push('\n');
-            for fold in &step.hashes[1..] {
-                todo.push_str("fixup ");
-                todo.push_str(fold);
-                todo.push('\n');
-            }
-            let message = step.message.as_deref().map(str::trim).unwrap_or("");
-            if !message.is_empty() {
-                let msg_path = dir.join(format!("msg-{i}"));
-                std::fs::write(&msg_path, message).map_err(|e| {
-                    AppError::InvalidArgument(format!("couldn't write message: {e}"))
-                })?;
-                let msg_fwd = msg_path.to_string_lossy().replace('\\', "/");
-                // --no-verify: the message is already composed; don't let a
-                // pre-commit/commit-msg hook stall the rebase mid-flight.
-                todo.push_str(&format!(
-                    "exec git commit --amend --no-verify -F \"{msg_fwd}\"\n"
-                ));
-            }
-        }
-        let todo_path = dir.join("todo");
-        std::fs::write(&todo_path, &todo)
-            .map_err(|e| AppError::InvalidArgument(format!("couldn't write todo: {e}")))?;
-        let todo_fwd = todo_path.to_string_lossy().replace('\\', "/");
-        // `sequence.editor` swaps git's generated todo for ours (a plain copy);
-        // `core.editor=true` guarantees nothing ever blocks waiting for an editor.
-        let seq_editor = format!("sequence.editor=cp \"{todo_fwd}\"");
-
-        let out = run_git_raw(
-            Some(&repo_path),
-            &[
-                "-c",
-                "core.editor=true",
-                "-c",
-                &seq_editor,
-                "rebase",
-                "-i",
-                &base,
-            ],
+        let (dir, todo_path) =
+            write_rebase_todo(&git_dir, TodoRoute::Edit, &steps, &dropped).await?;
+        let envs = rebase_editor_env(&todo_path);
+        let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let started = start_planned_rebase(
+            &repo_path,
+            &git_dir,
+            &base,
+            &expected,
+            &envs,
+            DEFAULT_TIMEOUT,
             DEFAULT_TIMEOUT,
         )
-        .await?;
-
-        // A paused rebase leaves rebase-merge in place — that's the hand-off to the
-        // banner, not a failure. Only error when nothing's in progress.
-        let rebasing = git_path_exists(&repo_path, "rebase-merge").await
-            || git_path_exists(&repo_path, "rebase-apply").await;
-        if !rebasing && out.code != 0 {
-            return Err(AppError::Git {
-                code: out.code,
-                stderr: format!("Couldn't start the rebase.\n{}", out.stderr),
-            });
+        .await;
+        if let Err(AppError::InvalidArgument(msg)) = &started {
+            // A refused start leaves no rebase to read these message files.
+            if msg == UNCOVERED_RANGE_REFUSAL {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
         }
-        Ok(())
+        started?;
+
+        let resumed = run_git_raw_env(
+            Some(&repo_path),
+            &REBASE_CONTINUE_ARGS,
+            &CONTINUE_EDITOR_ENV,
+            continue_timeout,
+        )
+        .await;
+        let rebasing = rebase_in_progress(&git_dir);
+        // Every stop with the rebase alive is left in progress on purpose: the user's
+        // edit intent stands and the banner owns the rebase.
+        let failure = match resumed {
+            Err(e @ AppError::Timeout(_)) if rebasing => {
+                return Err(AppError::Command(format!("{L_EDITTIMEOUT}\n{e}")));
+            }
+            Ok(out) if rebasing => RebaseFailure::Git(out),
+            Err(e) if rebasing => RebaseFailure::Other(e),
+            Ok(out) if out.code == 0 => return Ok(()),
+            Ok(_) | Err(_) => return classify_finished_rebase(&repo_path, &expected).await,
+        };
+        // An `edit` stop or a conflict is the hand-off to the banner, not a failure;
+        // any other stop never reached the plan's edit.
+        if rebase_stopped_for_edit(&git_dir) || has_unmerged_paths(&repo_path).await {
+            return Ok(());
+        }
+        Err(live_rebase_error(L_EDITINTERRUPTED, "", failure))
     }
     .await;
 
@@ -4959,6 +4963,874 @@ pub async fn git_rebase_edit(
     )
     .await;
     op_result
+}
+
+/// Both entry points' refusal while a merge, rebase, cherry-pick or revert is paused.
+const MID_OP_REFUSAL: &str = "Can't edit history while a merge, rebase, cherry-pick or revert is in progress — finish or abort it from the banner first.";
+
+// Each rewrite message's FIRST line (git's output only below it); the frontend reads
+// the rollback verdicts off it (error-summary.ts ROLLBACK_VERDICTS).
+const L_ROLLEDBACK: &str =
+    "The rewrite couldn't be applied and was rolled back — your branch is unchanged.";
+const L_ABORTFAILED: &str = "The rewrite failed and its automatic rollback also failed.";
+const L_START: &str = "Couldn't start the rebase.";
+const L_NOREWRITE: &str = "The rewrite plan was not applied, so nothing was rewritten as planned.";
+const L_UNVERIFIED: &str =
+    "The rewrite was rolled back — couldn't verify the state it started from.";
+const L_UNCONFIRMED: &str = "The rewrite's outcome couldn't be confirmed.";
+const L_EDITTIMEOUT: &str =
+    "The rebase timed out and was left in progress — continue or abort it from the banner.";
+const L_EDITINTERRUPTED: &str =
+    "The rebase was interrupted and left in progress — continue or abort it from the banner.";
+
+/// What git writes into `rebase-merge/head-name` when the rebase started detached.
+const DETACHED_HEAD_NAME: &str = "detached HEAD";
+
+/// git's refusal to start while another rebase's state exists (exit 128, no state
+/// written).
+const REBASE_DIR_EXISTS: &str = "It seems that there is already a rebase-merge directory";
+
+/// The one rebase start both paths run. Flags are all in git 2.21 (the floor `break`
+/// and `--no-reschedule-failed-exec` set); knobs newer than that ride `-c`, which an
+/// older git ignores instead of refusing. `--no-autosquash` and `--no-rebase-merges`
+/// keep git's own fallback todo a plain pick list, which the missing-commits check
+/// compares ours against; `--no-verify` skips the pre-rebase hook. post-checkout fires
+/// at the start; post-rewrite fires at the finish (the replay's scripts map its squash
+/// groups and rewords) and, on the edit path, after each reword's amend too.
+const REBASE_START_ARGS: [&str; 22] = [
+    "-c",
+    "core.editor=true",
+    "-c",
+    "rebase.missingCommitsCheck=error",
+    "-c",
+    "rebase.instructionFormat=%s",
+    "-c",
+    "rebase.abbreviateCommands=false",
+    "-c",
+    "rebase.updateRefs=false",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.auto=false",
+    "rebase",
+    "-i",
+    "--no-autosquash",
+    "--no-autostash",
+    "--no-fork-point",
+    "--no-rebase-merges",
+    "--no-reschedule-failed-exec",
+    "--no-verify",
+];
+
+/// git refuses `--[no-]reschedule-failed-exec` on `--continue`; the config pins it.
+const REBASE_CONTINUE_ARGS: [&str; 10] = [
+    "-c",
+    "core.editor=true",
+    "-c",
+    "rebase.rescheduleFailedExec=false",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.auto=false",
+    "rebase",
+    "--continue",
+];
+
+/// Which entry point a todo is built for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TodoRoute {
+    /// The atomic replay: no `edit` stops. A fold group runs as one generated script
+    /// that commits once (an intermediate fold can net empty, a leader's change can
+    /// already be present, and an inline exec line is length-limited). Only those
+    /// commits and a reword's amend run the commit hooks (pre-commit, commit-msg); a
+    /// plain pick runs none.
+    Replay,
+    /// The resumable rebase: `edit` stops, native `fixup` folds, and amends skip the
+    /// commit hooks.
+    Edit,
+}
+
+/// The tip and branch an entry point read, which the rebase's own start record must
+/// match before any pick runs.
+#[derive(Debug)]
+struct PlanStart {
+    tip: String,
+    /// The full ref HEAD was on (`refs/heads/<b>`), or [`DETACHED_HEAD_NAME`].
+    head_name: String,
+}
+
+/// A rebase step that failed: git's own report, or a runner error (a timeout, a spawn
+/// failure).
+enum RebaseFailure {
+    Git(crate::git::runner::GitOutput),
+    Other(AppError),
+}
+
+/// Single-quotes `s` for the shell git runs editor and `exec` values through.
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// A path as the shell git runs `exec` and editor values through reads it: Windows
+/// separators become `/`, which git's sh accepts there; elsewhere `\` is a legal
+/// filename byte and must pass through untouched.
+fn shell_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    }
+}
+
+/// The ref HEAD is on, or [`DETACHED_HEAD_NAME`] when it is detached. Any other
+/// answer is an error, so the rebase never starts on an unknown branch.
+async fn read_head_name(repo: &str) -> AppResult<String> {
+    let out = run_git_raw(Some(repo), &["symbolic-ref", "-q", "HEAD"], DEFAULT_TIMEOUT).await?;
+    let name = out.stdout_lossy().trim().to_string();
+    match (out.code, name.is_empty()) {
+        (0, _) => Ok(name),
+        (1, true) => Ok(DETACHED_HEAD_NAME.into()),
+        _ => out.exit_verdict().map(|_| name),
+    }
+}
+
+/// The rebase todo for `steps` and `dropped`, and the files its `exec` lines read
+/// (path, content) under `dir`: message files and the replay's scripts. It opens with
+/// `break`, so the rebase pauses on `base` before any pick and the start-tip gate can
+/// run; drops are explicit lines, since `missingCommitsCheck=error` refuses a bare
+/// omission.
+///
+/// On the replay route a fold group drops every one of its commits and runs ONE
+/// generated script ([`group_script`]) instead of picking its leader: a picked leader
+/// whose change is already present stops as an empty pick, and an inline exec chain
+/// is cut by git's `sh -c` at ~8 KiB (87+ folds, measured on Windows). A replay
+/// reword amends through its own script too ([`reword_script`]).
+fn rebase_todo(
+    route: TodoRoute,
+    steps: &[RewriteStep],
+    dropped: &[String],
+    dir: &Path,
+    git_path: &str,
+) -> (String, Vec<(std::path::PathBuf, String)>) {
+    // The app's resolved git, not whatever `git` the sequencer's PATH holds.
+    let git = sh_quote(git_path);
+    let mut todo = String::from("break\n");
+    let mut files = Vec::new();
+    for h in dropped {
+        todo.push_str(&format!("drop {h}\n"));
+    }
+    for (i, step) in steps.iter().enumerate() {
+        let leader = &step.hashes[0];
+        let folds = &step.hashes[1..];
+        let message = step.message.as_deref().map(str::trim).unwrap_or("");
+        let message_file = if message.is_empty() {
+            None
+        } else {
+            let path = dir.join(format!("msg-{i}"));
+            let quoted = sh_quote(&shell_path(&path));
+            files.push((path, message.to_string()));
+            Some(quoted)
+        };
+        match route {
+            TodoRoute::Replay if !folds.is_empty() => {
+                for h in &step.hashes {
+                    todo.push_str(&format!("drop {h}\n"));
+                }
+                let script = dir.join(format!("group-{i}.sh"));
+                let body = group_script(&git, leader, folds, message_file.as_deref());
+                todo.push_str(&format!("exec sh {}\n", sh_quote(&shell_path(&script))));
+                files.push((script, body));
+            }
+            TodoRoute::Replay => {
+                todo.push_str(&format!("pick {leader}\n"));
+                if let Some(file) = message_file {
+                    let script = dir.join(format!("reword-{i}.sh"));
+                    todo.push_str(&format!("exec sh {}\n", sh_quote(&shell_path(&script))));
+                    files.push((script, reword_script(&git, &file)));
+                }
+            }
+            TodoRoute::Edit => {
+                let command = if step.edit { "edit" } else { "pick" };
+                todo.push_str(&format!("{command} {leader}\n"));
+                for fold in folds {
+                    todo.push_str(&format!("fixup {fold}\n"));
+                }
+                // The edit path's message is already composed: a hook must not stall
+                // a rebase the user resumes from the banner.
+                if let Some(file) = message_file {
+                    todo.push_str(&format!(
+                        "exec {git} commit --amend --no-verify -F {file}\n"
+                    ));
+                }
+            }
+        }
+    }
+    (todo, files)
+}
+
+/// What a replay fold group's script reports when its commits add up to nothing.
+const EMPTY_GROUP_ERROR: &str =
+    "error: the squashed commits add up to no change, so the group would be empty";
+
+/// The sh script a replay fold group runs (LF only): it stages the leader and every
+/// fold (`cherry-pick -n`), refuses an empty net, and commits once with the leader's
+/// author and author date, its message (`-C`) or the group's own (`-F`). The commit
+/// runs the commit hooks once, with the whole group staged.
+///
+/// - The empty-net check passes `--ignore-submodules=none`: `.gitmodules` `ignore=all`
+///   would otherwise hide a gitlink-only group, and a `-c` override doesn't outrank it.
+/// - The author captures pass `--no-show-signature` (`log.showSignature` would splice
+///   gpg output into them) and take the date in git's own `@<seconds> <tz>` form,
+///   which round-trips every date (ISO 8601 breaks from 2100 on, and a plain raw
+///   date before 1973). Each is its own assignment: `set -e` can't see a failure
+///   inside a command's prefix assignment.
+/// - Each member's old → new line goes to the sequencer's rewritten-list, which git
+///   reads at the finish for notes rewriting and post-rewrite; dropped members are
+///   otherwise missing from it.
+fn group_script(git: &str, leader: &str, folds: &[String], message_file: Option<&str>) -> String {
+    let members = || std::iter::once(leader).chain(folds.iter().map(String::as_str));
+    let mut script = String::from("set -e\n");
+    for h in members() {
+        script.push_str(&format!("{git} cherry-pick -n {h}\n"));
+    }
+    script.push_str(&format!(
+        "if {git} diff --cached --quiet --ignore-submodules=none; then echo '{EMPTY_GROUP_ERROR}' >&2; exit 1; fi\n"
+    ));
+    match message_file {
+        None => script.push_str(&format!("{git} commit -C {leader}\n")),
+        Some(file) => script.push_str(&format!(
+            "n=$({git} log -1 --no-show-signature --format=%an {leader})\n\
+             e=$({git} log -1 --no-show-signature --format=%ae {leader})\n\
+             d=$({git} log -1 --no-show-signature --date=raw --format=@%ad {leader})\n\
+             GIT_AUTHOR_NAME=\"$n\" GIT_AUTHOR_EMAIL=\"$e\" GIT_AUTHOR_DATE=\"$d\" \
+             {git} commit -F {file}\n"
+        )),
+    }
+    script.push_str(&format!("new=$({git} rev-parse HEAD)\n"));
+    script.push_str(&format!(
+        "list=$({git} rev-parse --git-path rebase-merge/rewritten-list)\n"
+    ));
+    for h in members() {
+        script.push_str(&format!(
+            "printf '%s %s\\n' \"$({git} rev-parse {h})\" \"$new\" >> \"$list\"\n"
+        ));
+    }
+    script
+}
+
+/// The sh script a replay reword runs (LF only) after its pick: it amends with the new
+/// message, then points the pick's rewritten-list line at the amended commit. git
+/// records that line before the exec, so it would otherwise send the pick's notes and
+/// post-rewrite to the orphaned pre-amend commit; `--no-post-rewrite` leaves the
+/// finish's mapping as the only one. The commit hooks still run. A temp file and `mv`
+/// stand in for `sed -i`, whose syntax differs between GNU and BSD sed.
+fn reword_script(git: &str, message_file: &str) -> String {
+    format!(
+        "set -e\n\
+         pre=$({git} rev-parse HEAD)\n\
+         {git} commit --amend --no-post-rewrite -F {message_file}\n\
+         new=$({git} rev-parse HEAD)\n\
+         list=$({git} rev-parse --git-path rebase-merge/rewritten-list)\n\
+         if [ -f \"$list\" ]; then sed \"s/ $pre\\$/ $new/\" \"$list\" > \"$list.gd-tmp\" \
+         && mv \"$list.gd-tmp\" \"$list\"; fi\n"
+    )
+}
+
+/// The replay's `rebase --continue` budget: one bound for the whole plan, which that
+/// one process runs. Each `pick`/`drop` line (one per hash) gets 2 s; each exec line
+/// gets a full per-command budget, since it runs a commit plus the user's own commit
+/// hooks. Counted as [`rebase_todo`] writes the replay route.
+fn replay_timeout(steps: &[RewriteStep], dropped: &[String]) -> std::time::Duration {
+    let execs = steps
+        .iter()
+        .filter(|s| {
+            !s.message.as_deref().map(str::trim).unwrap_or("").is_empty() || s.hashes.len() > 1
+        })
+        .count() as u32;
+    let lines = dropped.len() + steps.iter().map(|s| s.hashes.len()).sum::<usize>();
+    DEFAULT_TIMEOUT + std::time::Duration::from_secs(2 * lines as u64) + DEFAULT_TIMEOUT * execs
+}
+
+/// The editor pins for the rebase START. The env vars outrank any
+/// `-c sequence.editor`/`core.editor`, so user config can't displace our todo.
+fn rebase_editor_env(todo_path: &str) -> [(&'static str, String); 2] {
+    [
+        ("GIT_SEQUENCE_EDITOR", format!("cp {}", sh_quote(todo_path))),
+        ("GIT_EDITOR", "true".to_string()),
+    ]
+}
+
+/// The editor pins for the CONTINUE, which never launches the sequence editor: a
+/// no-op one, so an exec line or hook that starts its own interactive rebase can't
+/// pick up the plan's todo.
+const CONTINUE_EDITOR_ENV: [(&str, &str); 2] =
+    [("GIT_SEQUENCE_EDITOR", "true"), ("GIT_EDITOR", "true")];
+
+/// Writes the route's todo and the files its exec lines read into the
+/// `gd-rebase-edit` scratch dir under `git_dir` and returns the dir and the todo's
+/// shell path. Those files must outlive a paused rebase the user continues from the
+/// banner, so stale ones are cleared up front.
+async fn write_rebase_todo(
+    git_dir: &Path,
+    route: TodoRoute,
+    steps: &[RewriteStep],
+    dropped: &[String],
+) -> AppResult<(std::path::PathBuf, String)> {
+    let dir = git_dir.join("gd-rebase-edit");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::InvalidArgument(format!("couldn't create scratch dir: {e}")))?;
+    let git_path = shell_path(&crate::git::runner::git_bin().await?);
+    let (todo, files) = rebase_todo(route, steps, dropped, &dir, &git_path);
+    for (path, content) in files {
+        std::fs::write(&path, content).map_err(|e| {
+            AppError::InvalidArgument(format!("couldn't write {}: {e}", path.display()))
+        })?;
+    }
+    let todo_path = dir.join("todo");
+    std::fs::write(&todo_path, &todo)
+        .map_err(|e| AppError::InvalidArgument(format!("couldn't write todo: {e}")))?;
+    let todo_shell = shell_path(&todo_path);
+    Ok((dir, todo_shell))
+}
+
+/// Whether a rebase is in progress, read off the filesystem under the repo's own git
+/// dir. Any error but "not found" counts as in progress: a failed probe never reads
+/// as "nothing in flight".
+fn rebase_in_progress(git_dir: &Path) -> bool {
+    ["rebase-merge", "rebase-apply"].iter().any(|name| {
+        match std::fs::symlink_metadata(git_dir.join(name)) {
+            Ok(_) => true,
+            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        }
+    })
+}
+
+/// Whether the index holds unmerged paths (a conflicted stop). A failed probe reads
+/// as none.
+async fn has_unmerged_paths(repo: &str) -> bool {
+    run_git(Some(repo), &["ls-files", "-u"], DEFAULT_TIMEOUT)
+        .await
+        .is_ok_and(|out| !out.stdout_lossy().trim().is_empty())
+}
+
+/// Aborts the rebase this rewrite started. `Err` carries why it didn't take: the
+/// failed abort's own report, or a note that a rebase is still in progress after it.
+async fn abort_planned_rebase(
+    repo: &str,
+    git_dir: &Path,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let aborted = run_git_raw(
+        Some(repo),
+        &[
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "maintenance.auto=false",
+            "rebase",
+            "--abort",
+        ],
+        timeout,
+    )
+    .await;
+    match aborted {
+        Err(e) => Err(e.to_string()),
+        Ok(out) if out.code != 0 => Err(out.full_failure_text()),
+        Ok(_) if rebase_in_progress(git_dir) => {
+            Err("git rebase --abort exited cleanly but left a rebase in progress.".into())
+        }
+        Ok(_) => Ok(()),
+    }
+}
+
+/// The rebase's own start record: the tip it started from and the ref it started on.
+/// Never the shared `ORIG_HEAD`, which other ops overwrite.
+struct StartRecord {
+    orig_head: String,
+    head_name: String,
+}
+
+impl StartRecord {
+    fn matches(&self, expected: &PlanStart) -> bool {
+        self.orig_head == expected.tip && self.head_name == expected.head_name
+    }
+}
+
+/// The start record under `git_dir`; `None` when either file is unreadable.
+fn read_start_record(git_dir: &Path) -> Option<StartRecord> {
+    let read = |name: &str| {
+        std::fs::read_to_string(git_dir.join("rebase-merge").join(name))
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
+    Some(StartRecord {
+        orig_head: read("orig-head")?,
+        head_name: read("head-name")?,
+    })
+}
+
+/// `lead` (one of the `L_*` first lines) with `body` lines below it and the failure's
+/// own report last — git's whole output, both streams, for a git failure.
+fn rebase_failure_error(lead: &str, body: &str, failure: RebaseFailure) -> AppError {
+    shaped_failure_error(lead, body, failure, str::to_string)
+}
+
+/// [`rebase_failure_error`] for a rebase left in progress: git's report loses only its
+/// progress counters, since its hints and advice stay true while the rebase is alive.
+fn live_rebase_error(lead: &str, body: &str, failure: RebaseFailure) -> AppError {
+    shaped_failure_error(lead, body, failure, strip_rebase_progress)
+}
+
+/// The rollback's error. git's report rides below the verdict without what the
+/// rollback made untrue (see [`strip_rebase_noise`]).
+fn rolled_back_error(failure: RebaseFailure) -> AppError {
+    shaped_failure_error(L_ROLLEDBACK, "", failure, strip_rebase_noise)
+}
+
+/// `lead` and `body` over the failure, with a git report passed through `shape`.
+fn shaped_failure_error(
+    lead: &str,
+    body: &str,
+    failure: RebaseFailure,
+    shape: fn(&str) -> String,
+) -> AppError {
+    let lead = if body.is_empty() {
+        lead.to_string()
+    } else {
+        format!("{lead}\n{body}")
+    };
+    match failure {
+        RebaseFailure::Git(out) => AppError::Git {
+            code: out.code,
+            stderr: format!("{lead}\n{}", shape(&out.full_failure_text()))
+                .trim_end()
+                .to_string(),
+        },
+        RebaseFailure::Other(e) => AppError::Command(format!("{lead}\n{e}")),
+    }
+}
+
+/// `report` without git's `Rebasing (n/m)` progress segments, which git joins to the
+/// next line with `\r`. Everything else stays, blank lines included.
+fn strip_rebase_progress(report: &str) -> String {
+    report_segments(report)
+        .filter(|segment| !is_rebase_progress(segment))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `report`'s lines and `\r`-joined segments, each without the erase-line escape
+/// (`ESC[K`) git puts in front of a segment when TERM is set.
+fn report_segments(report: &str) -> impl Iterator<Item = &str> {
+    report
+        .split('\n')
+        .flat_map(|line| line.split('\r'))
+        .map(|segment| segment.strip_prefix("\x1b[K").unwrap_or(segment))
+}
+
+/// A rolled-back `report` without what the rollback made untrue: git's progress
+/// counters, blank segments, the `Executing:` echo (its "execution failed" line
+/// stays), the exec's dirty-tree errors, a commit's success summary, the status
+/// block from "interactive rebase in progress;" to its first non-status line, and
+/// git's advice on continuing (`hint:` lines, `git rebase --continue|--skip|--abort|
+/// --edit-todo`, `git reset HEAD^`, `--allow-empty`). Other reason lines (error:,
+/// fatal:, warning:, CONFLICT, could not apply) always stay. The C locale is forced,
+/// so the English text is stable.
+fn strip_rebase_noise(report: &str) -> String {
+    let mut in_status = false;
+    report_segments(report)
+        .filter(|segment| {
+            if segment
+                .trim()
+                .starts_with("interactive rebase in progress;")
+            {
+                in_status = true;
+            } else if in_status && !is_status_line(segment) {
+                in_status = false;
+            }
+            !in_status
+        })
+        .filter_map(strip_advice)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A line of git's status block (wt-status): blank, one of its headings and
+/// summaries, or one of its own indented lines (a tab-indented path, a parenthesized
+/// hint, a todo line). Any other indented line, such as a hook's own reason, ends the
+/// block.
+fn is_status_line(segment: &str) -> bool {
+    const TODO_VERBS: [&str; 12] = [
+        "pick",
+        "drop",
+        "exec",
+        "fixup",
+        "squash",
+        "edit",
+        "reword",
+        "break",
+        "label",
+        "reset",
+        "merge",
+        "update-ref",
+    ];
+    const STATUS: [&str; 17] = [
+        "Last command done",
+        "Last commands done",
+        "Next command to do",
+        "Next commands to do",
+        "No commands remaining.",
+        "You are currently ",
+        "Changes to be committed:",
+        "Changes not staged for commit:",
+        "Untracked files:",
+        "Unmerged paths:",
+        "No changes",
+        "nothing to commit",
+        "nothing added to commit",
+        "no changes added to commit",
+        "Untracked files not listed",
+        "Ignored files:",
+        "interactive rebase in progress;",
+    ];
+    let trimmed = segment.trim();
+    let spaces = segment.len() - segment.trim_start_matches(' ').len();
+    let todo_line = spaces >= 3
+        && trimmed
+            .split_whitespace()
+            .next()
+            .is_some_and(|verb| TODO_VERBS.contains(&verb));
+    trimmed.is_empty()
+        || segment.starts_with('\t')
+        || (segment.starts_with(' ') && trimmed.starts_with('('))
+        || todo_line
+        || STATUS.iter().any(|s| segment.starts_with(s))
+}
+
+/// A line stating why git stopped, kept whatever advice it quotes.
+fn is_reason_line(trimmed: &str) -> bool {
+    const REASON_PREFIXES: [&str; 4] = ["error:", "fatal:", "warning:", "CONFLICT"];
+    REASON_PREFIXES.iter().any(|p| trimmed.starts_with(p)) || trimmed.contains("could not apply")
+}
+
+/// A line of git's own report that a rollback makes untrue even though it reads like a
+/// reason: the exec's echo, its dirty-tree errors and their continuations (a
+/// `<path>: needs merge` included), and a commit's success summary (an exec can
+/// commit before a later step fails).
+fn is_stale_after_rollback(segment: &str) -> bool {
+    const DIRTY_TREE: [&str; 4] = [
+        "error: cannot rebase:",
+        "error: additionally, your index contains uncommitted changes.",
+        "and made changes to the index and/or the working tree",
+        "but left changes to the index and/or the working tree",
+    ];
+    const SUMMARY: [&str; 7] = [
+        "Author: ",
+        "Date: ",
+        "create mode ",
+        "delete mode ",
+        "rename ",
+        "mode change ",
+        "copy ",
+    ];
+    let trimmed = segment.trim();
+    if segment.starts_with("Executing: ")
+        || segment.starts_with("[detached HEAD ")
+        || DIRTY_TREE.iter().any(|d| trimmed.starts_with(d))
+        || (!segment.starts_with([' ', '\t']) && trimmed.ends_with(": needs merge"))
+    {
+        return true;
+    }
+    if !segment.starts_with(' ') {
+        return false;
+    }
+    let mut words = trimmed.split_whitespace();
+    let files_changed = matches!(
+        (words.next(), words.next(), words.next()),
+        (Some(n), Some("file" | "files"), Some(changed))
+            if n.bytes().all(|b| b.is_ascii_digit()) && changed.starts_with("changed")
+    );
+    files_changed || SUMMARY.iter().any(|s| trimmed.starts_with(s))
+}
+
+/// One report segment with git's continue advice removed, or `None` to drop it.
+fn strip_advice(segment: &str) -> Option<&str> {
+    const ADVICE: [&str; 7] = [
+        "git rebase --continue",
+        "git rebase --skip",
+        "git rebase --abort",
+        "git rebase --edit-todo",
+        "git reset HEAD^",
+        "You can fix the problem, and then run",
+        "Commit or stash your changes, and then run",
+    ];
+    // git's empty-amend message ends its reason line with this advice sentence.
+    const ALLOW_EMPTY: &str = "You can repeat your command with --allow-empty";
+    let trimmed = segment.trim();
+    if trimmed.is_empty() || is_rebase_progress(trimmed) || is_stale_after_rollback(segment) {
+        return None;
+    }
+    if is_reason_line(trimmed) {
+        return Some(segment);
+    }
+    if trimmed.starts_with("hint:") || ADVICE.iter().any(|a| trimmed.contains(a)) {
+        return None;
+    }
+    match segment.find(ALLOW_EMPTY) {
+        Some(at) => Some(segment[..at].trim_end()).filter(|kept| !kept.trim().is_empty()),
+        None => Some(segment),
+    }
+}
+
+fn is_rebase_progress(segment: &str) -> bool {
+    let Some(inner) = segment
+        .trim()
+        .strip_prefix("Rebasing (")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return false;
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    matches!(inner.split_once('/'), Some((n, m)) if digits(n) && digits(m))
+}
+
+/// A failed abort: the branch ref stays at `orig` (git moves it only when the rebase
+/// finishes), so the remedy is the abort itself, never a reset. `orig` is what the
+/// abort restores: the rebase's recorded start tip. The abort's own report says what
+/// blocked it, ahead of the original failure's.
+fn abort_failed_error(orig: &str, abort_report: &str, failure: Option<RebaseFailure>) -> AppError {
+    let body = format!(
+        "Your branch is left mid-rebase; its tip before this run was {orig}.\nFix what git reports below, then run git rebase --abort to restore it.\n{abort_report}"
+    );
+    match failure {
+        Some(failure) => live_rebase_error(L_ABORTFAILED, body.trim_end(), failure),
+        None => AppError::Command(format!("{L_ABORTFAILED}\n{}", body.trim_end())),
+    }
+}
+
+/// A failed abort with the start record unreadable. git can't abort without it, but
+/// `--quit` drops the state and a checkout reattaches the branch, whose ref the
+/// rebase never moved (measured, git 2.51.1).
+fn unreadable_record_error(
+    expected: &PlanStart,
+    abort_report: &str,
+    failure: Option<RebaseFailure>,
+) -> AppError {
+    let target = match expected.head_name.strip_prefix("refs/heads/") {
+        Some(branch) => branch.to_string(),
+        None if expected.head_name == DETACHED_HEAD_NAME => expected.tip.clone(),
+        None => expected.head_name.clone(),
+    };
+    let body = format!(
+        "Your branch is left mid-rebase and its rebase record is unreadable; the plan was read at {}.\nRun git rebase --quit, then check out {target} again.\n{abort_report}",
+        expected.tip
+    );
+    match failure {
+        Some(failure) => live_rebase_error(L_ABORTFAILED, body.trim_end(), failure),
+        None => AppError::Command(format!("{L_ABORTFAILED}\n{}", body.trim_end())),
+    }
+}
+
+/// A failed abort after the gate passed: named by the rebase's own record when it is
+/// readable, else with the `--quit` remedy.
+fn failed_abort_error(
+    git_dir: &Path,
+    expected: &PlanStart,
+    abort_report: &str,
+    failure: Option<RebaseFailure>,
+) -> AppError {
+    match read_start_record(git_dir) {
+        Some(record) => abort_failed_error(&record.orig_head, abort_report, failure),
+        None => unreadable_record_error(expected, abort_report, failure),
+    }
+}
+
+/// Starts the planned rebase, whose todo the editor pins in `envs` swap in, and runs
+/// the start-tip gate at its leading `break`: `Ok` means the rebase is paused on
+/// `base` with the plan's own tip and branch recorded, ready to continue. Any tip
+/// move after the plan was read (a new commit or an amend trips git's missing-commits
+/// stop; a reset to an ancestor or a branch switch trips the gate) aborts and
+/// refuses; a rebase that isn't ours is never touched.
+async fn start_planned_rebase(
+    repo: &str,
+    git_dir: &Path,
+    base: &str,
+    expected: &PlanStart,
+    envs: &[(&str, &str)],
+    start_timeout: std::time::Duration,
+    abort_timeout: std::time::Duration,
+) -> AppResult<()> {
+    let mut args: Vec<&str> = REBASE_START_ARGS.to_vec();
+    args.push(base);
+    let started = run_git_raw_env(Some(repo), &args, envs, start_timeout).await;
+    let rebasing = rebase_in_progress(git_dir);
+    let out = match started {
+        // No exit code and no report: routed as a failed start without the marker. A
+        // timed-out git is already dead here: the runner kills its whole process tree.
+        Err(e) if rebasing => {
+            return clear_failed_start(repo, git_dir, expected, RebaseFailure::Other(e)).await;
+        }
+        Err(e) => return Err(rebase_failure_error(L_START, "", RebaseFailure::Other(e))),
+        Ok(out) => out,
+    };
+    if out.code != 0 {
+        if out.stderr.contains(REBASE_DIR_EXISTS) {
+            return Err(rebase_failure_error(L_START, "", RebaseFailure::Git(out)));
+        }
+        if is_missing_commits_stop(&out.stderr) {
+            // Ours by construction: git refuses to start over existing state (above),
+            // and the entry's mid-op refusal ran first. git recorded the MOVED tip as
+            // orig-head, so no tip comparison applies; the abort restores that tip.
+            if !rebasing {
+                return Err(AppError::InvalidArgument(UNCOVERED_RANGE_REFUSAL.into()));
+            }
+            return match abort_planned_rebase(repo, git_dir, abort_timeout).await {
+                Ok(()) => Err(AppError::InvalidArgument(UNCOVERED_RANGE_REFUSAL.into())),
+                Err(report) => Err(failed_abort_error(
+                    git_dir,
+                    expected,
+                    &report,
+                    Some(RebaseFailure::Git(out)),
+                )),
+            };
+        }
+        if rebasing {
+            return clear_failed_start(repo, git_dir, expected, RebaseFailure::Git(out)).await;
+        }
+        return Err(rebase_failure_error(L_START, "", RebaseFailure::Git(out)));
+    }
+    if !rebasing {
+        // Our leading `break` never ran, so git ran its own todo instead of ours.
+        let (label, at) = if expected.head_name == DETACHED_HEAD_NAME {
+            ("HEAD", "HEAD")
+        } else {
+            (expected.head_name.as_str(), expected.head_name.as_str())
+        };
+        let now = run_git(Some(repo), &["rev-parse", "--verify", at], DEFAULT_TIMEOUT)
+            .await
+            .map(|o| o.stdout_lossy().trim().to_string())
+            .unwrap_or_else(|_| "an unreadable commit".into());
+        return Err(AppError::Command(format!(
+            "{L_NOREWRITE}\n{label} is at {now}; its tip before this run was {}.",
+            expected.tip
+        )));
+    }
+    match read_start_record(git_dir) {
+        Some(record) if record.matches(expected) => Ok(()),
+        Some(record) => match abort_planned_rebase(repo, git_dir, DEFAULT_TIMEOUT).await {
+            Ok(()) => Err(AppError::InvalidArgument(UNCOVERED_RANGE_REFUSAL.into())),
+            Err(report) => Err(abort_failed_error(&record.orig_head, &report, None)),
+        },
+        None => match abort_planned_rebase(repo, git_dir, DEFAULT_TIMEOUT).await {
+            Ok(()) => Err(AppError::Command(format!(
+                "{L_UNVERIFIED}\nIts tip before this run was {}.",
+                expected.tip
+            ))),
+            Err(report) => Err(unreadable_record_error(expected, &report, None)),
+        },
+    }
+}
+
+/// A start that failed yet left a rebase in progress. Only a rebase whose own record
+/// names the plan's tip and branch is ours to clear; any other is left alone. On the
+/// branch, `--quit` drops the state without touching HEAD or the index; from a
+/// detached HEAD only `--abort` puts the branch back.
+async fn clear_failed_start(
+    repo: &str,
+    git_dir: &Path,
+    expected: &PlanStart,
+    failure: RebaseFailure,
+) -> AppResult<()> {
+    if !read_start_record(git_dir).is_some_and(|record| record.matches(expected)) {
+        return Err(rebase_failure_error(L_START, "", failure));
+    }
+    let cleared = match read_head_name(repo).await {
+        Ok(name) if name != DETACHED_HEAD_NAME => {
+            let quit = run_git_raw(
+                Some(repo),
+                &[
+                    "-c",
+                    "gc.auto=0",
+                    "-c",
+                    "maintenance.auto=false",
+                    "rebase",
+                    "--quit",
+                ],
+                DEFAULT_TIMEOUT,
+            )
+            .await;
+            match quit {
+                Err(e) => Err(e.to_string()),
+                Ok(out) if out.code != 0 => Err(out.full_failure_text()),
+                Ok(_) if rebase_in_progress(git_dir) => {
+                    Err("git rebase --quit exited cleanly but left a rebase in progress.".into())
+                }
+                Ok(_) => Ok(()),
+            }
+        }
+        _ => abort_planned_rebase(repo, git_dir, DEFAULT_TIMEOUT).await,
+    };
+    match cleared {
+        Ok(()) => Err(rebase_failure_error(L_START, "", failure)),
+        Err(report) => Err(abort_failed_error(&expected.tip, &report, Some(failure))),
+    }
+}
+
+/// A continue that failed with nothing left in progress: the kill landed after git
+/// finished. The plan's branch, still checked out and moved off the plan's tip, means
+/// it completed (a changed plan always moves the tip); at the plan's tip nothing was
+/// rewritten; anything else is reported, not guessed.
+async fn classify_finished_rebase(repo: &str, expected: &PlanStart) -> AppResult<()> {
+    let orig = &expected.tip;
+    if expected.head_name == DETACHED_HEAD_NAME {
+        // A detached plan has no branch to read the outcome off.
+        let head = run_git(
+            Some(repo),
+            &["rev-parse", "--verify", "HEAD"],
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .map(|o| o.stdout_lossy().trim().to_string())
+        .unwrap_or_else(|_| "an unreadable commit".into());
+        return Err(AppError::Command(format!(
+            "{L_UNCONFIRMED}\nIts tip before this run was {orig}; HEAD is at {head}.\nIf a rebase is still in progress, run git rebase --abort."
+        )));
+    }
+    let on = read_head_name(repo).await.ok();
+    let at = run_git(
+        Some(repo),
+        &["rev-parse", "--verify", &expected.head_name],
+        DEFAULT_TIMEOUT,
+    )
+    .await
+    .ok()
+    .map(|o| o.stdout_lossy().trim().to_string());
+    match (on.as_deref(), at.as_deref()) {
+        (Some(on), Some(at)) if on == expected.head_name && at != orig => Ok(()),
+        (Some(on), Some(_)) if on == expected.head_name => Err(AppError::Command(format!(
+            "{L_NOREWRITE}\n{} is at {orig}, its tip before this run.",
+            expected.head_name
+        ))),
+        _ => Err(AppError::Command(format!(
+            "{L_UNCONFIRMED}\nIts tip before this run was {orig}; HEAD is on {}, and {} reads {}.\nIf a rebase is still in progress, run git rebase --abort.",
+            on.as_deref().unwrap_or("an unreadable ref"),
+            expected.head_name,
+            at.as_deref().unwrap_or("nothing"),
+        ))),
+    }
+}
+
+/// git's own report when a rebase todo omits a commit under
+/// `missingCommitsCheck=error` (stderr, in the C locale the runner forces; git 2.51.1).
+/// Two lines, so a conflicting pick's one-line "could not apply <sha>... <subject>"
+/// can never match it.
+const MISSING_COMMITS_STOP: &str =
+    "some commits may have been dropped accidentally.\nDropped commits (newer to older):";
+
+fn is_missing_commits_stop(stderr: &str) -> bool {
+    stderr.replace("\r\n", "\n").contains(MISSING_COMMITS_STOP)
 }
 
 #[derive(serde::Serialize)]
@@ -5351,7 +6223,7 @@ mod tests {
 
     /// Pins the runner's zero-budget contract, both halves: a timeout is reported,
     /// and git never runs (a `git init` under it leaves no repository behind). A
-    /// red here means the guard in `run_git_raw_input_bytes` is gone and every
+    /// red here means the guard in `run_git_spawn` is gone and every
     /// killed-git test below is silently racing the child again.
     #[tokio::test]
     async fn a_zero_budget_times_out_without_running_git() {
@@ -5751,7 +6623,7 @@ mod tests {
 
         let state = AppState::default();
         // Oldest-first steps: "two" lands at the bottom, "one" on top.
-        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)])
+        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)], &[])
             .await
             .unwrap();
         assert_eq!(subjects(&repo).await, vec!["one", "two", "base"]);
@@ -5777,6 +6649,7 @@ mod tests {
                 message: Some("combined".into()),
                 edit: false,
             }],
+            &[],
         )
         .await
         .unwrap();
@@ -5807,6 +6680,7 @@ mod tests {
                 message: None,
                 edit: false,
             }],
+            &[],
         )
         .await
         .unwrap();
@@ -5828,7 +6702,7 @@ mod tests {
 
         let state = AppState::default();
         // "two"'s patch (v1→v2) can't apply onto v0 — conflict, then rollback.
-        let result = rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)]).await;
+        let result = rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)], &[]).await;
         match result {
             Err(AppError::Git { ref stderr, .. }) => {
                 // The negative control rides in `assert_verdict_shape`'s
@@ -5839,25 +6713,31 @@ mod tests {
                     stderr.contains("your branch is unchanged"),
                     "a completed rollback must say so: {stderr}"
                 );
-                // Below the verdict, git's whole report: the replay loop splits it
-                // across both streams exactly like `cherry_pick_onto`'s loop.
+                // Below the verdict, git's whole report: the rebase splits a
+                // conflicted pick's report across both streams.
                 assert!(
                     stderr.contains("could not apply")
                         && stderr.contains("CONFLICT (content): Merge conflict in a.txt"),
                     "the verdict must carry git's diagnostic AND its file list: {stderr}"
                 );
+                // The rollback made git's progress and continue/skip/abort hints moot.
+                assert!(
+                    !stderr.lines().any(|l| l.starts_with("hint:")),
+                    "no hint lines: {stderr}"
+                );
+                assert!(!stderr.contains("Rebasing ("), "no progress: {stderr}");
             }
             Ok(()) => panic!("the conflicting rewrite must fail"),
             Err(e) => panic!("expected a Git error, got {e:?}"),
         }
         assert_eq!(rev(&repo, "HEAD").await, orig);
+        assert!(!rebasing(&repo).await, "the rollback leaves no rebase");
         let status = git(&repo, &["status", "--porcelain"]).await;
         assert!(status.trim().is_empty(), "tree should be clean: {status}");
-
     }
 
-    /// The multi-hash pick splits its report the same way the single-hash one
-    /// does, and it is a separate call site — so it needs its own conflict.
+    /// A squash conflicts inside its group script's `cherry-pick -n`, a failed exec
+    /// rather than a pick's stop — so it needs its own conflict.
     #[tokio::test]
     async fn conflicting_squash_rolls_back_and_carries_gits_report() {
         let (dir, repo) = setup_repo("conflict-squash").await;
@@ -5870,7 +6750,7 @@ mod tests {
 
         let state = AppState::default();
         // Squashing them newest-first replays "two"'s patch (v1→v2) onto v0 first,
-        // so the `cherry-pick -n` leg conflicts before any commit is attempted.
+        // so the leader's pick conflicts before any fold is applied.
         let result = rewrite_commits(
             &state,
             &repo,
@@ -5880,6 +6760,7 @@ mod tests {
                 message: Some("combined".into()),
                 edit: false,
             }],
+            &[],
         )
         .await;
         match result {
@@ -5894,15 +6775,16 @@ mod tests {
             Err(e) => panic!("expected a Git error, got {e:?}"),
         }
         assert_eq!(rev(&repo, "HEAD").await, orig);
+        assert!(!rebasing(&repo).await, "the rollback leaves no rebase");
         let status = git(&repo, &["status", "--porcelain"]).await;
         assert!(status.trim().is_empty(), "tree should be clean: {status}");
     }
 
-    /// The other half of the family: a squash whose commits cancel out fails at
-    /// `commit`, which reports on STDOUT alone — a stderr-only error would leave
-    /// the verdict with no explanation under it at all.
+    /// The other half of the family: a squash whose commits cancel out is refused by
+    /// its group script, with no conflict to blame — the verdict must still carry
+    /// that report under it.
     #[tokio::test]
-    async fn empty_squash_rolls_back_and_carries_gits_report() {
+    async fn empty_squash_rolls_back_and_carries_its_report() {
         let (dir, repo) = setup_repo("empty-squash").await;
         let base = rev(&repo, "HEAD").await;
         commit_file(&repo, dir.path(), "a.txt", "v1\n", "one").await;
@@ -5923,29 +6805,726 @@ mod tests {
                 message: Some("combined".into()),
                 edit: false,
             }],
+            &[],
         )
         .await;
         match result {
             Err(AppError::Git { ref stderr, .. }) => {
                 assert_verdict_shape(stderr, "was rolled back");
-                // git's whole sentence, not the bare "nothing to commit": the
-                // verdict's own cause line already says that much, so the short
-                // form passes even when git's report was dropped entirely.
                 assert!(
-                    stderr.contains("nothing to commit, working tree clean"),
-                    "the verdict must carry git's stdout-only report: {stderr}"
+                    stderr.lines().any(|l| l == EMPTY_GROUP_ERROR),
+                    "the verdict must carry the empty-net report: {stderr}"
                 );
             }
             Ok(()) => panic!("the empty squash must fail"),
             Err(e) => panic!("expected a Git error, got {e:?}"),
         }
         assert_eq!(rev(&repo, "HEAD").await, orig);
+        assert!(!rebasing(&repo).await, "the rollback leaves no rebase");
         let status = git(&repo, &["status", "--porcelain"]).await;
         assert!(status.trim().is_empty(), "tree should be clean: {status}");
     }
 
-    /// The rollback must run for every failure class, not just a conflict — a
-    /// killed pick otherwise leaves the branch rewound onto `base`.
+    /// A change, its revert and another change: replayed as one group, the fold after
+    /// the revert would net the commit empty midway, yet the group applies.
+    /// Returns (dir, repo, base, [leader, revert, other]).
+    async fn revert_pair_group(marker: &str) -> (tempfile::TempDir, String, String, [String; 3]) {
+        let (dir, repo) = setup_repo(marker).await;
+        let base = rev(&repo, "HEAD").await;
+        std::fs::write(dir.path().join("a.txt"), "v0\nX\n").unwrap();
+        git(&repo, &["add", "."]).await;
+        git(
+            &repo,
+            &[
+                "commit",
+                "--author",
+                "Orig Author <orig@example.com>",
+                "--date",
+                "2021-01-01T10:00:00+02:00",
+                "-m",
+                "add X",
+            ],
+        )
+        .await;
+        let leader = rev(&repo, "HEAD").await;
+        git(&repo, &["revert", "--no-edit", "HEAD"]).await;
+        let revert = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "add b").await;
+        let other = rev(&repo, "HEAD").await;
+        (dir, repo, base, [leader, revert, other])
+    }
+
+    /// Re-creates `chain` (oldest first, ending at HEAD) with a bogus `gpgsig` header
+    /// on its first commit and the same trees, moves the branch to the new tip, and
+    /// returns the new chain. Under `log.showSignature` git then prints gpg's failed
+    /// verification for that commit.
+    async fn with_bogus_signature_on_first(repo: &str, chain: &[String]) -> Vec<String> {
+        const SIGNATURE: &str = "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEAAAAAAAAAAAAAAAAAAAAAAAAAAAFAmAAAAAACgkQAAAAAAAA\n AAA=\n =AAAA\n -----END PGP SIGNATURE-----\n";
+        let mut parent: Option<String> = None;
+        let mut rebuilt = Vec::new();
+        for (i, commit) in chain.iter().enumerate() {
+            let raw = git(repo, &["cat-file", "commit", commit]).await;
+            let (headers, message) = raw.split_once("\n\n").expect("a commit object");
+            let mut object = String::new();
+            for line in headers.lines() {
+                match (&parent, line.starts_with("parent ")) {
+                    (Some(p), true) => object.push_str(&format!("parent {p}\n")),
+                    _ => object.push_str(&format!("{line}\n")),
+                }
+            }
+            if i == 0 {
+                object.push_str(SIGNATURE);
+            }
+            object.push_str(&format!("\n{message}"));
+            let out = run_git_raw_input(
+                Some(repo),
+                &["hash-object", "-t", "commit", "-w", "--stdin"],
+                Some(&object),
+                DEFAULT_TIMEOUT,
+            )
+            .await
+            .unwrap();
+            assert_eq!(out.code, 0, "hash-object: {}", out.full_failure_text());
+            let sha = out.stdout_lossy().trim().to_string();
+            parent = Some(sha.clone());
+            rebuilt.push(sha);
+        }
+        git(repo, &["reset", "-q", "--hard", rebuilt.last().unwrap()]).await;
+        rebuilt
+    }
+
+    #[tokio::test]
+    async fn a_fold_group_whose_middle_nets_empty_still_applies() {
+        for message in [None, Some("Squashed \"it\" (with quotes)\n\nbody line")] {
+            let marker = format!("revert-pair-{}", message.is_some());
+            let (dir, repo, base, group) = revert_pair_group(&marker).await;
+            // The message group's script reads the leader's identity through `git
+            // log`; a signed leader under `log.showSignature` would splice gpg's
+            // verification output into it. Vacuous where gpg is absent (Git for
+            // Windows bundles it).
+            let group = if message.is_some() {
+                with_bogus_signature_on_first(&repo, &group).await
+            } else {
+                group.to_vec()
+            };
+            let identity = "%an <%ae> %ad";
+            let leader = git(
+                &repo,
+                &[
+                    "log",
+                    "-1",
+                    &format!("--format={identity}"),
+                    "--date=raw",
+                    &group[0],
+                ],
+            )
+            .await;
+            if message.is_some() {
+                git(&repo, &["config", "log.showSignature", "true"]).await;
+            }
+            let state = AppState::default();
+            rewrite_commits(
+                &state,
+                &repo,
+                &base,
+                &[RewriteStep {
+                    hashes: group.clone(),
+                    message: message.map(str::to_string),
+                    edit: false,
+                }],
+                &[],
+            )
+            .await
+            .unwrap_or_else(|e| panic!("message={message:?}: {e}"));
+            assert_eq!(
+                git(&repo, &["rev-list", "--count", &format!("{base}..HEAD")])
+                    .await
+                    .trim(),
+                "1"
+            );
+            assert_eq!(
+                git(&repo, &["log", "-1", "--format=%B"]).await.trim_end(),
+                message.unwrap_or("add X"),
+                "the leader's message, or the group's verbatim"
+            );
+            let changed = git(&repo, &["diff", "--name-only", &base, "HEAD"]).await;
+            assert_eq!(changed.trim(), "b.txt", "base plus the third change only");
+            assert_eq!(tree_text(dir.path(), "a.txt"), "v0\n");
+            assert_eq!(
+                git(
+                    &repo,
+                    &[
+                        "log",
+                        "-1",
+                        &format!("--format={identity}"),
+                        "--date=raw",
+                        "HEAD"
+                    ]
+                )
+                .await,
+                leader,
+                "the leader's author and author date, timezone included"
+            );
+            assert!(leader.contains(" +0200"), "{leader}");
+            assert!(!rebasing(&repo).await, "nothing is in progress");
+            let status = git(&repo, &["status", "--porcelain"]).await;
+            assert!(status.trim().is_empty(), "tree should be clean: {status}");
+        }
+    }
+
+    /// A fold that conflicts inside its group's exec rolls back like any other stop,
+    /// leaving no cherry-pick state behind.
+    #[tokio::test]
+    async fn a_fold_conflicting_inside_its_group_rolls_back() {
+        let (dir, repo, base, [leader, revert, other]) = revert_pair_group("fold-conflict").await;
+        commit_file(&repo, dir.path(), "a.txt", "v0\nZ\n", "add Z").await;
+        let add_z = rev(&repo, "HEAD").await;
+        let orig = add_z.clone();
+        let expected = plan_start(&repo).await;
+
+        // "add Z" leads onto `base`, then folding "add X" in conflicts on a.txt's end.
+        let state = AppState::default();
+        let result = rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[
+                RewriteStep {
+                    hashes: vec![add_z, leader],
+                    message: None,
+                    edit: false,
+                },
+                pick(&revert),
+                pick(&other),
+            ],
+            &[],
+        )
+        .await;
+        let Err(AppError::Git { stderr, .. }) = &result else {
+            panic!("the conflicting fold must roll back, got {result:?}");
+        };
+        assert_verdict_shape(stderr, "was rolled back");
+        assert!(
+            stderr.contains("could not apply") && stderr.contains("CONFLICT (content)"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("git rebase --continue"), "{stderr}");
+        assert_eq!(rev(&repo, "HEAD").await, orig);
+        assert_eq!(read_head_name(&repo).await.unwrap(), expected.head_name);
+        let git_dir = git_dir_of(&repo).await;
+        assert!(!git_dir.join("sequencer").exists(), "no sequencer left");
+        assert!(!git_dir.join("CHERRY_PICK_HEAD").exists());
+        assert!(!rebasing(&repo).await, "the rollback leaves no rebase");
+        let status = git(&repo, &["status", "--porcelain"]).await;
+        assert!(status.trim().is_empty(), "tree should be clean: {status}");
+    }
+
+    /// A group whose leader's change is already present (re-adding what a dropped
+    /// revert removed) still applies: the leader is staged, never picked.
+    #[tokio::test]
+    async fn a_fold_group_whose_leader_is_already_applied_still_applies() {
+        let (dir, repo) = setup_repo("empty-leader").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "x.txt", "X\n", "A add X").await;
+        let a = rev(&repo, "HEAD").await;
+        git(&repo, &["rm", "-q", "x.txt"]).await;
+        git(&repo, &["commit", "-m", "B revert"]).await;
+        let b = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "x.txt", "X\n", "C re-add X").await;
+        let c = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "d.txt", "d\n", "D add d").await;
+        let d = rev(&repo, "HEAD").await;
+
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[
+                pick(&a),
+                RewriteStep {
+                    hashes: vec![c, d],
+                    message: None,
+                    edit: false,
+                },
+            ],
+            &[b],
+        )
+        .await
+        .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["C re-add X", "A add X", "base"]);
+        let changed = git(&repo, &["show", "--name-only", "--format=", "HEAD"]).await;
+        assert_eq!(changed.trim(), "d.txt", "the group carries D's change");
+        assert!(!rebasing(&repo).await, "nothing is in progress");
+    }
+
+    /// A group far past the length an inline exec line survives applies as one
+    /// commit (git's `sh -c` cuts an exec line at ~8 KiB on Windows).
+    #[tokio::test]
+    async fn a_120_commit_fold_group_applies_as_one_commit() {
+        const N: usize = 120;
+        let (_dir, repo) = setup_repo("long-group").await;
+        let base = rev(&repo, "HEAD").await;
+        let mut stream = String::new();
+        for i in 1..=N {
+            let msg = format!("c{i}\n");
+            let content = format!("{i}\n");
+            let from = if i == 1 {
+                base.clone()
+            } else {
+                format!(":{}", i - 1)
+            };
+            stream.push_str(&format!(
+                "commit refs/heads/long\nmark :{i}\nauthor A <a@a> 1700000000 +0000\n\
+                 committer t <t@t> 1700000000 +0000\ndata {}\n{msg}from {from}\n\
+                 M 100644 inline f{i}.txt\ndata {}\n{content}\n",
+                msg.len(),
+                content.len()
+            ));
+        }
+        let out = run_git_raw_input(
+            Some(&repo),
+            &["fast-import", "--quiet"],
+            Some(&stream),
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.code, 0, "fast-import: {}", out.full_failure_text());
+        git(&repo, &["reset", "-q", "--hard", "long"]).await;
+        let chain: Vec<String> = git(&repo, &["rev-list", "--reverse", &format!("{base}..HEAD")])
+            .await
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(chain.len(), N);
+
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[RewriteStep {
+                hashes: chain,
+                message: None,
+                edit: false,
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["c1", "base"]);
+        let files = git(&repo, &["show", "--name-only", "--format=", "HEAD"]).await;
+        assert_eq!(
+            files.lines().count(),
+            N,
+            "every fold's change is in the commit"
+        );
+    }
+
+    /// A fold group's one commit runs the commit hooks once, with the whole group
+    /// staged.
+    #[tokio::test]
+    async fn a_fold_group_commits_once_through_the_hooks() {
+        let (dir, repo) = setup_repo("group-hooks").await;
+        let base = rev(&repo, "HEAD").await;
+        let mut group = Vec::new();
+        for (file, msg) in [("1.txt", "one"), ("2.txt", "two"), ("3.txt", "three")] {
+            commit_file(&repo, dir.path(), file, "x\n", msg).await;
+            group.push(rev(&repo, "HEAD").await);
+        }
+        write_hook(
+            &repo,
+            "pre-commit",
+            "echo $(git diff --cached --name-only) >> \"$(git rev-parse --git-dir)/pre-commit-log\"",
+        );
+        write_hook(
+            &repo,
+            "commit-msg",
+            "echo ran >> \"$(git rev-parse --git-dir)/commit-msg-log\"",
+        );
+
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[RewriteStep {
+                hashes: group,
+                message: None,
+                edit: false,
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+        let git_dir = git_dir_of(&repo).await;
+        let log = |name: &str| std::fs::read_to_string(git_dir.join(name)).unwrap_or_default();
+        assert_eq!(log("pre-commit-log"), "1.txt 2.txt 3.txt\n");
+        assert_eq!(log("commit-msg-log"), "ran\n");
+        assert_eq!(subjects(&repo).await, vec!["one", "base"]);
+    }
+
+    /// Installs a post-rewrite hook that logs its argument and stdin to
+    /// `.git/post-rewrite-log`.
+    fn log_post_rewrite(repo: &str) {
+        write_hook(
+            repo,
+            "post-rewrite",
+            "log=\"$(git rev-parse --git-dir)/post-rewrite-log\"\necho \"post-rewrite $1\" >> \"$log\"\ncat >> \"$log\"",
+        );
+    }
+
+    /// A group's members reach git's rewrite mappings: their notes are copied to the
+    /// squashed commit, and post-rewrite sees every member beside the plain picks.
+    #[tokio::test]
+    async fn a_fold_group_maps_its_members_for_notes_and_post_rewrite() {
+        let (dir, repo) = setup_repo("group-mappings").await;
+        git(&repo, &["config", "notes.rewriteRef", "refs/notes/commits"]).await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "1.txt", "1\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "2.txt", "2\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "3.txt", "3\n", "three").await;
+        let c3 = rev(&repo, "HEAD").await;
+        git(&repo, &["notes", "add", "-m", "note-two", &c2]).await;
+        git(&repo, &["notes", "add", "-m", "note-three", &c3]).await;
+        log_post_rewrite(&repo);
+
+        // Reordered so the pick is rewritten too.
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[
+                RewriteStep {
+                    hashes: vec![c2.clone(), c3.clone()],
+                    message: None,
+                    edit: false,
+                },
+                pick(&c1),
+            ],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["one", "two", "base"]);
+        let squashed = rev(&repo, "HEAD~1").await;
+        let notes = git(&repo, &["notes", "show", &squashed]).await;
+        assert!(
+            notes.contains("note-two") && notes.contains("note-three"),
+            "both members' notes reach the squashed commit: {notes}"
+        );
+        let log = std::fs::read_to_string(git_dir_of(&repo).await.join("post-rewrite-log"))
+            .expect("post-rewrite ran");
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.first(), Some(&"post-rewrite rebase"), "{log}");
+        for member in [&c2, &c3] {
+            assert!(
+                lines.contains(&format!("{member} {squashed}").as_str()),
+                "post-rewrite maps {member}: {log}"
+            );
+        }
+        let picked = rev(&repo, "HEAD").await;
+        assert!(lines.contains(&format!("{c1} {picked}").as_str()), "{log}");
+    }
+
+    /// A plan of only fold groups (no pick for git to map) still fires post-rewrite.
+    #[tokio::test]
+    async fn an_all_group_plan_fires_post_rewrite() {
+        let (dir, repo) = setup_repo("all-group-post-rewrite").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "1.txt", "1\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "2.txt", "2\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        log_post_rewrite(&repo);
+
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[RewriteStep {
+                hashes: vec![c1.clone(), c2.clone()],
+                message: Some("combined".into()),
+                edit: false,
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+        let squashed = rev(&repo, "HEAD").await;
+        let log = std::fs::read_to_string(git_dir_of(&repo).await.join("post-rewrite-log"))
+            .expect("post-rewrite ran");
+        assert_eq!(
+            log,
+            format!("post-rewrite rebase\n{c1} {squashed}\n{c2} {squashed}\n")
+        );
+    }
+
+    /// A group holding only gitlink bumps commits under `.gitmodules` `ignore = all`,
+    /// which hides them from a plain `diff --cached --quiet`.
+    #[tokio::test]
+    async fn a_gitlink_only_group_applies_under_submodule_ignore_all() {
+        let (dir, repo) = setup_repo("gitlink-group").await;
+        std::fs::write(
+            dir.path().join(".gitmodules"),
+            "[submodule \"sub\"]\n\tpath = sub\n\turl = ./nowhere\n\tignore = all\n",
+        )
+        .unwrap();
+        git(&repo, &["add", ".gitmodules"]).await;
+        let gitlink = |sha: &str| format!("160000,{},sub", sha.repeat(40));
+        git(
+            &repo,
+            &["update-index", "--add", "--cacheinfo", &gitlink("1")],
+        )
+        .await;
+        git(&repo, &["commit", "-m", "add sub"]).await;
+        let base = rev(&repo, "HEAD").await;
+        let mut bumps = Vec::new();
+        for (sha, msg) in [("2", "bump one"), ("3", "bump two")] {
+            git(&repo, &["update-index", "--cacheinfo", &gitlink(sha)]).await;
+            git(&repo, &["commit", "-m", msg]).await;
+            bumps.push(rev(&repo, "HEAD").await);
+        }
+
+        let state = AppState::default();
+        rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[RewriteStep {
+                hashes: bumps,
+                message: None,
+                edit: false,
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["bump one", "add sub", "base"]);
+        let tree = git(&repo, &["ls-tree", "HEAD", "sub"]).await;
+        assert!(
+            tree.contains(&"3".repeat(40)),
+            "the group's last bump: {tree}"
+        );
+    }
+
+    /// A message group keeps its leader's exact author date at the edges git's other
+    /// date forms break on: before 1973 (raw seconds), from 2100 on (ISO 8601), and
+    /// the first hours of 1970 at a negative offset.
+    #[tokio::test]
+    async fn a_message_group_keeps_its_leaders_author_date_at_the_edges() {
+        for (i, when) in [
+            "@45815400 +0530",   // 1971-06-15T12:00:00+05:30
+            "@4102444800 +0000", // 2100-01-01T00:00:00Z
+            "@0 -0500",          // 1969-12-31T19:00:00-05:00
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (dir, repo) = setup_repo(&format!("edge-date-{i}")).await;
+            let base = rev(&repo, "HEAD").await;
+            std::fs::write(dir.path().join("1.txt"), "1\n").unwrap();
+            git(&repo, &["add", "."]).await;
+            // Through the env in git's raw form, the only one that sets all three:
+            // `--date` refuses the pre-epoch one and ISO 8601 refuses 2100.
+            let out = run_git_raw_env(
+                Some(&repo),
+                &["commit", "-m", "old"],
+                &[("GIT_AUTHOR_DATE", when)],
+                DEFAULT_TIMEOUT,
+            )
+            .await
+            .unwrap();
+            assert_eq!(out.code, 0, "{when}: {}", out.full_failure_text());
+            let leader = rev(&repo, "HEAD").await;
+            commit_file(&repo, dir.path(), "2.txt", "2\n", "new").await;
+            let fold = rev(&repo, "HEAD").await;
+            let date = |r: &str| {
+                let repo = repo.clone();
+                let r = r.to_string();
+                async move { git(&repo, &["log", "-1", "--date=raw", "--format=%ad", &r]).await }
+            };
+            let before = date(&leader).await;
+
+            let state = AppState::default();
+            rewrite_commits(
+                &state,
+                &repo,
+                &base,
+                &[RewriteStep {
+                    hashes: vec![leader, fold],
+                    message: Some("combined".into()),
+                    edit: false,
+                }],
+                &[],
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{when}: {e}"));
+            assert_eq!(subjects(&repo).await, vec!["combined", "base"], "{when}");
+            assert_eq!(date("HEAD").await, before, "{when}");
+        }
+    }
+
+    /// Installs a post-rewrite hook that logs its argument and stdin, and turns on
+    /// notes rewriting; returns the log's path.
+    async fn track_rewrites(repo: &str) -> std::path::PathBuf {
+        git(repo, &["config", "notes.rewriteRef", "refs/notes/commits"]).await;
+        log_post_rewrite(repo);
+        git_dir_of(repo).await.join("post-rewrite-log")
+    }
+
+    /// A replay reword sends its commit's note and post-rewrite mapping to the FINAL
+    /// reworded commit, whether its pick fast-forwards or not.
+    #[tokio::test]
+    async fn a_replay_reword_maps_its_commit_to_the_final_one() {
+        for fast_forward in [true, false] {
+            let (dir, repo) = setup_repo(&format!("reword-mapping-{fast_forward}")).await;
+            let base = rev(&repo, "HEAD").await;
+            commit_file(&repo, dir.path(), "1.txt", "1\n", "one").await;
+            let c1 = rev(&repo, "HEAD").await;
+            commit_file(&repo, dir.path(), "2.txt", "2\n", "two").await;
+            let x = rev(&repo, "HEAD").await;
+            git(&repo, &["notes", "add", "-m", "note-x", &x]).await;
+            let log = track_rewrites(&repo).await;
+            let reword = RewriteStep {
+                hashes: vec![x.clone()],
+                message: Some("reworded".into()),
+                edit: false,
+            };
+            // Fast-forward: every pick replays onto its own parent. Otherwise "one" is
+            // dropped, so "two" is picked onto a new parent.
+            let (steps, dropped) = if fast_forward {
+                (vec![pick(&c1), reword], vec![])
+            } else {
+                (vec![reword], vec![c1.clone()])
+            };
+            let state = AppState::default();
+            rewrite_commits(&state, &repo, &base, &steps, &dropped)
+                .await
+                .unwrap();
+            let head = rev(&repo, "HEAD").await;
+            assert_eq!(
+                subjects(&repo).await.first().map(String::as_str),
+                Some("reworded")
+            );
+            assert_eq!(
+                git(&repo, &["notes", "show", "HEAD"]).await.trim(),
+                "note-x",
+                "ff={fast_forward}: the note follows to the final commit"
+            );
+            let log = std::fs::read_to_string(&log).expect("post-rewrite ran");
+            assert!(log.starts_with("post-rewrite rebase\n"), "{log}");
+            let mapped: Vec<&str> = log
+                .lines()
+                .filter_map(|l| l.strip_prefix(&format!("{x} ")))
+                .collect();
+            assert_eq!(mapped, vec![head.as_str()], "ff={fast_forward}: {log}");
+            let amend_events = log
+                .lines()
+                .filter(|l| l.starts_with("post-rewrite amend"))
+                .count();
+            assert_eq!(amend_events, 0, "{log}");
+        }
+    }
+
+    /// A conflict ON the `edit` line hands off to the banner like any conflict, and
+    /// never reads as a paused edit: git writes no `amend` there, before or after the
+    /// conflict is resolved.
+    #[tokio::test]
+    async fn a_conflict_on_the_edit_line_is_not_a_paused_edit() {
+        let (dir, repo) = setup_repo("edit-line-conflict").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "a.txt", "v1\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "a.txt", "v2\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let step = RewriteStep {
+            hashes: vec![c2],
+            message: None,
+            edit: true,
+        };
+        // "two"'s patch (v1→v2) can't apply onto v0 once "one" is dropped.
+        git_rebase_edit(repo.clone(), base, vec![step], Some(vec![c1]))
+            .await
+            .unwrap();
+        assert!(rebasing(&repo).await, "left for the banner");
+        assert!(!git(&repo, &["ls-files", "-u"]).await.trim().is_empty());
+        assert!(!op_state(&repo).await.unwrap().edit_paused, "conflicted");
+
+        std::fs::write(dir.path().join("a.txt"), "resolved\n").unwrap();
+        git(&repo, &["add", "a.txt"]).await;
+        assert!(git(&repo, &["ls-files", "-u"]).await.trim().is_empty());
+        assert!(!op_state(&repo).await.unwrap().edit_paused, "resolved");
+    }
+
+    /// Reword keeps each commit's author and author date, and a squash its leader's;
+    /// the committer is whoever ran the rewrite. Both routes.
+    #[tokio::test]
+    async fn rewrites_keep_each_commits_author_and_date() {
+        for replay in [true, false] {
+            let (dir, repo) = setup_repo(&format!("author-date-{replay}")).await;
+            let base = rev(&repo, "HEAD").await;
+            let mut commits = Vec::new();
+            for (name, author, date) in [
+                ("one", "Auth A <a@example.com>", "2001-01-01T00:00:00Z"),
+                ("two", "Auth B <b@example.com>", "2002-02-02T00:00:00Z"),
+                ("three", "Auth C <c@example.com>", "2003-03-03T00:00:00Z"),
+            ] {
+                std::fs::write(dir.path().join(format!("{name}.txt")), "x\n").unwrap();
+                git(&repo, &["add", "."]).await;
+                git(
+                    &repo,
+                    &["commit", "--author", author, "--date", date, "-m", name],
+                )
+                .await;
+                commits.push(rev(&repo, "HEAD").await);
+            }
+            let identity = |r: String| {
+                let repo = repo.clone();
+                async move { git(&repo, &["log", "-1", "--format=%an|%aI", &r]).await }
+            };
+            let leader = identity(commits[0].clone()).await;
+            let reworded = identity(commits[2].clone()).await;
+            let plan = vec![
+                RewriteStep {
+                    hashes: vec![commits[0].clone(), commits[1].clone()],
+                    message: Some("combined".into()),
+                    edit: false,
+                },
+                RewriteStep {
+                    hashes: vec![commits[2].clone()],
+                    message: Some("reworded".into()),
+                    edit: false,
+                },
+            ];
+            if replay {
+                let state = AppState::default();
+                rewrite_commits(&state, &repo, &base, &plan, &[])
+                    .await
+                    .unwrap();
+            } else {
+                git_rebase_edit(repo.clone(), base, plan, None)
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(subjects(&repo).await, vec!["reworded", "combined", "base"]);
+            assert_eq!(identity("HEAD".into()).await, reworded, "replay={replay}");
+            assert_eq!(identity("HEAD~1".into()).await, leader, "replay={replay}");
+            assert_eq!(
+                git(&repo, &["log", "-2", "--format=%cn"]).await,
+                "t\nt\n",
+                "the committer is the current user"
+            );
+        }
+    }
+
+    /// The rollback must run for every failure class, not just a conflict, and it
+    /// says so: a killed continue is rolled back under the same verdict line.
     #[tokio::test]
     async fn rewrite_rolls_back_when_a_step_fails_non_git() {
         let (dir, repo) = setup_repo("rewrite-nongit").await;
@@ -5955,36 +7534,39 @@ mod tests {
         let orig = c1.clone();
 
         let state = AppState::default();
-        // A zero budget fails the pick without running it, so the loop sees
-        // AppError::Timeout — the non-Git arm, which passes through untouched once the
-        // rollback lands.
+        // A zero budget fails the continue without running it, so the rebase sits at
+        // its leading `break` and the engine sees AppError::Timeout — the non-Git arm.
         match rewrite_commits_with_timeouts(
             &state,
             &repo,
             &base,
             &[pick(&c1)],
+            &[],
             NO_BUDGET,
             DEFAULT_TIMEOUT,
         )
         .await
         {
-            Err(AppError::Timeout(_)) => {}
-            Ok(()) => panic!("the killed pick must fail"),
-            Err(e) => panic!("expected the non-Git arm, got {e:?}"),
+            Err(AppError::Command(msg)) => {
+                assert_verdict_shape(&msg, "was rolled back");
+                assert!(msg.contains("timed out"), "the cause rides below: {msg}");
+            }
+            Ok(()) => panic!("the killed continue must fail"),
+            Err(e) => panic!("expected the non-Git rolled-back arm, got {e:?}"),
         }
         assert_eq!(
             rev(&repo, "HEAD").await,
             orig,
             "a killed step must leave the branch at its pre-run tip"
         );
-        assert!(!op_state(&repo).await.unwrap().cherry_picking);
+        assert!(!rebasing(&repo).await, "the rollback leaves no rebase");
         let status = git(&repo, &["status", "--porcelain"]).await;
         assert!(status.trim().is_empty(), "tree should be clean: {status}");
     }
 
-    /// When the rollback itself fails the branch really is left rewritten, so the
-    /// error has to name the pre-run tip and both remedies — asserted against the
-    /// destruction it warns about, not just the wording.
+    /// When the abort itself fails the rebase is left in progress, so the error has
+    /// to name the pre-run tip and the abort as the remedy — and the branch REF is
+    /// still safe, since git moves it only when the rebase finishes.
     #[tokio::test]
     async fn rewrite_failed_rollback_names_the_pre_run_tip_and_remedies() {
         let (dir, repo) = setup_repo("rewrite-rollback-fail").await;
@@ -5994,15 +7576,17 @@ mod tests {
         commit_file(&repo, dir.path(), "a.txt", "v2\n", "two").await;
         let c2 = rev(&repo, "HEAD").await;
         let orig = c2.clone();
+        let branch_ref = read_head_name(&repo).await.unwrap();
 
         let state = AppState::default();
         // "two"'s patch (v1→v2) can't apply onto v0 — a real conflict — while the zero
-        // rollback budget fails `reset --hard orig` without running it.
+        // abort budget fails `rebase --abort` without running it.
         match rewrite_commits_with_timeouts(
             &state,
             &repo,
             &base,
             &[pick(&c2), pick(&c1)],
+            &[],
             DEFAULT_TIMEOUT,
             NO_BUDGET,
         )
@@ -6010,81 +7594,97 @@ mod tests {
         {
             Err(AppError::Git { stderr, .. }) => {
                 assert_verdict_shape(&stderr, "rollback also failed");
-                assert!(stderr.contains(&orig), "must name the pre-run tip: {stderr}");
                 assert!(
-                    stderr.contains("cherry-pick --abort") && stderr.contains("reset --hard"),
-                    "must name both remedies: {stderr}"
+                    stderr.contains(&orig),
+                    "must name the pre-run tip: {stderr}"
+                );
+                assert!(
+                    stderr.contains(
+                        "Fix what git reports below, then run git rebase --abort to restore it."
+                    ),
+                    "must name the abort as the remedy: {stderr}"
+                );
+                assert!(!stderr.contains("reset --hard"), "never a reset: {stderr}");
+                // The rebase is still alive, so git's hints stay; only progress goes.
+                assert!(stderr.contains("\nhint: "), "{stderr}");
+                assert!(!stderr.contains("Rebasing ("), "{stderr}");
+                // The abort's own report says what blocked it, ahead of the conflict.
+                let abort_report = stderr
+                    .find(&AppError::Timeout(0).to_string())
+                    .unwrap_or_else(|| panic!("the abort's own report rides along: {stderr}"));
+                let conflict = stderr
+                    .find("CONFLICT (content): Merge conflict in a.txt")
+                    .unwrap_or_else(|| panic!("git's report rides below: {stderr}"));
+                assert!(
+                    abort_report < conflict,
+                    "the abort's report leads: {stderr}"
                 );
             }
             Ok(()) => panic!("the conflicting rewrite must fail"),
             Err(e) => panic!("expected a Git error, got {e:?}"),
         }
-        // The rollback provably never ran (a zero budget refuses before spawning), so
-        // the damage is deterministic; a production timeout races it, hence the hedge.
-        assert_ne!(
-            rev(&repo, "HEAD").await,
+        assert!(rebasing(&repo).await, "the abort never ran");
+        assert_eq!(
+            rev(&repo, &branch_ref).await,
             orig,
-            "the failed rollback leaves the branch where the replay abandoned it"
+            "the branch ref stays at the pre-run tip mid-rebase"
         );
-        assert_eq!(subjects(&repo).await, vec!["base"]);
-        // The abort keeps DEFAULT_TIMEOUT, so nothing is left mid-pick either way.
-        assert!(!op_state(&repo).await.unwrap().cherry_picking);
     }
 
-    /// A rewrite that dies on the initial rewind never replayed anything, so its
-    /// error must not borrow the replay's detail text: no conflict to blame, and a
-    /// branch that never left its tip can't be "partly rewritten".
+    /// A rewrite whose rebase can't even start never touched the branch, so its
+    /// error leads with the start failure and claims no rollback at all.
     #[tokio::test]
-    async fn rewrite_rewind_failure_reports_a_branch_that_never_moved() {
-        let (dir, repo) = setup_repo("rewrite-rewind-fail").await;
+    async fn rewrite_start_failure_leaves_the_branch_untouched() {
+        let (dir, repo) = setup_repo("rewrite-start-fail").await;
         let base = rev(&repo, "HEAD").await;
         commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
         let c1 = rev(&repo, "HEAD").await;
         let orig = c1.clone();
+        let branch = head_branch(&repo).await;
 
-        // A held index.lock fails every `reset --hard` — the rewind and the
-        // rollback alike — with no kill race in play, while the read-only guards
-        // above still pass (the runner runs git with GIT_OPTIONAL_LOCKS=0).
+        // A held index.lock fails the rebase start before it writes any state, while
+        // the read-only guards above still pass (the runner runs git with
+        // GIT_OPTIONAL_LOCKS=0).
         let lock = std::path::Path::new(&repo).join(".git/index.lock");
         std::fs::write(&lock, "").unwrap();
         let state = AppState::default();
-        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1)]).await;
+        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1)], &[]).await;
         // Released before the assertions so a failure can't leave the fixture
         // locked for teardown.
         std::fs::remove_file(&lock).unwrap();
 
         match result {
             Err(AppError::Git { stderr, .. }) => {
-                assert_verdict_shape(&stderr, "rollback also failed");
-                assert!(
-                    stderr.contains(&format!("should still be at its original tip {orig}")),
-                    "a rewind that never moved HEAD must be described as such: {stderr}"
+                assert_eq!(
+                    stderr.lines().next(),
+                    Some("Couldn't start the rebase."),
+                    "the start failure leads: {stderr}"
                 );
-                assert!(
-                    !stderr.contains("partly rewritten") && !stderr.contains("Usually a conflict"),
-                    "the replay's detail text must not leak onto the rewind path: {stderr}"
-                );
-                assert!(
-                    stderr.contains("reset --hard"),
-                    "must still name the remedy: {stderr}"
-                );
+                for literal in [
+                    "was rolled back",
+                    "rollback also failed",
+                    "rollback restored",
+                ] {
+                    assert!(!stderr.contains(literal), "no rollback claim: {stderr}");
+                }
             }
-            Ok(()) => panic!("the locked rewind must fail"),
+            Ok(()) => panic!("the locked start must fail"),
             Err(e) => panic!("expected a Git error, got {e:?}"),
         }
-        // Deterministic, unlike the killed-git arms: no git process ever got the
-        // lock, so nothing can have moved.
+        // Deterministic: no git process ever got the lock, so nothing can have moved.
         assert_eq!(
             rev(&repo, "HEAD").await,
             orig,
-            "the failed rewind must leave the branch exactly where it was"
+            "the failed start must leave the branch exactly where it was"
         );
+        assert!(!rebasing(&repo).await, "no rebase was left behind");
+        assert_eq!(head_branch(&repo).await, branch, "HEAD stays on the branch");
         let status = git(&repo, &["status", "--porcelain"]).await;
         assert!(status.trim().is_empty(), "tree should be clean: {status}");
     }
 
-    /// A non-Git failure whose rollback also fails can't pass through untouched —
-    /// the remedies would be lost with it.
+    /// A non-Git failure whose abort also fails can't pass through untouched — the
+    /// remedy would be lost with it.
     #[tokio::test]
     async fn rewrite_non_git_failure_with_failed_rollback_still_names_the_remedies() {
         let (dir, repo) = setup_repo("rewrite-nongit-rollback-fail").await;
@@ -6092,6 +7692,7 @@ mod tests {
         commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
         let c1 = rev(&repo, "HEAD").await;
         let orig = c1.clone();
+        let branch_ref = read_head_name(&repo).await.unwrap();
 
         let state = AppState::default();
         match rewrite_commits_with_timeouts(
@@ -6099,6 +7700,7 @@ mod tests {
             &repo,
             &base,
             &[pick(&c1)],
+            &[],
             NO_BUDGET,
             NO_BUDGET,
         )
@@ -6108,30 +7710,26 @@ mod tests {
                 assert_verdict_shape(&msg, "rollback also failed");
                 assert!(msg.contains(&orig), "must name the pre-run tip: {msg}");
                 assert!(
-                    msg.contains("cherry-pick --abort") && msg.contains("reset --hard"),
-                    "must name both remedies: {msg}"
+                    msg.contains(
+                        "Fix what git reports below, then run git rebase --abort to restore it."
+                    ),
+                    "must name the abort as the remedy: {msg}"
                 );
             }
-            Ok(()) => panic!("the killed pick must fail"),
+            Ok(()) => panic!("the killed continue must fail"),
             Err(e) => panic!("expected the collapsed Command arm, got {e:?}"),
         }
-        // The rollback provably never ran (a zero budget refuses before spawning), so
-        // the rewound branch is deterministic; a production timeout races it.
-        assert_ne!(
-            rev(&repo, "HEAD").await,
-            orig,
-            "the failed rollback leaves the branch rewound onto base"
-        );
+        // Both budgets refuse before spawning, so the rebase deterministically sits at
+        // its `break` with the branch ref untouched.
+        assert!(rebasing(&repo).await, "the abort never ran");
+        assert_eq!(rev(&repo, &branch_ref).await, orig);
     }
 
-    /// Negative control for the compound-lock fix: a rewrite that rolls back must
-    /// not take a concurrent commit down with it. The second task waits until the
-    /// rewrite observably holds the repo lock, then commits the way every other
-    /// mutating command does; tokio's fair mutex queues it behind the whole
-    /// compound. When the lock was taken per STEP instead, that commit landed
-    /// between two cycles and the rollback's `reset --hard orig` destroyed it.
-    /// Multi-threaded flavor deliberately: the concurrent task must genuinely run
-    /// in parallel instead of starving on a current-thread runtime.
+    /// A rewrite that rolls back must not take a concurrent in-app commit down with
+    /// it. The second task waits until the rewrite observably holds the repo lock, then
+    /// commits the way every other mutating command does; tokio's fair mutex queues it
+    /// behind the whole compound. Multi-threaded flavor deliberately: the concurrent
+    /// task must run in parallel instead of starving on a current-thread runtime.
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_commit_survives_a_rolled_back_rewrite() {
         let (dir, repo) = setup_repo("interleave").await;
@@ -6139,6 +7737,7 @@ mod tests {
         commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
         let c1 = rev(&repo, "HEAD").await;
         commit_file(&repo, dir.path(), "a.txt", "v1\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
         commit_file(&repo, dir.path(), "a.txt", "v2\n", "three").await;
         let c3 = rev(&repo, "HEAD").await;
         let orig = rev(&repo, "HEAD").await;
@@ -6173,10 +7772,21 @@ mod tests {
         };
 
         // "three"'s patch (v1→v2) can't apply after only "one" replayed, so the
-        // SECOND pick conflicts — the compound has already mutated the branch by
-        // the time it rolls back.
-        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1), pick(&c3)]).await;
-        assert!(result.is_err(), "the second pick must conflict");
+        // SECOND pick conflicts and the rewrite rolls back. "two" is declared
+        // dropped, as the coverage check refuses an undeclared omission.
+        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1), pick(&c3)], &[c2]).await;
+        // The rollback verdict, not just any error: a refusal before the first
+        // mutation would let the concurrent commit land without testing anything.
+        match result {
+            Err(AppError::Git { ref stderr, .. }) => {
+                assert_verdict_shape(stderr, "was rolled back");
+                assert!(
+                    stderr.contains("your branch is unchanged"),
+                    "a completed rollback must say so: {stderr}"
+                );
+            }
+            other => panic!("the second pick must conflict and roll back, got {other:?}"),
+        }
         concurrent.await.expect("concurrent task panicked");
 
         let log = subjects(&repo).await;
@@ -6189,6 +7799,1893 @@ mod tests {
             rev(&repo, "HEAD~1").await,
             orig,
             "and it must sit directly on the tip the rewrite rolled back to"
+        );
+    }
+
+    const UNCOVERED_REFUSAL: &str =
+        "the branch changed after this plan was made, so nothing was rewritten — start over";
+
+    /// Two unpushed commits the plan knows about, then a third landed from outside
+    /// the app after the plan was made. Returns (dir, repo, base, c1, c2, c3).
+    async fn plan_with_an_outside_commit(
+        marker: &str,
+    ) -> (tempfile::TempDir, String, String, String, String, String) {
+        let (dir, repo) = setup_repo(marker).await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        std::fs::write(dir.path().join("d.txt"), "d\n").unwrap();
+        git(&repo, &["add", "."]).await;
+        git(&repo, &["commit", "-m", "outside"]).await;
+        let c3 = rev(&repo, "HEAD").await;
+        (dir, repo, base, c1, c2, c3)
+    }
+
+    #[tokio::test]
+    async fn rewrite_refuses_uncovered_commits() {
+        let (_dir, repo, base, c1, c2, c3) = plan_with_an_outside_commit("uncovered").await;
+        let state = AppState::default();
+        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1), pick(&c2)], &[]).await;
+        let Err(AppError::InvalidArgument(msg)) = &result else {
+            panic!("an uncovered commit must refuse, got {result:?}");
+        };
+        assert_eq!(msg, UNCOVERED_REFUSAL);
+        assert_eq!(rev(&repo, "HEAD").await, c3, "the branch must be untouched");
+        assert_eq!(subjects(&repo).await, vec!["outside", "two", "one", "base"]);
+        let status = git(&repo, &["status", "--porcelain"]).await;
+        assert!(status.trim().is_empty(), "tree should be clean: {status}");
+    }
+
+    #[tokio::test]
+    async fn rewrite_allows_explicit_drops() {
+        let (dir, repo) = setup_repo("explicit-drop").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+
+        let state = AppState::default();
+        rewrite_commits(&state, &repo, &base, &[pick(&c2)], &[c1])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["two", "base"]);
+        assert!(
+            !dir.path().join("b.txt").exists(),
+            "the dropped commit's file is gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn rewrite_refuses_an_out_of_range_dropped_hash() {
+        let (dir, repo) = setup_repo("drop-out-of-range").await;
+        let below = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "mid").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+
+        let state = AppState::default();
+        let result = rewrite_commits(&state, &repo, &base, &[pick(&c1)], &[below.clone()]).await;
+        let Err(AppError::InvalidArgument(msg)) = &result else {
+            panic!("an out-of-range drop must refuse, got {result:?}");
+        };
+        assert_eq!(msg, UNCOVERED_REFUSAL);
+        assert_eq!(rev(&repo, "HEAD").await, c1);
+    }
+
+    #[tokio::test]
+    async fn rewrite_refuses_a_hash_listed_twice() {
+        let (dir, repo) = setup_repo("listed-twice").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let twice = |h: &str| format!("{h} is listed more than once in the rewrite plan");
+
+        let state = AppState::default();
+        // Across the two lists: a step hash also declared dropped.
+        let across =
+            rewrite_commits(&state, &repo, &base, &[pick(&c1), pick(&c2)], &[c1.clone()]).await;
+        assert!(
+            matches!(&across, Err(AppError::InvalidArgument(m)) if *m == twice(&c1)),
+            "{across:?}"
+        );
+        // Within the steps: one commit replayed twice.
+        let in_steps = rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[pick(&c1), pick(&c2), pick(&c1)],
+            &[],
+        )
+        .await;
+        assert!(
+            matches!(&in_steps, Err(AppError::InvalidArgument(m)) if *m == twice(&c1)),
+            "{in_steps:?}"
+        );
+        // Within the drops.
+        let in_dropped = rewrite_commits(
+            &state,
+            &repo,
+            &base,
+            &[pick(&c2)],
+            &[c1.clone(), c1.clone()],
+        )
+        .await;
+        assert!(
+            matches!(&in_dropped, Err(AppError::InvalidArgument(m)) if *m == twice(&c1)),
+            "{in_dropped:?}"
+        );
+        assert_eq!(rev(&repo, "HEAD").await, c2, "the branch must be untouched");
+        assert_eq!(subjects(&repo).await, vec!["two", "one", "base"]);
+    }
+
+    #[tokio::test]
+    async fn rebase_edit_refuses_uncovered_commits() {
+        let (_dir, repo, base, c1, c2, c3) = plan_with_an_outside_commit("rebase-uncovered").await;
+        let result = git_rebase_edit(repo.clone(), base, vec![pick(&c1), pick(&c2)], None).await;
+        let Err(AppError::InvalidArgument(msg)) = &result else {
+            panic!("an uncovered commit must refuse, got {result:?}");
+        };
+        assert_eq!(msg, UNCOVERED_REFUSAL);
+        assert_rebase_edit_untouched(&repo, &c3).await;
+    }
+
+    #[tokio::test]
+    async fn rebase_edit_allows_explicit_drops() {
+        let (dir, repo) = setup_repo("rebase-explicit-drop").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+
+        git_rebase_edit(repo.clone(), base, vec![pick(&c2)], Some(vec![c1]))
+            .await
+            .unwrap();
+        assert!(!git_path_exists(&repo, "rebase-merge").await);
+        assert!(!git_path_exists(&repo, "rebase-apply").await);
+        assert_eq!(subjects(&repo).await, vec!["two", "base"]);
+    }
+
+    /// Under `rebase.missingCommitsCheck=error` git refuses a todo that only OMITS
+    /// a commit and stops the rebase with HEAD at `base` — the drop must be written.
+    #[tokio::test]
+    async fn rebase_edit_drops_explicitly_under_missing_commits_check() {
+        let (dir, repo) = setup_repo("rebase-missing-check").await;
+        git(&repo, &["config", "rebase.missingCommitsCheck", "error"]).await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+
+        let step = RewriteStep {
+            hashes: vec![c2],
+            message: None,
+            edit: true,
+        };
+        git_rebase_edit(repo.clone(), base, vec![step], Some(vec![c1]))
+            .await
+            .unwrap();
+        // Paused at the edit with the drop applied, not stopped on the todo.
+        assert!(git_path_exists(&repo, "rebase-merge").await);
+        assert_eq!(subjects(&repo).await, vec!["two", "base"]);
+        let resumed = run_git_raw(
+            Some(&repo),
+            &["-c", "core.editor=true", "rebase", "--continue"],
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resumed.code, 0,
+            "the rebase must finish: {}",
+            resumed.stderr
+        );
+        assert!(!git_path_exists(&repo, "rebase-merge").await);
+        assert_eq!(subjects(&repo).await, vec!["two", "base"]);
+    }
+
+    /// git's undo idiom after a rewrite, `git reset --hard ORIG_HEAD`, must land on
+    /// the tip the rewrite started from, as it does after `git rebase`.
+    #[tokio::test]
+    async fn rewrite_leaves_orig_head_at_the_original_tip() {
+        let (dir, repo) = setup_repo("rewrite-orig-head").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let orig = rev(&repo, "HEAD").await;
+
+        let state = AppState::default();
+        rewrite_commits(&state, &repo, &base, &[pick(&orig), pick(&c1)], &[])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["one", "two", "base"]);
+        assert_eq!(rev(&repo, "ORIG_HEAD").await, orig);
+
+        // Group commits and reword amends leave ORIG_HEAD alone too.
+        commit_file(&repo, dir.path(), "d.txt", "d\n", "three").await;
+        let tip = rev(&repo, "HEAD").await;
+        let below = rev(&repo, "HEAD~1").await;
+        let bottom = rev(&repo, "HEAD~2").await;
+        let plan = [
+            RewriteStep {
+                hashes: vec![bottom.clone(), below.clone()],
+                message: Some("squashed".into()),
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec![tip.clone()],
+                message: Some("reworded".into()),
+                edit: false,
+            },
+        ];
+        rewrite_commits(&state, &repo, &base, &plan, &[])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["reworded", "squashed", "base"]);
+        assert_eq!(rev(&repo, "ORIG_HEAD").await, tip);
+
+        // A message-less group commits with `-C`, which leaves it alone as well.
+        let tip = rev(&repo, "HEAD").await;
+        let below = rev(&repo, "HEAD~1").await;
+        let plan = [RewriteStep {
+            hashes: vec![below, tip.clone()],
+            message: None,
+            edit: false,
+        }];
+        rewrite_commits(&state, &repo, &base, &plan, &[])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["squashed", "base"]);
+        assert_eq!(rev(&repo, "ORIG_HEAD").await, tip);
+    }
+
+    #[test]
+    fn missing_commits_stop_needs_gits_two_line_report() {
+        let stop = "Warning: some commits may have been dropped accidentally.\nDropped commits (newer to older):\n - 5abc123 # two\n";
+        assert!(is_missing_commits_stop(stop));
+        assert!(is_missing_commits_stop(&stop.replace('\n', "\r\n")));
+        // A conflicting pick names its commit's subject on one line, whatever it says.
+        let conflict = "error: could not apply 5abc123... some commits may have been dropped accidentally.\nhint: Resolve all conflicts manually, mark them as resolved with\n";
+        assert!(!is_missing_commits_stop(conflict));
+    }
+
+    /// A todo that omits an in-range commit stops on git's own missing-commits check
+    /// at the start, and the shared starter aborts it and refuses.
+    #[tokio::test]
+    async fn rebase_edit_start_refuses_a_commit_missing_from_its_todo() {
+        let (dir, repo) = setup_repo("rebase-start-stale").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let todo_path = write_test_todo(&repo, "stale-todo", &format!("break\npick {c1}\n"));
+        let expected = plan_start(&repo).await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        assert!(
+            matches!(&started, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+            "{started:?}"
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(
+            rev(&repo, "HEAD").await,
+            tip,
+            "HEAD back at the original tip"
+        );
+        assert_eq!(
+            read_head_name(&repo).await.unwrap(),
+            expected.head_name,
+            "HEAD is attached to the branch"
+        );
+        assert_eq!(subjects(&repo).await, vec!["two", "one", "base"]);
+    }
+
+    /// The real race: the plan was read at `tip`, then an outside commit landed
+    /// before the rebase started. git stops on it, and the abort leaves the branch
+    /// AT the new commit.
+    #[tokio::test]
+    async fn rebase_edit_start_aborts_cleanly_past_an_outside_commit() {
+        let (dir, repo) = setup_repo("rebase-start-outside").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let todo_path = write_test_todo(
+            &repo,
+            "covering-todo",
+            &format!("break\npick {c1}\npick {tip}\n"),
+        );
+        let expected = plan_start(&repo).await;
+        commit_file(&repo, dir.path(), "d.txt", "d\n", "outside").await;
+        let outside = rev(&repo, "HEAD").await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        assert!(
+            matches!(&started, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+            "{started:?}"
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(
+            rev(&repo, "HEAD").await,
+            outside,
+            "the branch keeps the new commit"
+        );
+        assert_eq!(
+            read_head_name(&repo).await.unwrap(),
+            expected.head_name,
+            "HEAD is attached to the branch"
+        );
+        assert!(dir.path().join("d.txt").exists(), "its file is intact");
+        assert_eq!(subjects(&repo).await, vec!["outside", "two", "one", "base"]);
+    }
+
+    /// HEAD's tip and branch as an entry point reads them.
+    async fn plan_start(repo: &str) -> PlanStart {
+        PlanStart {
+            tip: rev(repo, "HEAD").await,
+            head_name: read_head_name(repo).await.unwrap(),
+        }
+    }
+
+    /// Writes a hand-made todo inside .git (keeping the worktree clean) and returns
+    /// its shell path.
+    fn write_test_todo(repo: &str, name: &str, todo: &str) -> String {
+        let path = std::path::Path::new(repo).join(".git").join(name);
+        std::fs::write(&path, todo).unwrap();
+        shell_path(&path)
+    }
+
+    /// The shared starter with the production editor pins for `todo_path`.
+    async fn start_with_todo(
+        repo: &str,
+        base: &str,
+        expected: &PlanStart,
+        todo_path: &str,
+    ) -> AppResult<()> {
+        let envs = rebase_editor_env(todo_path);
+        let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let git_dir = git_dir_of(repo).await;
+        start_planned_rebase(
+            repo,
+            &git_dir,
+            base,
+            expected,
+            &envs,
+            DEFAULT_TIMEOUT,
+            DEFAULT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// The todo the replay route writes for `steps`, saved where the starter reads it.
+    async fn replay_todo(repo: &str, steps: &[RewriteStep]) -> String {
+        let (_, todo_path) =
+            write_rebase_todo(&git_dir_of(repo).await, TodoRoute::Replay, steps, &[])
+                .await
+                .unwrap();
+        todo_path
+    }
+
+    /// The repo's own git dir, which the engine's probes read under.
+    async fn git_dir_of(repo: &str) -> std::path::PathBuf {
+        absolute_git_dir(repo).await.unwrap()
+    }
+
+    async fn rebasing(repo: &str) -> bool {
+        rebase_in_progress(&git_dir_of(repo).await)
+    }
+
+    /// The start record's raw bytes, to prove a rebase that isn't ours is untouched.
+    async fn start_record_bytes(repo: &str) -> (Vec<u8>, Vec<u8>) {
+        let dir = git_dir_of(repo).await.join("rebase-merge");
+        (
+            std::fs::read(dir.join("orig-head")).unwrap(),
+            std::fs::read(dir.join("head-name")).unwrap(),
+        )
+    }
+
+    /// Pauses a rebase of `base..HEAD` at a leading `break`, the way another tool
+    /// (or a user) would, outside the engine.
+    async fn pause_foreign_rebase(repo: &str, base: &str) {
+        let todo = write_test_todo(repo, "foreign-todo", "break\n");
+        let editor = format!("cp '{todo}'");
+        let out = run_git_raw_env(
+            Some(repo),
+            &["-c", "core.editor=true", "rebase", "-i", base],
+            &[
+                ("GIT_SEQUENCE_EDITOR", editor.as_str()),
+                ("GIT_EDITOR", "true"),
+            ],
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.code, 0, "the foreign rebase must pause: {}", out.stderr);
+        assert!(rebasing(repo).await);
+    }
+
+    /// Arm 1: a rebase that isn't ours is left exactly as it was.
+    #[tokio::test]
+    async fn start_leaves_a_foreign_rebase_alone() {
+        let (dir, repo) = setup_repo("start-foreign").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+        let todo_path = replay_todo(&repo, &[pick(&c1), pick(&c2)]).await;
+        pause_foreign_rebase(&repo, &base).await;
+        let before = start_record_bytes(&repo).await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        let Err(AppError::Git { stderr, .. }) = &started else {
+            panic!("a foreign rebase must refuse the start, got {started:?}");
+        };
+        assert_eq!(stderr.lines().next(), Some("Couldn't start the rebase."));
+        assert!(
+            rebasing(&repo).await,
+            "the foreign rebase is still in progress"
+        );
+        assert_eq!(
+            start_record_bytes(&repo).await,
+            before,
+            "and its record untouched"
+        );
+    }
+
+    /// Arm 2, abort leg: a start git refuses partway (an invalid todo line, measured
+    /// on git 2.51.1: exit 1, state left, HEAD detached at `base`) is ours to clear.
+    #[tokio::test]
+    async fn start_clears_its_own_rebase_left_detached_by_a_failed_start() {
+        let (dir, repo) = setup_repo("start-invalid-line").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let branch = head_branch(&repo).await;
+        let expected = plan_start(&repo).await;
+        let todo_path = write_test_todo(
+            &repo,
+            "invalid-todo",
+            &format!(
+                "break\npick {c1}\npick {tip}\npick 0123456789abcdef0123456789abcdef01234567\n"
+            ),
+        );
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        let Err(AppError::Git { stderr, .. }) = &started else {
+            panic!("a failed start must report, got {started:?}");
+        };
+        assert_eq!(stderr.lines().next(), Some("Couldn't start the rebase."));
+        assert!(!rebasing(&repo).await, "our own rebase is cleared");
+        assert_eq!(
+            head_branch(&repo).await,
+            branch,
+            "HEAD is back on the branch"
+        );
+        assert_eq!(rev(&repo, "HEAD").await, tip);
+        // The abort leg, read off HEAD's reflog: git started detached at `base`, and
+        // the abort returned HEAD to the branch.
+        let reflog = git(&repo, &["reflog", "-2", "--format=%gs", "HEAD"]).await;
+        assert_eq!(
+            reflog.lines().collect::<Vec<_>>(),
+            vec![
+                format!("rebase (abort): returning to {}", expected.head_name),
+                format!("rebase (start): checkout {base}"),
+            ],
+            "{reflog}"
+        );
+    }
+
+    /// Arm 2, quit and not-ours legs, on a paused rebase whose HEAD was checked back
+    /// out to the branch (git allows it; measured, git 2.51.1).
+    #[tokio::test]
+    async fn clear_failed_start_quits_its_own_rebase_on_the_branch_only() {
+        let (dir, repo) = setup_repo("clear-quit").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let branch = head_branch(&repo).await;
+        let expected = plan_start(&repo).await;
+        pause_foreign_rebase(&repo, &base).await;
+        git(&repo, &["checkout", &branch]).await;
+        let git_dir = git_dir_of(&repo).await;
+        let failure = || RebaseFailure::Other(AppError::Command("start failed".into()));
+
+        // Not ours: a record naming another branch is left alone.
+        let other = PlanStart {
+            tip: tip.clone(),
+            head_name: "refs/heads/other".into(),
+        };
+        let before = start_record_bytes(&repo).await;
+        let refused = clear_failed_start(&repo, &git_dir, &other, failure()).await;
+        let Err(AppError::Command(msg)) = &refused else {
+            panic!("expected the start failure, got {refused:?}");
+        };
+        assert_eq!(msg.lines().next(), Some("Couldn't start the rebase."));
+        assert!(rebasing(&repo).await, "a rebase that isn't ours stays");
+        assert_eq!(start_record_bytes(&repo).await, before);
+
+        // Ours, on the branch: `--quit` drops the state and leaves HEAD alone.
+        let cleared = clear_failed_start(&repo, &git_dir, &expected, failure()).await;
+        let Err(AppError::Command(msg)) = &cleared else {
+            panic!("expected the start failure, got {cleared:?}");
+        };
+        assert_eq!(msg.lines().next(), Some("Couldn't start the rebase."));
+        assert!(!rebasing(&repo).await, "--quit cleared our rebase");
+        assert_eq!(head_branch(&repo).await, branch);
+        assert_eq!(rev(&repo, "HEAD").await, tip);
+        // The quit leg ran, not an abort (which writes its own HEAD reflog entry).
+        let reflog = git(&repo, &["reflog", "--format=%gs", "HEAD"]).await;
+        assert!(
+            !reflog.lines().any(|l| l.starts_with("rebase (abort)")),
+            "{reflog}"
+        );
+    }
+
+    /// A start that never spawned (a zero budget refuses first) reports itself and
+    /// leaves nothing behind.
+    #[tokio::test]
+    async fn a_start_that_never_ran_reports_the_start_failure() {
+        let (dir, repo) = setup_repo("start-timeout").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+        let todo_path = replay_todo(&repo, &[pick(&c1)]).await;
+        let envs = rebase_editor_env(&todo_path);
+        let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let git_dir = git_dir_of(&repo).await;
+
+        let started = start_planned_rebase(
+            &repo,
+            &git_dir,
+            &base,
+            &expected,
+            &envs,
+            NO_BUDGET,
+            DEFAULT_TIMEOUT,
+        )
+        .await;
+        let Err(AppError::Command(msg)) = &started else {
+            panic!("a start that never ran must report, got {started:?}");
+        };
+        assert_eq!(msg.lines().next(), Some("Couldn't start the rebase."));
+        assert!(!rebasing(&repo).await);
+        assert_eq!(rev(&repo, "HEAD").await, c1);
+    }
+
+    /// Both entries refuse a plan the branch moved past before the call — an amended
+    /// tip or a reset to an ancestor — with the one neutral refusal, untouched.
+    #[tokio::test]
+    async fn both_entries_refuse_a_plan_the_branch_moved_past() {
+        for amend in [true, false] {
+            for replay in [true, false] {
+                let marker = format!("moved-past-{amend}-{replay}");
+                let (dir, repo) = setup_repo(&marker).await;
+                let base = rev(&repo, "HEAD").await;
+                commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+                let c1 = rev(&repo, "HEAD").await;
+                commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+                let c2 = rev(&repo, "HEAD").await;
+                if amend {
+                    git(&repo, &["commit", "--amend", "-m", "two amended"]).await;
+                } else {
+                    git(&repo, &["reset", "--hard", &c1]).await;
+                }
+                let moved = rev(&repo, "HEAD").await;
+                let log = subjects(&repo).await;
+
+                let plan = vec![pick(&c2), pick(&c1)];
+                let result = if replay {
+                    let state = AppState::default();
+                    rewrite_commits(&state, &repo, &base, &plan, &[]).await
+                } else {
+                    git_rebase_edit(repo.clone(), base.clone(), plan, None).await
+                };
+                assert!(
+                    matches!(&result, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+                    "amend={amend} replay={replay}: {result:?}"
+                );
+                assert_eq!(rev(&repo, "HEAD").await, moved, "nothing was rewritten");
+                assert_eq!(subjects(&repo).await, log);
+                assert!(!rebasing(&repo).await, "nothing is in progress");
+            }
+        }
+    }
+
+    #[test]
+    fn rollback_reports_drop_rebase_progress_and_hints() {
+        // A real 2.51.1 conflict stop from the pinned continue, as `full_failure_text`
+        // joins it (stderr, then stdout).
+        let report = "Rebasing (2/3)\rerror: could not apply 328946b... two\nhint: Resolve all conflicts manually, mark them as resolved with\nhint: \"git add/rm <conflicted_files>\", then run \"git rebase --continue\".\nhint: You can instead skip this commit: run \"git rebase --skip\".\nhint: To abort and get back to the state before \"git rebase\", run \"git rebase --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\nCould not apply 328946b...\nAuto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt";
+        assert_eq!(
+            strip_rebase_noise(report),
+            "error: could not apply 328946b... two\nCould not apply 328946b...\nAuto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt"
+        );
+        assert_eq!(strip_rebase_noise("Rebasing (1/2)\rRebasing (2/2)\r\n"), "");
+        // Only the exact counter shape is progress.
+        assert_eq!(strip_rebase_noise("Rebasing (a/b)"), "Rebasing (a/b)");
+        // A reason line stays whatever advice it quotes.
+        let reason = "error: could not run \"git rebase --continue\"";
+        assert_eq!(strip_rebase_noise(reason), reason);
+    }
+
+    /// Real 2.51.1 rollback reports from the replay's pinned continue, joined as
+    /// `full_failure_text` joins them (paths and shas shortened): what the rollback
+    /// made untrue goes, and every reason line stays. The first cases are captures of
+    /// an earlier engine's inline exec chain (`cherry-pick -n … && commit --amend`),
+    /// kept as regression pins; the group-script cases capture the current shape.
+    #[test]
+    fn rollback_reports_drop_gits_continue_advice() {
+        let joined = |lines: &[&str]| lines.join("\n");
+        let cases = [
+            // Earlier engine: an empty amend at the end of an exec chain.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: git cherry-pick -n 72bbd32 && git commit --amend -F '/r/msg-0'",
+                    "You asked to amend the most recent commit, but doing so would make",
+                    "it empty. You can repeat your command with --allow-empty, or you can",
+                    "remove the commit entirely with \"git reset HEAD^\".",
+                    "error: cannot rebase: Your index contains uncommitted changes.",
+                    "warning: execution failed: git cherry-pick -n 72bbd32 && git commit --amend -F '/r/msg-0'",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                    "interactive rebase in progress; onto 33b1f4a",
+                    "Last commands done (4 commands done):",
+                    "   drop 72bbd32 ",
+                    "   exec git cherry-pick -n 72bbd32 && git commit --amend -F '/r/msg-0'",
+                    "  (see more in file .git/rebase-merge/done)",
+                    "No commands remaining.",
+                    "You are currently rebasing branch 'main' on '33b1f4a'.",
+                    "  (all conflicts fixed: run \"git rebase --continue\")",
+                    "",
+                    "No changes",
+                ]),
+                joined(&[
+                    "You asked to amend the most recent commit, but doing so would make",
+                    "it empty.",
+                    "warning: execution failed: git cherry-pick -n 72bbd32 && git commit --amend -F '/r/msg-0'",
+                ]),
+            ),
+            // A reason line after the status block ends it and stays.
+            (
+                joined(&[
+                    "error: could not apply 65d8b67... c1 add X",
+                    "interactive rebase in progress; onto 33b1f4a",
+                    "Next command to do (1 remaining command):",
+                    "   pick 3d2f335 two",
+                    "  (use \"git rebase --edit-todo\" to view and edit)",
+                    "You are currently editing a commit while rebasing branch 'main' on '33b1f4a'.",
+                    "nothing to commit, working tree clean",
+                    "no changes added to commit (use \"git add\" and/or \"git commit -a\")",
+                    "CONFLICT (content): Merge conflict in f",
+                    "f: needs merge",
+                ]),
+                joined(&[
+                    "error: could not apply 65d8b67... c1 add X",
+                    "CONFLICT (content): Merge conflict in f",
+                ]),
+            ),
+            // Earlier engine: a fold conflicting inside its exec chain.
+            (
+                joined(&[
+                    "Rebasing (2/5)\rRebasing (3/5)\rRebasing (4/5)\rExecuting: git cherry-pick -n 65d8b67 && git commit --amend --no-edit",
+                    "error: could not apply 65d8b67... c1 add X",
+                    "hint: after resolving the conflicts, mark the corrected paths",
+                    "hint: with 'git add <paths>' or 'git rm <paths>'",
+                    "hint: Disable this message with \"git config set advice.mergeConflict false\"",
+                    "error: cannot rebase: You have unstaged changes.",
+                    "error: additionally, your index contains uncommitted changes.",
+                    "warning: execution failed: git cherry-pick -n 65d8b67 && git commit --amend --no-edit",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                    "Auto-merging f",
+                    "CONFLICT (content): Merge conflict in f",
+                    "f: needs merge",
+                ]),
+                joined(&[
+                    "error: could not apply 65d8b67... c1 add X",
+                    "warning: execution failed: git cherry-pick -n 65d8b67 && git commit --amend --no-edit",
+                    "Auto-merging f",
+                    "CONFLICT (content): Merge conflict in f",
+                ]),
+            ),
+            // A commit-msg hook refusing a reword's amend.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: git commit --amend -F '/r/msg-1'",
+                    "commit-msg says no",
+                    "warning: execution failed: git commit --amend -F '/r/msg-1'",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    "commit-msg says no",
+                    "warning: execution failed: git commit --amend -F '/r/msg-1'",
+                ]),
+            ),
+            // A group script refusing its empty net.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: sh '/r/group-0.sh'",
+                    EMPTY_GROUP_ERROR,
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    EMPTY_GROUP_ERROR,
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                ]),
+            ),
+            // The same under TERM (git 2.43, Ubuntu 24.04): the `Executing:` echo
+            // carries a leading erase-line escape.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\r\r\x1b[KExecuting: sh '/p/.git/gd-rebase-edit/group-0.sh'",
+                    EMPTY_GROUP_ERROR,
+                    "warning: execution failed: sh '/p/.git/gd-rebase-edit/group-0.sh'",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    EMPTY_GROUP_ERROR,
+                    "warning: execution failed: sh '/p/.git/gd-rebase-edit/group-0.sh'",
+                ]),
+            ),
+            // A commit-msg hook refusing a group's commit.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: sh '/r/group-0.sh'",
+                    "commit-msg: subject must start with a ticket id",
+                    "error: cannot rebase: Your index contains uncommitted changes.",
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    "commit-msg: subject must start with a ticket id",
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                ]),
+            ),
+            // A conflict inside a group script.
+            (
+                joined(&[
+                    "Rebasing (2/5)\rRebasing (3/5)\rRebasing (4/5)\rRebasing (5/5)\rExecuting: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "error: could not apply cd4b95f... two",
+                    "hint: after resolving the conflicts, mark the corrected paths",
+                    "hint: with 'git add <paths>' or 'git rm <paths>'",
+                    "hint: Disable this message with \"git config set advice.mergeConflict false\"",
+                    "error: cannot rebase: You have unstaged changes.",
+                    "error: additionally, your index contains uncommitted changes.",
+                    "warning: execution failed: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                    "Auto-merging a.txt",
+                    "CONFLICT (content): Merge conflict in a.txt",
+                    "a.txt: needs merge",
+                ]),
+                joined(&[
+                    "error: could not apply cd4b95f... two",
+                    "warning: execution failed: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "Auto-merging a.txt",
+                    "CONFLICT (content): Merge conflict in a.txt",
+                ]),
+            ),
+            // A group's pre-commit hook printing `git status`, then an INDENTED reason
+            // of its own: only git's indented shapes continue the block.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "interactive rebase in progress; onto ce97f06",
+                    "Last commands done (4 commands done):",
+                    "   drop 9fa6fba ",
+                    "   exec sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "  (see more in file .git/rebase-merge/done)",
+                    "No commands remaining.",
+                    "You are currently rebasing branch 'main' on 'ce97f06'.",
+                    "  (all conflicts fixed: run \"git rebase --continue\")",
+                    "",
+                    "Changes to be committed:",
+                    "  (use \"git restore --staged <file>...\" to unstage)",
+                    "\tnew file:   x.txt",
+                    "\tnew file:   y.txt",
+                    "",
+                    "  \u{2716} eslint found 3 problems",
+                    "error: cannot rebase: Your index contains uncommitted changes.",
+                    "warning: execution failed: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    "  \u{2716} eslint found 3 problems",
+                    "warning: execution failed: sh '/r/.git/gd-rebase-edit/group-0.sh'",
+                ]),
+            ),
+            // Earlier engine: an exec that committed, then left the tree dirty (a
+            // pre-commit hook that edits a file): the commit's summary and git's
+            // dirty-tree advice go.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: git cherry-pick -n ffa6155 && git commit --amend --no-edit",
+                    "error: cannot rebase: You have unstaged changes.",
+                    "warning: execution succeeded: git cherry-pick -n ffa6155 && git commit --amend --no-edit",
+                    "but left changes to the index and/or the working tree.",
+                    "Commit or stash your changes, and then run",
+                    "",
+                    "  git rebase --continue",
+                    "[detached HEAD b0ebea1] one",
+                    " Date: Sat Oct 17 13:52:18 2026 -0400",
+                    " 2 files changed, 2 insertions(+)",
+                    " create mode 100644 b.txt",
+                    " create mode 100644 c.txt",
+                ]),
+                joined(&[
+                    "warning: execution succeeded: git cherry-pick -n ffa6155 && git commit --amend --no-edit",
+                ]),
+            ),
+            // Every line shape of a commit's summary (git 2.51.1 `commit` output).
+            (
+                joined(&[
+                    "[detached HEAD 425de84] c1 add X",
+                    " Author: Author A <A@x>",
+                    " Date: Fri Jan 1 10:00:00 2021 +0200",
+                    " 1 file changed, 1 insertion(+)",
+                    " create mode 100644 x.txt",
+                    " delete mode 100644 y.txt",
+                    " rename a.txt => b.txt (100%)",
+                    " copy c.txt => d.txt (100%)",
+                    " mode change 100644 => 100755 run.sh",
+                    "warning: execution succeeded: sh '/r/group-0.sh'",
+                ]),
+                joined(&["warning: execution succeeded: sh '/r/group-0.sh'"]),
+            ),
+            // Earlier engine: a hook that prints `git status` before its own
+            // unindented reason.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: git cherry-pick -n 8794a9d && git commit --amend --no-edit",
+                    "interactive rebase in progress; onto c1aea54",
+                    "Last commands done (4 commands done):",
+                    "   drop 8794a9d ",
+                    "   exec git cherry-pick -n 8794a9d && git commit --amend --no-edit",
+                    "  (see more in file .git/rebase-merge/done)",
+                    "No commands remaining.",
+                    "You are currently rebasing branch 'main' on 'c1aea54'.",
+                    "  (all conflicts fixed: run \"git rebase --continue\")",
+                    "",
+                    "Changes to be committed:",
+                    "  (use \"git restore --staged <file>...\" to unstage)",
+                    "\tnew file:   c.txt",
+                    "",
+                    "lint failed: c.txt has trailing whitespace",
+                    "error: cannot rebase: Your index contains uncommitted changes.",
+                    "warning: execution failed: git cherry-pick -n 8794a9d && git commit --amend --no-edit",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    "lint failed: c.txt has trailing whitespace",
+                    "warning: execution failed: git cherry-pick -n 8794a9d && git commit --amend --no-edit",
+                ]),
+            ),
+            // git 2.34.1 (Ubuntu 22.04): an exec that failed, then one that succeeded,
+            // each leaving the tree dirty; this git prints the continuations without
+            // their period.
+            (
+                joined(&[
+                    "Rebasing (2/3)\rRebasing (3/3)\r\r\x1b[KExecuting: sh -c 'echo x >> b.txt; exit 1'",
+                    "error: cannot rebase: You have unstaged changes.",
+                    "warning: execution failed: sh -c 'echo x >> b.txt; exit 1'",
+                    "and made changes to the index and/or the working tree",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&["warning: execution failed: sh -c 'echo x >> b.txt; exit 1'"]),
+            ),
+            (
+                joined(&[
+                    "Rebasing (2/3)\rRebasing (3/3)\r\r\x1b[KExecuting: sh -c 'echo x >> b.txt'",
+                    "error: cannot rebase: You have unstaged changes.",
+                    "warning: execution succeeded: sh -c 'echo x >> b.txt'",
+                    "but left changes to the index and/or the working tree",
+                    "Commit or stash your changes, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&["warning: execution succeeded: sh -c 'echo x >> b.txt'"]),
+            ),
+            // A group's hook printing `git status` under status.showUntrackedFiles=no,
+            // then its own reason.
+            (
+                joined(&[
+                    "Rebasing (2/4)\rRebasing (3/4)\rRebasing (4/4)\rExecuting: sh '/r/group-0.sh'",
+                    "interactive rebase in progress; onto cda714e",
+                    "Last commands done (4 commands done):",
+                    "   drop 0ab37aa ",
+                    "   exec sh '/r/group-0.sh'",
+                    "  (see more in file .git/rebase-merge/done)",
+                    "No commands remaining.",
+                    "You are currently rebasing branch 'main' on 'cda714e'.",
+                    "  (all conflicts fixed: run \"git rebase --continue\")",
+                    "",
+                    "Changes to be committed:",
+                    "  (use \"git restore --staged <file>...\" to unstage)",
+                    "\tnew file:   1.txt",
+                    "\tnew file:   2.txt",
+                    "",
+                    "Untracked files not listed (use -u option to show untracked files)",
+                    "Ignored files:",
+                    "lint: 2 files need formatting",
+                    "error: cannot rebase: Your index contains uncommitted changes.",
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                    "and made changes to the index and/or the working tree.",
+                    "You can fix the problem, and then run",
+                    "",
+                    "  git rebase --continue",
+                ]),
+                joined(&[
+                    "lint: 2 files need formatting",
+                    "warning: execution failed: sh '/r/group-0.sh'",
+                ]),
+            ),
+        ];
+        for (report, kept) in cases {
+            assert_eq!(strip_rebase_noise(&report), kept);
+        }
+    }
+
+    /// A rebase left in progress keeps git's hints and advice, which stay true; only
+    /// the progress counters (and a leading erase-line escape) go.
+    #[test]
+    fn live_rebase_reports_drop_only_progress() {
+        let report = "Rebasing (2/3)\r\r\x1b[KExecuting: sh '/r/group-0.sh'\nerror: could not apply 328946b... two\nhint: Resolve all conflicts manually, mark them as resolved with\nYou can fix the problem, and then run\n\n  git rebase --continue";
+        assert_eq!(
+            strip_rebase_progress(report),
+            "\nExecuting: sh '/r/group-0.sh'\nerror: could not apply 328946b... two\nhint: Resolve all conflicts manually, mark them as resolved with\nYou can fix the problem, and then run\n\n  git rebase --continue"
+        );
+    }
+
+    /// Installs a hook script (`#!/bin/sh` + `body`).
+    fn write_hook(repo: &str, name: &str, body: &str) {
+        let hooks = std::path::Path::new(repo).join(".git/hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let path = hooks.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// Commits a file under an author other than the repo's configured user.
+    async fn commit_file_by(repo: &str, dir: &std::path::Path, file: &str, msg: &str) {
+        std::fs::write(dir.join(file), format!("{file}\n")).unwrap();
+        git(repo, &["add", "."]).await;
+        git(
+            repo,
+            &[
+                "commit",
+                "--author",
+                "Orig Author <orig@example.com>",
+                "-m",
+                msg,
+            ],
+        )
+        .await;
+    }
+
+    /// Under `rebase.updateRefs=true` a branch pointing into the range stays where it
+    /// was. This pins the outcome: our replaced todo has no update-ref lines, so the
+    /// start's `-c rebase.updateRefs=false` is defense in depth.
+    #[tokio::test]
+    async fn rewrite_leaves_a_branch_inside_the_range_alone_under_update_refs() {
+        let (dir, repo) = setup_repo("update-refs").await;
+        git(&repo, &["config", "rebase.updateRefs", "true"]).await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        git(&repo, &["branch", "mid"]).await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+
+        let state = AppState::default();
+        // A reorder changes every oid; an identity replay would reproduce them and
+        // prove nothing.
+        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)], &[])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["one", "two", "base"]);
+        assert_eq!(rev(&repo, "mid").await, c1, "the inner branch stays put");
+    }
+
+    /// A reset to an ancestor trips neither git check (our todo is a superset of
+    /// git's own); only the start-tip gate catches it, before any commit comes back.
+    #[tokio::test]
+    async fn start_refuses_a_branch_reset_to_an_ancestor() {
+        let (dir, repo) = setup_repo("start-ancestor").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "resurrect me").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+        let todo_path = replay_todo(&repo, &[pick(&c1), pick(&c2)]).await;
+        git(&repo, &["reset", "--hard", &c1]).await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        assert!(
+            matches!(&started, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+            "{started:?}"
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(rev(&repo, "HEAD").await, c1, "HEAD stays at the ancestor");
+        assert_eq!(
+            read_head_name(&repo).await.unwrap(),
+            expected.head_name,
+            "HEAD is attached to the branch"
+        );
+        assert_eq!(subjects(&repo).await, vec!["one", "base"]);
+    }
+
+    /// An outside amend of the tip trips git's missing-commits stop; the abort puts
+    /// the branch back on the AMENDED tip and the start refuses as stale.
+    #[tokio::test]
+    async fn start_refuses_an_amended_tip() {
+        let (dir, repo) = setup_repo("start-amend").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+        let todo_path = replay_todo(&repo, &[pick(&c1), pick(&c2)]).await;
+        git(&repo, &["commit", "--amend", "-m", "two amended"]).await;
+        let amended = rev(&repo, "HEAD").await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        assert!(
+            matches!(&started, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+            "{started:?}"
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(
+            rev(&repo, "HEAD").await,
+            amended,
+            "the amended tip is restored"
+        );
+        assert_eq!(
+            read_head_name(&repo).await.unwrap(),
+            expected.head_name,
+            "HEAD is attached to the branch"
+        );
+    }
+
+    /// Arm 3 with a failed abort: the body names the tip the abort would restore,
+    /// the rebase's recorded orig-head (the AMENDED tip), never the plan's.
+    #[tokio::test]
+    async fn a_failed_abort_after_an_outside_amend_names_the_amended_tip() {
+        let (dir, repo) = setup_repo("start-amend-abort-fail").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+        let todo_path = replay_todo(&repo, &[pick(&c1), pick(&c2)]).await;
+        git(&repo, &["commit", "--amend", "-m", "two amended"]).await;
+        let amended = rev(&repo, "HEAD").await;
+        let envs = rebase_editor_env(&todo_path);
+        let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+        let started = start_planned_rebase(
+            &repo,
+            &git_dir_of(&repo).await,
+            &base,
+            &expected,
+            &envs,
+            DEFAULT_TIMEOUT,
+            NO_BUDGET,
+        )
+        .await;
+        let Err(AppError::Git { stderr, .. }) = &started else {
+            panic!("a failed abort must report, got {started:?}");
+        };
+        assert_verdict_shape(stderr, "rollback also failed");
+        assert!(
+            stderr.contains(&format!("its tip before this run was {amended}.")),
+            "names the recorded tip: {stderr}"
+        );
+        assert!(
+            !stderr.contains(&expected.tip),
+            "never the plan's: {stderr}"
+        );
+        assert!(rebasing(&repo).await, "the abort never ran");
+    }
+
+    /// A branch switch to a same-tip ref passes the tip comparison but not the branch
+    /// one: the start refuses and nothing is rewritten.
+    #[tokio::test]
+    async fn start_refuses_a_different_branch_at_the_same_tip() {
+        let (dir, repo) = setup_repo("start-head-name").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let branch = head_branch(&repo).await;
+        git(&repo, &["branch", "other"]).await;
+        let expected = PlanStart {
+            tip: c2.clone(),
+            head_name: "refs/heads/other".into(),
+        };
+        let todo_path = replay_todo(&repo, &[pick(&c2), pick(&c1)]).await;
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        assert!(
+            matches!(&started, Err(AppError::InvalidArgument(m)) if m == UNCOVERED_REFUSAL),
+            "{started:?}"
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(rev(&repo, "HEAD").await, c2);
+        assert_eq!(head_branch(&repo).await, branch);
+        assert_eq!(subjects(&repo).await, vec!["two", "one", "base"]);
+    }
+
+    /// The replay refuses over a paused op with the edit path's own message, before
+    /// it clears the shared scratch dir.
+    #[tokio::test]
+    async fn rewrite_refuses_a_concurrent_op() {
+        let (dir, repo) = setup_repo("rewrite-reentry").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "x.txt", "x\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        std::fs::create_dir_all(std::path::Path::new(&repo).join(".git/rebase-merge")).unwrap();
+
+        let state = AppState::default();
+        let refused = rewrite_commits(&state, &repo, &base, &[pick(&c1)], &[]).await;
+        let Err(AppError::InvalidArgument(msg)) = &refused else {
+            panic!("the replay must refuse over a paused op, got {refused:?}");
+        };
+        assert_eq!(msg, MID_OP_REFUSAL);
+        assert!(
+            !std::path::Path::new(&repo)
+                .join(".git/gd-rebase-edit")
+                .exists(),
+            "scratch dir must not be touched when refused"
+        );
+    }
+
+    /// With the rebase's start record gone, git can't abort the rebase either
+    /// (measured, git 2.51.1: `--abort` exits 1, "could not read
+    /// '.git/rebase-merge/head'"), so the gate reports a failed rollback with the
+    /// remedy that works there, and the branch ref is still at the plan's tip.
+    #[tokio::test]
+    async fn start_gate_with_an_unreadable_record_reports_a_failed_rollback() {
+        let (dir, repo) = setup_repo("start-unreadable").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let branch_ref = read_head_name(&repo).await.unwrap();
+        let expected = plan_start(&repo).await;
+        let todo_path = write_test_todo(
+            &repo,
+            "unreadable-todo",
+            &format!(
+                "exec rm -f \"$(git rev-parse --git-path rebase-merge/orig-head)\"\nbreak\npick {c1}\npick {tip}\n"
+            ),
+        );
+
+        let started = start_with_todo(&repo, &base, &expected, &todo_path).await;
+        let Err(AppError::Command(msg)) = &started else {
+            panic!("an unreadable record must refuse, got {started:?}");
+        };
+        assert_verdict_shape(msg, "rollback also failed");
+        assert!(
+            msg.contains(&format!("the plan was read at {tip}.")),
+            "names the plan's tip: {msg}"
+        );
+        let branch = branch_ref.trim_start_matches("refs/heads/");
+        assert!(
+            msg.contains(&format!(
+                "Run git rebase --quit, then check out {branch} again."
+            )),
+            "advises the remedy that works without the record: {msg}"
+        );
+        assert!(!msg.contains("git rebase --abort to restore"), "{msg}");
+        assert_eq!(rev(&repo, &branch_ref).await, tip);
+    }
+
+    /// `--no-verify` on the rebase: a refusing pre-rebase hook blocks neither path.
+    #[tokio::test]
+    async fn a_refusing_pre_rebase_hook_blocks_neither_path() {
+        let (dir, repo) = setup_repo("pre-rebase").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        write_hook(&repo, "pre-rebase", "exit 1");
+
+        // Negative control: without the flag the hook refuses the rebase.
+        let plain = run_git_raw(
+            Some(&repo),
+            &[
+                "-c",
+                "core.editor=true",
+                "-c",
+                "sequence.editor=true",
+                "rebase",
+                "-i",
+                &c1,
+            ],
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_ne!(plain.code, 0, "the hook must refuse a plain rebase");
+        assert!(
+            plain.stderr.contains("pre-rebase hook refused"),
+            "{}",
+            plain.stderr
+        );
+        assert!(!rebasing(&repo).await);
+
+        let state = AppState::default();
+        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)], &[])
+            .await
+            .unwrap();
+        assert_eq!(subjects(&repo).await, vec!["one", "two", "base"]);
+
+        let tip = rev(&repo, "HEAD").await;
+        let below = rev(&repo, "HEAD~1").await;
+        let step = RewriteStep {
+            hashes: vec![tip.clone()],
+            message: None,
+            edit: true,
+        };
+        git_rebase_edit(repo.clone(), base, vec![pick(&below), step], None)
+            .await
+            .unwrap();
+        assert!(rebasing(&repo).await, "paused at the edit");
+    }
+
+    /// The replay's group commits run the commit hooks (a squash's `-F` commit and a
+    /// message-less fixup's `-C` commit) and keep the leader's author; the edit path's
+    /// amend and fixups run none.
+    #[tokio::test]
+    async fn replay_commits_run_commit_hooks_and_the_edit_path_skips_them() {
+        let hook = "echo 'Hooked: yes' >> \"$1\"";
+        let marker = "touch \"$(git rev-parse --git-dir)/pre-commit-ran\"";
+        let plan = |c: &[String]| {
+            vec![
+                RewriteStep {
+                    hashes: vec![c[0].clone(), c[1].clone()],
+                    message: Some("combined".into()),
+                    edit: false,
+                },
+                RewriteStep {
+                    hashes: vec![c[2].clone(), c[3].clone()],
+                    message: None,
+                    edit: false,
+                },
+            ]
+        };
+
+        // A space in the repo path exercises every quoted path the todo carries.
+        let (dir, repo) = setup_repo("hooks replay").await;
+        let base = rev(&repo, "HEAD").await;
+        let mut commits = Vec::new();
+        for (file, msg) in [
+            ("1.txt", "one"),
+            ("2.txt", "two"),
+            ("3.txt", "three"),
+            ("4.txt", "four"),
+        ] {
+            commit_file_by(&repo, dir.path(), file, msg).await;
+            commits.push(rev(&repo, "HEAD").await);
+        }
+        write_hook(&repo, "commit-msg", hook);
+        write_hook(&repo, "pre-commit", marker);
+        let state = AppState::default();
+        rewrite_commits(&state, &repo, &base, &plan(&commits), &[])
+            .await
+            .unwrap();
+        let log = git(&repo, &["log", "-2", "--format=%an|%B%x00"]).await;
+        let entries: Vec<&str> = log
+            .split('\0')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .collect();
+        assert_eq!(entries.len(), 2, "{log}");
+        for entry in &entries {
+            assert!(
+                entry.starts_with("Orig Author|"),
+                "the leader's author stays: {entry}"
+            );
+            assert!(entry.contains("Hooked: yes"), "commit-msg ran: {entry}");
+        }
+        assert!(
+            entries[0].contains("three"),
+            "the fixup keeps its leader's message: {log}"
+        );
+        assert!(entries[1].contains("combined"), "{log}");
+        assert!(std::path::Path::new(&repo)
+            .join(".git/pre-commit-ran")
+            .exists());
+
+        let (dir, repo) = setup_repo("hooks edit").await;
+        let base = rev(&repo, "HEAD").await;
+        let mut commits = Vec::new();
+        for (file, msg) in [
+            ("1.txt", "one"),
+            ("2.txt", "two"),
+            ("3.txt", "three"),
+            ("4.txt", "four"),
+        ] {
+            commit_file_by(&repo, dir.path(), file, msg).await;
+            commits.push(rev(&repo, "HEAD").await);
+        }
+        write_hook(&repo, "commit-msg", hook);
+        write_hook(&repo, "pre-commit", marker);
+        git_rebase_edit(repo.clone(), base, plan(&commits), None)
+            .await
+            .unwrap();
+        assert!(!rebasing(&repo).await, "a plan with no edit runs through");
+        let log = git(&repo, &["log", "-2", "--format=%B"]).await;
+        assert!(
+            !log.contains("Hooked: yes"),
+            "the edit path runs no commit hooks: {log}"
+        );
+        assert!(!std::path::Path::new(&repo)
+            .join(".git/pre-commit-ran")
+            .exists());
+    }
+
+    /// The edit path still pauses at an `edit` after the start-tip gate's continue.
+    #[tokio::test]
+    async fn rebase_edit_pauses_at_its_edit_after_the_gate() {
+        let (dir, repo) = setup_repo("rebase-edit-pause").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let step = RewriteStep {
+            hashes: vec![c2.clone()],
+            message: None,
+            edit: true,
+        };
+        git_rebase_edit(repo.clone(), base, vec![pick(&c1), step], None)
+            .await
+            .unwrap();
+        assert!(rebasing(&repo).await);
+        assert_eq!(rev(&repo, "HEAD").await, c2, "stopped at the edit commit");
+        assert!(
+            op_state(&repo).await.unwrap().edit_paused,
+            "the banner reads a real edit stop as one"
+        );
+    }
+
+    #[test]
+    fn the_replay_route_never_writes_an_edit_stop() {
+        let step = RewriteStep {
+            hashes: vec!["aaaa".into()],
+            message: None,
+            edit: true,
+        };
+        let dir = std::path::Path::new("scratch");
+        let (replay, _) = rebase_todo(
+            TodoRoute::Replay,
+            std::slice::from_ref(&step),
+            &[],
+            dir,
+            "git",
+        );
+        assert_eq!(replay, "break\npick aaaa\n");
+        let (edit, _) = rebase_todo(TodoRoute::Edit, &[step], &[], dir, "git");
+        assert_eq!(edit, "break\nedit aaaa\n");
+    }
+
+    #[test]
+    fn rebase_paths_are_single_quoted_for_the_shell() {
+        assert_eq!(sh_quote("C:/repo/.git/todo"), "'C:/repo/.git/todo'");
+        assert_eq!(sh_quote("dir with space/todo x"), "'dir with space/todo x'");
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+
+        let step = RewriteStep {
+            hashes: vec!["aaaa".into()],
+            message: Some("reworded".into()),
+            edit: false,
+        };
+        let dir = std::path::Path::new("C:/it's dir");
+        let (todo, files) = rebase_todo(
+            TodoRoute::Replay,
+            &[step],
+            &[],
+            dir,
+            "C:/Program Files/Git/cmd/git.exe",
+        );
+        assert_eq!(
+            todo,
+            "break\npick aaaa\nexec sh 'C:/it'\\''s dir/reword-0.sh'\n"
+        );
+        assert_eq!(files.len(), 2);
+        let script = files
+            .iter()
+            .find(|(path, _)| shell_path(path).ends_with("reword-0.sh"))
+            .map(|(_, content)| content.as_str())
+            .unwrap();
+        assert!(
+            script.contains(
+                "'C:/Program Files/Git/cmd/git.exe' commit --amend --no-post-rewrite -F 'C:/it'\\''s dir/msg-0'\n"
+            ),
+            "{script}"
+        );
+        assert!(files.iter().any(|(_, content)| content == "reworded"));
+        let env = rebase_editor_env("C:/it's dir/todo");
+        assert_eq!(env[0].1, r"cp 'C:/it'\''s dir/todo'");
+    }
+
+    /// Arm 4: a start that never ran our todo (its `break` never paused) completes on
+    /// git's own todo — reported as nothing rewritten, with the branch where it was.
+    #[tokio::test]
+    async fn start_that_never_used_our_todo_reports_nothing_rewritten() {
+        let (dir, repo) = setup_repo("start-unused-todo").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let tip = rev(&repo, "HEAD").await;
+        let expected = plan_start(&repo).await;
+
+        let envs = [("GIT_SEQUENCE_EDITOR", "true"), ("GIT_EDITOR", "true")];
+        let git_dir = git_dir_of(&repo).await;
+        let started = start_planned_rebase(
+            &repo,
+            &git_dir,
+            &base,
+            &expected,
+            &envs,
+            DEFAULT_TIMEOUT,
+            DEFAULT_TIMEOUT,
+        )
+        .await;
+        let Err(AppError::Command(msg)) = &started else {
+            panic!("an unused todo must be reported, got {started:?}");
+        };
+        assert_eq!(
+            msg.lines().next(),
+            Some("The rewrite plan was not applied, so nothing was rewritten as planned.")
+        );
+        assert!(!rebasing(&repo).await);
+        assert_eq!(rev(&repo, "HEAD").await, tip);
+    }
+
+    /// Only the start copies the plan's todo in; the continue's sequence editor is a
+    /// no-op, so a nested interactive rebase can't pick the todo up.
+    #[test]
+    fn the_editor_env_pins_the_todo_copy_and_a_no_op_editor() {
+        let env = rebase_editor_env("C:/repo/.git/gd-rebase-edit/todo");
+        assert_eq!(
+            env,
+            [
+                (
+                    "GIT_SEQUENCE_EDITOR",
+                    "cp 'C:/repo/.git/gd-rebase-edit/todo'".to_string()
+                ),
+                ("GIT_EDITOR", "true".to_string()),
+            ]
+        );
+        assert_eq!(
+            CONTINUE_EDITOR_ENV,
+            [("GIT_SEQUENCE_EDITOR", "true"), ("GIT_EDITOR", "true")]
+        );
+    }
+
+    /// The replay drops a fold group's commits and runs its script (every commit
+    /// staged, one commit); the edit route keeps git's own `fixup` lines.
+    #[test]
+    fn fold_groups_build_one_script_on_replay_and_fixups_on_edit() {
+        let steps = [
+            RewriteStep {
+                hashes: vec!["a1".into(), "a2".into(), "a3".into()],
+                message: None,
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["b1".into(), "b2".into()],
+                message: Some("squashed".into()),
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["c1".into()],
+                message: None,
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["d1".into()],
+                message: Some("reworded".into()),
+                edit: false,
+            },
+        ];
+        let dir = std::path::Path::new("d");
+        let (replay, files) = rebase_todo(TodoRoute::Replay, &steps, &[], dir, "git");
+        assert_eq!(
+            replay,
+            "break\n\
+             drop a1\ndrop a2\ndrop a3\n\
+             exec sh 'd/group-0.sh'\n\
+             drop b1\ndrop b2\n\
+             exec sh 'd/group-1.sh'\n\
+             pick c1\n\
+             pick d1\n\
+             exec sh 'd/reword-3.sh'\n"
+        );
+        let file = |name: &str| {
+            files
+                .iter()
+                .find(|(path, _)| shell_path(path) == name)
+                .map(|(_, content)| content.as_str())
+                .unwrap_or_else(|| panic!("no {name} in {files:?}"))
+        };
+        assert_eq!(files.len(), 5, "{files:?}");
+        let empty_net = format!(
+            "if 'git' diff --cached --quiet --ignore-submodules=none; \
+             then echo '{EMPTY_GROUP_ERROR}' >&2; exit 1; fi\n"
+        );
+        let mappings = |members: &[&str]| {
+            let mut lines = String::from(
+                "new=$('git' rev-parse HEAD)\n\
+                 list=$('git' rev-parse --git-path rebase-merge/rewritten-list)\n",
+            );
+            for m in members {
+                lines.push_str(&format!(
+                    "printf '%s %s\\n' \"$('git' rev-parse {m})\" \"$new\" >> \"$list\"\n"
+                ));
+            }
+            lines
+        };
+        assert_eq!(
+            file("d/group-0.sh"),
+            format!(
+                "set -e\n\
+                 'git' cherry-pick -n a1\n\
+                 'git' cherry-pick -n a2\n\
+                 'git' cherry-pick -n a3\n\
+                 {empty_net}\
+                 'git' commit -C a1\n\
+                 {}",
+                mappings(&["a1", "a2", "a3"])
+            )
+        );
+        assert_eq!(
+            file("d/group-1.sh"),
+            format!(
+                "set -e\n\
+                 'git' cherry-pick -n b1\n\
+                 'git' cherry-pick -n b2\n\
+                 {empty_net}\
+                 n=$('git' log -1 --no-show-signature --format=%an b1)\n\
+                 e=$('git' log -1 --no-show-signature --format=%ae b1)\n\
+                 d=$('git' log -1 --no-show-signature --date=raw --format=@%ad b1)\n\
+                 GIT_AUTHOR_NAME=\"$n\" GIT_AUTHOR_EMAIL=\"$e\" GIT_AUTHOR_DATE=\"$d\" \
+                 'git' commit -F 'd/msg-1'\n\
+                 {}",
+                mappings(&["b1", "b2"])
+            )
+        );
+        assert_eq!(file("d/msg-1"), "squashed");
+        assert_eq!(file("d/msg-3"), "reworded");
+        assert_eq!(
+            file("d/reword-3.sh"),
+            "set -e\n\
+             pre=$('git' rev-parse HEAD)\n\
+             'git' commit --amend --no-post-rewrite -F 'd/msg-3'\n\
+             new=$('git' rev-parse HEAD)\n\
+             list=$('git' rev-parse --git-path rebase-merge/rewritten-list)\n\
+             if [ -f \"$list\" ]; then sed \"s/ $pre\\$/ $new/\" \"$list\" > \"$list.gd-tmp\" \
+             && mv \"$list.gd-tmp\" \"$list\"; fi\n"
+        );
+        assert!(!files.iter().any(|(_, c)| c.contains('\r')), "LF only");
+        let (edit, _) = rebase_todo(TodoRoute::Edit, &steps, &[], dir, "git");
+        assert_eq!(
+            edit,
+            "break\n\
+             pick a1\nfixup a2\nfixup a3\n\
+             pick b1\nfixup b2\n\
+             exec 'git' commit --amend --no-verify -F 'd/msg-1'\n\
+             pick c1\n\
+             pick d1\n\
+             exec 'git' commit --amend --no-verify -F 'd/msg-3'\n"
+        );
+    }
+
+    /// A path reaches the shell as-is off Windows, where `\` is a filename byte.
+    #[test]
+    fn shell_paths_swap_separators_on_windows_only() {
+        let path = std::path::Path::new(r"bs\dir/todo");
+        let expected = if cfg!(windows) {
+            "bs/dir/todo"
+        } else {
+            r"bs\dir/todo"
+        };
+        assert_eq!(shell_path(path), expected);
+    }
+
+    /// A continue that times out on the edit path leaves the rebase for the banner,
+    /// but says so instead of reporting a paused edit.
+    #[tokio::test]
+    async fn rebase_edit_continue_timeout_is_reported_and_left_in_progress() {
+        let (dir, repo) = setup_repo("rebase-edit-timeout").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let branch_ref = read_head_name(&repo).await.unwrap();
+        let step = RewriteStep {
+            hashes: vec![c2.clone()],
+            message: None,
+            edit: true,
+        };
+        let result = git_rebase_edit_with_timeout(
+            repo.clone(),
+            base,
+            vec![pick(&c1), step],
+            None,
+            NO_BUDGET,
+        )
+        .await;
+        let Err(AppError::Command(msg)) = &result else {
+            panic!("a timed-out continue must be reported, got {result:?}");
+        };
+        assert_eq!(
+            msg.lines().next(),
+            Some(
+                "The rebase timed out and was left in progress — continue or abort it from the banner."
+            )
+        );
+        assert!(rebasing(&repo).await, "left for the banner");
+        assert_eq!(rev(&repo, &branch_ref).await, c2);
+    }
+
+    /// A continue that stops short of the plan's edit is reported, not toasted as a
+    /// paused edit, and stays in progress for the banner. Here an index.lock taken at
+    /// the start's checkout fails the first line, a pick or the `edit` itself; a
+    /// failed `edit` line leaves the same `done` as a real stop, minus its `amend`.
+    #[tokio::test]
+    async fn rebase_edit_reports_a_stop_short_of_its_edit() {
+        for edit_first in [false, true] {
+            let (dir, repo) = setup_repo(&format!("rebase-edit-interrupted-{edit_first}")).await;
+            let base = rev(&repo, "HEAD").await;
+            commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+            let c1 = rev(&repo, "HEAD").await;
+            commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+            let c2 = rev(&repo, "HEAD").await;
+            let branch_ref = read_head_name(&repo).await.unwrap();
+            write_hook(
+                &repo,
+                "post-checkout",
+                "touch \"$(git rev-parse --git-dir)/index.lock\"",
+            );
+            let edit = |hash: &str| RewriteStep {
+                hashes: vec![hash.to_string()],
+                message: None,
+                edit: true,
+            };
+            let plan = if edit_first {
+                vec![edit(&c1), pick(&c2)]
+            } else {
+                vec![pick(&c1), edit(&c2)]
+            };
+            let result = git_rebase_edit(repo.clone(), base, plan, None).await;
+            let lock = git_dir_of(&repo).await.join("index.lock");
+            let Err(AppError::Git { stderr, .. }) = &result else {
+                panic!("edit_first={edit_first}: a stop short of the edit must be reported, got {result:?}");
+            };
+            assert_eq!(
+                stderr.lines().next(),
+                Some(
+                    "The rebase was interrupted and left in progress — continue or abort it from the banner."
+                )
+            );
+            assert!(
+                stderr.contains("index.lock"),
+                "git's report rides below: {stderr}"
+            );
+            assert!(
+                !stderr.contains("Rebasing ("),
+                "no progress counters: {stderr}"
+            );
+            assert!(rebasing(&repo).await, "left for the banner");
+            assert!(
+                !op_state(&repo).await.unwrap().edit_paused,
+                "edit_first={edit_first}: the banner doesn't read it as an edit stop"
+            );
+            assert_eq!(rev(&repo, &branch_ref).await, c2, "the branch is untouched");
+            let _ = std::fs::remove_file(lock);
+        }
+    }
+
+    /// A conflict before the plan's edit is the banner's to resolve: no error.
+    #[tokio::test]
+    async fn rebase_edit_hands_a_conflict_to_the_banner() {
+        let (dir, repo) = setup_repo("rebase-edit-conflict").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "a.txt", "v1\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "a.txt", "v2\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let step = RewriteStep {
+            hashes: vec![c1],
+            message: None,
+            edit: true,
+        };
+        // "two"'s patch (v1→v2) can't apply onto v0.
+        git_rebase_edit(repo.clone(), base, vec![pick(&c2), step], None)
+            .await
+            .unwrap();
+        assert!(rebasing(&repo).await, "left for the banner");
+        assert!(!git(&repo, &["ls-files", "-u"]).await.trim().is_empty());
+    }
+
+    /// A continue that left nothing in progress is read off the branch: moved and
+    /// still checked out is done, at the plan's tip is nothing rewritten, and any
+    /// other state (or a detached plan) is reported unconfirmed.
+    #[tokio::test]
+    async fn a_finished_rebase_is_classified_off_the_branch() {
+        let (dir, repo) = setup_repo("classify-finished").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "two").await;
+        let c2 = rev(&repo, "HEAD").await;
+        let branch_ref = read_head_name(&repo).await.unwrap();
+        let plan = |tip: &str, head_name: &str| PlanStart {
+            tip: tip.to_string(),
+            head_name: head_name.to_string(),
+        };
+        let verdict = |result: AppResult<()>| match result {
+            Err(AppError::Command(msg)) => msg,
+            other => panic!("expected a Command verdict, got {other:?}"),
+        };
+
+        // Moved off the plan's tip, still on the branch.
+        classify_finished_rebase(&repo, &plan(&c1, &branch_ref))
+            .await
+            .unwrap();
+        // At the plan's tip.
+        let msg = verdict(classify_finished_rebase(&repo, &plan(&c2, &branch_ref)).await);
+        assert_eq!(msg.lines().next(), Some(L_NOREWRITE), "{msg}");
+
+        git(&repo, &["checkout", "--detach"]).await;
+        // The branch is no longer checked out.
+        let msg = verdict(classify_finished_rebase(&repo, &plan(&c1, &branch_ref)).await);
+        assert_eq!(msg.lines().next(), Some(L_UNCONFIRMED), "{msg}");
+        assert!(
+            msg.contains(&format!("HEAD is on {DETACHED_HEAD_NAME}")),
+            "{msg}"
+        );
+        // A plan made on a detached HEAD.
+        let msg = verdict(classify_finished_rebase(&repo, &plan(&c1, DETACHED_HEAD_NAME)).await);
+        assert_eq!(msg.lines().next(), Some(L_UNCONFIRMED), "{msg}");
+        assert!(msg.contains(&format!("HEAD is at {c2}.")), "{msg}");
+    }
+
+    /// The replay's continue budget counts exactly the lines its todo carries: 2 s per
+    /// pick or drop, and the per-command budget per exec (a commit plus its hooks).
+    #[test]
+    fn replay_timeout_counts_the_todo_work_lines() {
+        let steps = [
+            RewriteStep {
+                hashes: vec!["a1".into()],
+                message: None,
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["b1".into()],
+                message: Some("reword".into()),
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["c1".into(), "c2".into()],
+                message: None,
+                edit: false,
+            },
+            RewriteStep {
+                hashes: vec!["d1".into(), "d2".into(), "d3".into()],
+                message: Some("squash".into()),
+                edit: false,
+            },
+        ];
+        let dropped = ["e1".to_string()];
+        let (todo, _) = rebase_todo(
+            TodoRoute::Replay,
+            &steps,
+            &dropped,
+            std::path::Path::new("d"),
+            "git",
+        );
+        let count = |verb: &str| todo.lines().filter(|l| l.starts_with(verb)).count() as u32;
+        let (picks, drops, execs) = (count("pick "), count("drop "), count("exec "));
+        assert_eq!(
+            (picks, drops, execs),
+            (2, 6, 3),
+            "the fixture exercises every line kind: {todo}"
+        );
+        assert_eq!(
+            todo.lines().count() as u32,
+            1 + picks + drops + execs,
+            "nothing else but the leading break: {todo}"
+        );
+        assert_eq!(
+            replay_timeout(&steps, &dropped),
+            DEFAULT_TIMEOUT
+                + std::time::Duration::from_secs(2 * u64::from(picks + drops))
+                + DEFAULT_TIMEOUT * execs
+        );
+    }
+
+    #[tokio::test]
+    async fn rebase_edit_refuses_an_out_of_range_step_hash() {
+        let (dir, repo) = setup_repo("rebase-step-out-of-range").await;
+        let below = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "b.txt", "b\n", "mid").await;
+        let base = rev(&repo, "HEAD").await;
+        commit_file(&repo, dir.path(), "c.txt", "c\n", "one").await;
+        let c1 = rev(&repo, "HEAD").await;
+
+        let result = git_rebase_edit(repo.clone(), base, vec![pick(&below), pick(&c1)], None).await;
+        let Err(AppError::InvalidArgument(msg)) = &result else {
+            panic!("an out-of-range step must refuse, got {result:?}");
+        };
+        assert_eq!(msg, UNCOVERED_REFUSAL);
+        assert_rebase_edit_untouched(&repo, &c1).await;
+    }
+
+    /// A refused edit-rebase started nothing: no rebase, HEAD where it was, and no
+    /// scratch dir.
+    async fn assert_rebase_edit_untouched(repo: &str, head: &str) {
+        assert!(!git_path_exists(repo, "rebase-merge").await);
+        assert!(!git_path_exists(repo, "rebase-apply").await);
+        assert_eq!(rev(repo, "HEAD").await, head, "HEAD must not move");
+        assert!(
+            !std::path::Path::new(repo)
+                .join(".git/gd-rebase-edit")
+                .exists(),
+            "scratch dir must not be touched when refused"
         );
     }
 
@@ -6788,7 +10285,7 @@ mod tests {
             message: None,
             edit: true,
         };
-        let result = git_rebase_edit(repo.clone(), base, vec![step]).await;
+        let result = git_rebase_edit(repo.clone(), base, vec![step], None).await;
         assert!(
             result.is_err(),
             "must refuse a new edit-rebase while one is in progress"
@@ -6801,13 +10298,11 @@ mod tests {
                 .exists(),
             "scratch dir must not be touched when refused"
         );
-
     }
 
-    /// The state the app's own squash/fixup engine creates: a multi-hash
-    /// `cherry-pick -n` that conflicts leaves `.git/sequencer` and NO
-    /// `CHERRY_PICK_HEAD` (measured, git 2.51.1), which every marker-file gate
-    /// used to read as "nothing in flight".
+    /// The state a user's own multi-commit `cherry-pick -n` leaves when it conflicts:
+    /// `.git/sequencer` and NO `CHERRY_PICK_HEAD` (measured, git 2.51.1), which a
+    /// marker-file gate reads as "nothing in flight".
     #[tokio::test]
     async fn op_state_sees_a_sequencer_only_cherry_pick() {
         let (dir, repo) = setup_repo("seq-pick").await;
@@ -6842,7 +10337,7 @@ mod tests {
         // Reachable through the guard that clears another op's pending files. The
         // message is load-bearing: the dirty-tree guard below it also refuses this
         // tree, so only the wording proves WHICH guard caught it.
-        let refused = git_rebase_edit(repo.clone(), tip, vec![pick(&f1)]).await;
+        let refused = git_rebase_edit(repo.clone(), tip, vec![pick(&f1)], None).await;
         let Err(AppError::InvalidArgument(msg)) = &refused else {
             panic!("edit-rebase must refuse over sequencer state, got {refused:?}");
         };
@@ -9533,7 +13028,7 @@ detached
         git(&repo, &["tag", "feature", &base]).await;
 
         let state = AppState::default();
-        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)])
+        rewrite_commits(&state, &repo, &base, &[pick(&c2), pick(&c1)], &[])
             .await
             .unwrap();
         let journaled = |op: &'static str| {
@@ -9556,7 +13051,7 @@ detached
         let tip = rev(&repo, "HEAD").await;
         commit_file(&repo, dir.path(), "d.txt", "d\n", "three").await;
         let c3 = rev(&repo, "HEAD").await;
-        git_rebase_edit(repo.clone(), tip, vec![pick(&c3)])
+        git_rebase_edit(repo.clone(), tip, vec![pick(&c3)], None)
             .await
             .unwrap();
         assert_eq!(journaled("rebase_edit").await.as_deref(), Some("feature"));
