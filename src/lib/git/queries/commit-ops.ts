@@ -12,11 +12,20 @@ export function useResetToCommit(repo: string) {
 
 /** Moves the CURRENT branch and the working tree to `hash`. The backend refuses
  *  outright while tracked changes are outstanding, so the caller's confirm can
- *  promise a clean tree is required rather than pre-flighting one. */
+ *  promise a clean tree is required rather than pre-flighting one. It also
+ *  refuses unless HEAD is still `expectedHead` on `expectedBranch`, the tip and branch
+ *  the user confirmed. */
 export function useHardResetToCommit(repo: string) {
   return useRepoMutation(
     repo,
-    (hash: string) => api.gitReset(repo, hash, "hard"),
+    (args: { hash: string; expectedHead: string; expectedBranch: string }) =>
+      api.gitReset(
+        repo,
+        args.hash,
+        "hard",
+        args.expectedHead,
+        args.expectedBranch,
+      ),
     {
       // Local history write — never park it offline.
       networkMode: "always",

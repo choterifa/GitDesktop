@@ -322,8 +322,13 @@ export function refuseWhilePushRuns(
 }
 
 export function useUndoCommit(repo: string) {
-  return useRepoMutation(repo, () => api.gitUndoCommit(repo), {
-    // Local history write — never park it offline.
-    networkMode: "always",
-  });
+  return useRepoMutation(
+    repo,
+    (args: { expectedHead: string; expectedBranch: string }) =>
+      api.gitUndoCommit(repo, args.expectedHead, args.expectedBranch),
+    {
+      // Local history write — never park it offline.
+      networkMode: "always",
+    },
+  );
 }
