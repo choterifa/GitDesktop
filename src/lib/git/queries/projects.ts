@@ -91,6 +91,7 @@ import {
   refetchOnMountUnlessHeld,
   releaseLens,
   repoFocusInvalidations,
+  statusWriteKind,
 } from "./board-writes";
 import { keepPreviousDataForKeyAxes, repoKeys } from "./core";
 import {
@@ -3686,11 +3687,14 @@ interface StatusWriteScope {
   projectId: string;
 }
 
-/** The key every status write carries. Its own prefix, never under `board-write`:
+/** The family prefix every status write's key starts with; {@link statusWriteKey}
+ *  appends each write's kind. Its own prefix, never under `board-write`:
  *  {@link usePendingBoardWrites} enumerates that prefix, and would start counting
  *  these. Which repo and project a write addresses rides its VARIABLES, for the
  *  reason {@link boardWriteKey} gives. */
 const STATUS_WRITE_KEY = ["project-status-write"] as const;
+const statusWriteKey = (kind: "create" | "update" | "delete") =>
+  [...STATUS_WRITE_KEY, kind] as const;
 
 /** Whether a mutation's variables address `scope`. The filter sees
  *  `Mutation<any>`, so the fields are `typeof`-guarded rather than asserted. */
@@ -3724,6 +3728,50 @@ function settleStatusUpdates(queryClient: QueryClient, args: StatusWriteScope) {
   });
 }
 
+/** One pending status write on a project, as the editor dialog holds by it. */
+export interface PendingStatusUpdateWrite {
+  kind: "create" | "update" | "delete";
+  /** The entry an update or delete targets; null for a create. */
+  statusUpdateId: string | null;
+  paused: boolean;
+}
+
+const NO_STATUS_WRITES: PendingStatusUpdateWrite[] = [];
+
+/**
+ * The status writes pending on `projectId` in `repo`, read off the mutation cache
+ * so the editor dialog holds the project its write targets, never whichever one
+ * the panel shows when the hook's observer last fired. The kind comes from the
+ * write's own key; the variables are `typeof`-guarded, the filter seeing
+ * `Mutation<any>`.
+ */
+export function usePendingStatusUpdateWrites(
+  repo: string,
+  projectId: string,
+): PendingStatusUpdateWrite[] {
+  const select = useCallback(
+    (cache: MutationCache) =>
+      cache
+        .findAll({ mutationKey: STATUS_WRITE_KEY, status: "pending" })
+        .flatMap((m): PendingStatusUpdateWrite[] => {
+          const kind = statusWriteKind(m.options.mutationKey);
+          if (kind === null || !writesScope(m, { repo, projectId })) return [];
+          // writesScope has already checked the variables are an object.
+          const vars = m.state.variables as Record<string, unknown>;
+          const id = vars.statusUpdateId;
+          return [
+            {
+              kind,
+              statusUpdateId: typeof id === "string" ? id : null,
+              paused: m.state.isPaused,
+            },
+          ];
+        }),
+    [repo, projectId],
+  );
+  return useMutationCacheSnapshot(select, NO_STATUS_WRITES);
+}
+
 /**
  * Posts a status update, OPTIMISTIC: a placeholder entry leads the history at
  * once, and GitHub's answer replaces it — the real id is what makes Edit and
@@ -3738,7 +3786,7 @@ function settleStatusUpdates(queryClient: QueryClient, args: StatusWriteScope) {
 export function useCreateProjectStatusUpdate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: STATUS_WRITE_KEY,
+    mutationKey: statusWriteKey("create"),
     mutationFn: (
       args: StatusWriteScope & {
         status: ProjectStatusValue;
@@ -3803,7 +3851,7 @@ export function useCreateProjectStatusUpdate() {
 export function useUpdateProjectStatusUpdate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: STATUS_WRITE_KEY,
+    mutationKey: statusWriteKey("update"),
     mutationFn: (
       args: StatusWriteScope & {
         statusUpdateId: string;
@@ -3860,7 +3908,7 @@ export function useUpdateProjectStatusUpdate() {
 export function useDeleteProjectStatusUpdate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: STATUS_WRITE_KEY,
+    mutationKey: statusWriteKey("delete"),
     mutationFn: (args: StatusWriteScope & { statusUpdateId: string }) =>
       api.ghDeleteProjectStatusUpdate(args.repo, args.statusUpdateId),
     onMutate: async (args) => {

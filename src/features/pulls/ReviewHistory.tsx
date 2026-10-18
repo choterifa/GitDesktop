@@ -6,16 +6,19 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useRef, useState } from "react";
+import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Markdown } from "@/components/markdown/markdown";
 import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { copyText } from "@/lib/clipboard";
-import { useForgeStatus } from "@/lib/git/queries";
+import { useForgeStatus, usePendingRepoWrites } from "@/lib/git/queries";
 import type { RemoteLens } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
+import { ACT_PENDING_REASON } from "@/lib/offline-writes";
 import {
+  REVIEW_HISTORY_WRITES_FAMILY,
   useClearReviews,
   useDeleteReview,
   useReviewHistory,
@@ -83,6 +86,19 @@ export function ReviewHistory({
     setLastScopeKey(scopeKey);
     setConfirmingClear(false);
   }
+  // The clear and trim holds, read from the cache by review scope: this disclosure
+  // outlives a PR switch, and the cache keeps a write another scope started (or a
+  // return to this one mid-write) apart. No click-time slot: a second press before
+  // the cache notification lands repeats the same idempotent write.
+  const historyWrites = usePendingRepoWrites(
+    REVIEW_HISTORY_WRITES_FAMILY,
+    repoPath,
+    [lens, prKind, prRef],
+  );
+  // Whole-scope writes: the key already names the PR, and a clear sends no
+  // variables to match on.
+  const clearing = historyWrites.some((w) => w.kind === "clear");
+  const saving = historyWrites.some((w) => w.kind === "update");
 
   // ONE list: completed reviews and kept partial runs interleave by time, so the
   // disclosure, its count, and the arrow-key walk all cover every stored record — a PR
@@ -170,15 +186,16 @@ export function ReviewHistory({
                   ? "Clear this PR's history, including the kept partial output?"
                   : "Clear this PR's history?"}
               </span>
-              <Button
+              <DisabledReasonButton
                 variant="ghost"
                 size="xs"
                 className="text-destructive"
-                disabled={clear.isPending}
+                disabled={clearing}
+                reason={ACT_PENDING_REASON}
                 onClick={() => void clearHistory()}
               >
                 Yes
-              </Button>
+              </DisabledReasonButton>
               <Button
                 variant="ghost"
                 size="xs"
@@ -296,13 +313,14 @@ export function ReviewHistory({
                           aria-label="Edit the previous review's findings"
                         />
                         <div className="flex items-center gap-2">
-                          <Button
+                          <DisabledReasonButton
                             size="xs"
-                            disabled={update.isPending}
+                            disabled={saving}
+                            reason={ACT_PENDING_REASON}
                             onClick={() => void saveEdit(r.id)}
                           >
                             Save
-                          </Button>
+                          </DisabledReasonButton>
                           <Button variant="ghost" size="xs" onClick={closeEdit}>
                             Cancel
                           </Button>

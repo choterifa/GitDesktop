@@ -53,10 +53,12 @@ import {
   forgeProbeReason,
   forgeProbeState,
   keepPreviousDataForKeyAxes,
+  pendingWriteMatching,
   prDetailsOptions,
   repoKeys,
   useForgeStatus,
   useHoverPrefetch,
+  usePendingRepoWrites,
   usePrefetchPr,
   usePrList,
   usePrListCi,
@@ -72,6 +74,7 @@ import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { type LocalPrStatus, reloadLocalPrs } from "@/lib/pulls/local";
 import {
+  LOCAL_PR_RECORD_WRITES_FAMILY,
   localPrKey,
   useDeleteLocalPr,
   useLocalPrs,
@@ -464,6 +467,14 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   // against the CURRENT selection, so a flag outliving its PR would offer to
   // delete whichever local PR is selected next.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // The confirmed PR's own delete, from the cache: the panel outlives a selection
+  // change, so another PR's delete never holds this confirm.
+  const deleting =
+    pendingWriteMatching(
+      usePendingRepoWrites(LOCAL_PR_RECORD_WRITES_FAMILY, repoPath),
+      "delete",
+      (v: string) => v === confirmDeleteId,
+    ) !== undefined;
   const shownSelectedLocalPr = useRetained(selectedLocalPr);
 
   /** Whether the live UI still has this local PR selected in THIS repo. An
@@ -1367,7 +1378,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
           }
           confirmLabel="Delete"
           confirmVariant="destructive"
-          pending={deleteLocalPr.isPending}
+          pending={deleting}
           onConfirm={() => {
             if (!selectedLocalPr) return;
             void deleteSelectedLocalPr(selectedLocalPr.id);

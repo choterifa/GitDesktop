@@ -1,8 +1,11 @@
 // Shared TypeScript/TSX masking and source traversal for the networkmode guards.
 // Runs in CI's installless guards job, so node built-ins ONLY.
-// Known loud false ambiguities: postfix `x++ / y` division lexes as a regex
-// opener; a `<const T,>` generic arrow lexes as JSX; a function-typed JSX
-// prop's type argument is unreadable. These fail closed.
+// Known false ambiguities: a `<const T,>` generic arrow lexes as JSX and a
+// function-typed JSX prop's type argument is unreadable; both fail closed.
+// Postfix `x++ / y` / `x-- / y` division lexes as a regex opener: it fails
+// closed only when nothing later on the line closes it, else the code between is
+// blanked silently. A regex right after a brace-less `if (…)`/`while (…)`/
+// `for (…)` lexes as a division.
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,7 +16,11 @@ export const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 /** Punctuation after which an expression starts, so a `/` opens a regex literal
  *  and, in .tsx, a `<` opens a JSX element. */
 export const EXPR_OPENERS = new Set([..."(,=:[!&|?{};+-*%<>~^"]);
-/** Keywords after which an expression starts. */
+/** Keywords after which an expression starts. All but `of` are reserved words in
+ *  a module (`yield` and `await` too, modules being strict), so none can be a
+ *  name; `of` is contextual and `maskNonCode` checks its position. Contextual
+ *  words that never precede an expression here (`async`, `let`, `get`, …) are
+ *  left out on purpose. */
 export const EXPR_KEYWORDS = new Set([
   "return",
   "throw",
@@ -38,12 +45,39 @@ export const EXPR_KEYWORDS = new Set([
  *  text refuses rather than guesses. */
 export function maskNonCode(src, jsx) {
   const out = src.split("");
+  // A leading byte-order mark is blanked in place, so offsets stay put.
+  const BOM = String.fromCharCode(0xfeff);
+  if (out[0] === BOM) out[0] = " ";
   const blank = (from, to) => {
     for (let k = from; k < to; k++)
       if (out[k] !== "\n" && out[k] !== "\r") out[k] = " ";
   };
   const fail = (what, at) => {
     throw new ScanError(`${what} at line ${lineOf(src, at)}`);
+  };
+  // `of` is a keyword only after a for-of binding (`for (const x of …)`, a `]`
+  // or `}` pattern); anywhere else it is an ordinary name (`of / 2`).
+  const ofIsKeyword = (s) => {
+    let k = s - 1;
+    while (k >= 0 && /\s/.test(out[k])) k--;
+    if (k < 0) return false;
+    if (out[k] === "]" || out[k] === "}") return true;
+    if (!/[\w$]/.test(out[k])) return false;
+    let w = k;
+    while (w > 0 && /[\w$]/.test(out[w - 1])) w--;
+    // A reserved word before it rules the binding out. A preceding `of` counts as
+    // the for-of target only right after `const`/`let`/`var` or `(` (`for (const
+    // of of …)`), or after `.` as a member target (`for (obj.of of …)`); after
+    // anything else it is the keyword, and this `of` is a name.
+    const prev = out.slice(w, k + 1).join("");
+    if (prev !== "of") return !EXPR_KEYWORDS.has(prev);
+    let b = w - 1;
+    while (b >= 0 && /\s/.test(out[b])) b--;
+    if (b < 0) return false;
+    if (out[b] === "(" || out[b] === ".") return true;
+    let d = b;
+    while (d > 0 && /[\w$]/.test(out[d - 1])) d--;
+    return ["const", "let", "var"].includes(out.slice(d, b + 1).join(""));
   };
   // Reads the already-masked text backwards, so comments and string bodies
   // before `i` can't pose as the previous token.
@@ -54,7 +88,20 @@ export function maskNonCode(src, jsx) {
     if (/[\w$]/.test(out[k])) {
       let s = k;
       while (s > 0 && /[\w$]/.test(out[s - 1])) s--;
-      return EXPR_KEYWORDS.has(out.slice(s, k + 1).join(""));
+      // A keyword-named property (`size.in / 2`) is an operand, not a keyword;
+      // a spread's `...` before a keyword is not a property access.
+      if (out[s - 1] === "." && out[s - 2] !== ".") return false;
+      const word = out.slice(s, k + 1).join("");
+      if (word === "of") return ofIsKeyword(s);
+      return EXPR_KEYWORDS.has(word);
+    }
+    // A run of `!` hard after an operand (a name, a closing bracket, a
+    // template's backtick) is TS's postfix non-null assertion (`total! / 2`,
+    // `x!! / 2`, `count! < 3`), so what follows is an operator.
+    if (out[k] === "!") {
+      let s = k;
+      while (s > 0 && out[s - 1] === "!") s--;
+      if (s > 0 && /[\w$)\]`]/.test(out[s - 1])) return false;
     }
     return EXPR_OPENERS.has(out[k]);
   };
@@ -64,6 +111,8 @@ export function maskNonCode(src, jsx) {
     for (let j = start + 1; j < src.length; j++) {
       if (src[j] === "\\" && !multiline) {
         j++;
+        // A line continuation over CRLF escapes the whole break.
+        if (src[j] === "\r" && src[j + 1] === "\n") j++;
         continue;
       }
       if (src[j] === q) {

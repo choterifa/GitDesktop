@@ -33,7 +33,10 @@ export type PrWriteKind =
   | "resolve-merge"
   | "abort-resolve"
   | "labels"
-  | "submit-review";
+  | "submit-review"
+  | "delete-comment"
+  | "delete-review-comment"
+  | "discard-review";
 
 /** Filter prefix for EVERY PR write ({@link prWriteKey}). */
 export const PR_WRITES_KEY = ["pr-write"] as const;
@@ -145,15 +148,22 @@ export function pendingMutationEntries(
 
 /** The writes among `entries` filed against `repo` (keyed `[prefix, kind, repo]`),
  *  each read through `read`. One keyed to another repo, or with no kind, is dropped:
- *  a hold never crosses repos. */
+ *  a hold never crosses repos. `scope` matches the key's trailing elements in order
+ *  (a lens, a Jira site): a key element that differs drops the write, while one the
+ *  key lacks, or either side holds as null, matches, so a write keyed without it
+ *  over-holds rather than releasing early. */
 export function pendingWritesFor<W>(
   entries: readonly PendingMutationEntry[],
   repo: string,
   read: (kind: string, vars: unknown, paused: boolean) => W,
+  scope: readonly unknown[] = [],
 ): W[] {
   return entries.flatMap((e) => {
-    const [, kind, keyRepo] = e.key ?? [];
-    return keyRepo === repo && typeof kind === "string"
+    const [, kind, keyRepo, ...trailing] = e.key ?? [];
+    const inScope = scope.every(
+      (want, i) => want == null || trailing[i] == null || trailing[i] === want,
+    );
+    return keyRepo === repo && typeof kind === "string" && inScope
       ? [read(kind, e.vars, e.paused ?? false)]
       : [];
   });
@@ -413,8 +423,59 @@ export function pendingTagPushesFor(
   return out;
 }
 
+/** The tag and release writes whose in-flight state a tag view holds its controls on. */
+export type ReleaseWriteKind =
+  | "delete-local-tag"
+  | "delete-origin-tag"
+  | "edit-release"
+  | "sync-updater"
+  | "delete-release"
+  | "upload-asset"
+  | "delete-asset";
+
+/** Filter prefix for EVERY tag/release write ({@link releaseWriteKey}). */
+export const RELEASE_WRITES_FAMILY = "release-write";
+
+/** A tag/release write's mutation key. Static per repo, so it never detaches a
+ *  pending write across a tag switch; the tag rides the variables. */
+export const releaseWriteKey = (kind: ReleaseWriteKind, repo: string) =>
+  [RELEASE_WRITES_FAMILY, kind, repo] as const;
+
+/** Each tag/release write's variables, shared by the mutations' generics. */
+export type ReleaseWriteVars = {
+  /** The tag name, bare. */
+  "delete-local-tag": string;
+  /** The tag name, bare. */
+  "delete-origin-tag": string;
+  "edit-release": {
+    tag: string;
+    title: string;
+    notes: string;
+    prerelease: boolean;
+    draft: boolean;
+    latest: boolean | undefined;
+  };
+  "sync-updater": { tag: string; notes: string };
+  "delete-release": { tag: string; cleanupTag: boolean };
+  "upload-asset": { tag: string; filePath: string };
+  "delete-asset": { tag: string; assetName: string };
+};
+
+/** The tag a release/tag write's variables target: bare-string vars ARE the tag,
+ *  object vars carry `tag`; anything else targets nothing. */
+export function releaseWriteTag(vars: unknown): string | null {
+  if (typeof vars === "string") return vars;
+  if (typeof vars !== "object" || vars === null) return null;
+  const { tag } = vars as Record<string, unknown>;
+  return typeof tag === "string" ? tag : null;
+}
+
 /** The local-PR writes whose in-flight state a local PR view holds its controls on. */
-export type LocalPrWriteKind = "merge" | "update-from";
+export type LocalPrWriteKind =
+  | "merge"
+  | "update-from"
+  | "finish-merge"
+  | "abort-merge";
 
 /** Filter prefix for EVERY local-PR write ({@link localPrWriteKey}); disjoint from
  *  {@link PR_WRITES_KEY}, so neither aggregate sees the other's writes. */
@@ -436,6 +497,9 @@ export interface PendingLocalPrWrite {
 const LOCAL_HEAD_FIELD: Record<LocalPrWriteKind, string> = {
   merge: "head",
   "update-from": "branch",
+  // Neither carries a head: finish names only its base, abort no branch at all.
+  "finish-merge": "head",
+  "abort-merge": "head",
 };
 
 /** Reads a local-PR write's variables, which the cache filter sees as `unknown`. A

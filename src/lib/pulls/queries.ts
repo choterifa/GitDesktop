@@ -45,6 +45,11 @@ export function useLocalPrs(repo: string) {
   return useQuery(localPrsOptions(repo));
 }
 
+/** Filter prefix for every local-PR RECORD write (`[family, op, repo]`), the
+ *  family a view reads its pending writes back from. Distinct from the git-side
+ *  local-PR writes' `LOCAL_PR_WRITES_KEY` ("local-pr-write"). */
+export const LOCAL_PR_RECORD_WRITES_FAMILY = "local-pr";
+
 /** Pinned to `op` + repo, so a repo switch mid-flight detaches the write and the
  *  newly-live repo's controls don't read it as busy (gd-conventions). The detached
  *  observer goes idle, so callers never rely on `isPending` alone for re-entry
@@ -56,7 +61,7 @@ function useLocalPrMutation<TArgs, TData>(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationKey: ["local-pr", op, repo],
+    mutationKey: [LOCAL_PR_RECORD_WRITES_FAMILY, op, repo],
     mutationFn: fn,
     // Local PR write — never park it offline.
     networkMode: "always",
@@ -123,7 +128,21 @@ export function useReviewPartials(
   });
 }
 
+/** Filter prefix for the review-history writes a view reads back from the cache. */
+export const REVIEW_HISTORY_WRITES_FAMILY = "review-history-write";
+
+/** A review-history write's key: the review scope (lens, PR kind, PR ref) trails
+ *  the repo, so a reader passing its scope holds only its own PR's writes. */
+const reviewHistoryWriteKey = (
+  op: "update" | "delete" | "clear",
+  repo: string,
+  lens: RemoteLens,
+  kind: PrKind,
+  ref: string,
+) => [REVIEW_HISTORY_WRITES_FAMILY, op, repo, lens, kind, ref] as const;
+
 function useReviewHistoryMutation<TArgs>(
+  op: "update" | "delete" | "clear",
   repo: string,
   lens: RemoteLens,
   kind: PrKind,
@@ -132,6 +151,7 @@ function useReviewHistoryMutation<TArgs>(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: reviewHistoryWriteKey(op, repo, lens, kind, ref),
     mutationFn: fn,
     // Local review-history write — never park it offline.
     networkMode: "always",
@@ -160,6 +180,7 @@ export function useUpdateReviewText(
   ref: string,
 ) {
   return useReviewHistoryMutation(
+    "update",
     repo,
     lens,
     kind,
@@ -175,8 +196,13 @@ export function useDeleteReview(
   kind: PrKind,
   ref: string,
 ) {
-  return useReviewHistoryMutation(repo, lens, kind, ref, (id: string) =>
-    deleteReview(repo, id),
+  return useReviewHistoryMutation(
+    "delete",
+    repo,
+    lens,
+    kind,
+    ref,
+    (id: string) => deleteReview(repo, id),
   );
 }
 
@@ -186,7 +212,7 @@ export function useClearReviews(
   kind: PrKind,
   ref: string,
 ) {
-  return useReviewHistoryMutation(repo, lens, kind, ref, () =>
+  return useReviewHistoryMutation("clear", repo, lens, kind, ref, () =>
     clearReviewsFor(repo, lens, kind, ref),
   );
 }

@@ -21,8 +21,11 @@ import {
   pendingWriteOfKind,
   pendingWritesFor,
   prWriteKey,
+  RELEASE_WRITES_FAMILY,
   readPendingLocalPrWrite,
   readPendingPrWrite,
+  releaseWriteKey,
+  releaseWriteTag,
 } from "../src/lib/git/queries/pr-writes.ts";
 
 const write = (kind, vars) => ({ kind, ...pendingPrWriteTarget(vars) });
@@ -360,4 +363,124 @@ test("a foreign repo's local merge never holds this repo's view", () => {
   assert.equal(pendingWriteOfKind(writes, "merge"), undefined);
   const own = pendingWritesFor(entries, "C:/b", readPendingLocalPrWrite);
   assert.equal(pendingWriteOfKind(own, "merge")?.head, "feat");
+});
+
+test("a local merge's finish names its base only; an abort names no branch", () => {
+  assert.deepEqual(
+    pendingLocalPrWrite("finish-merge", {
+      base: "main",
+      strategy: "squash",
+      message: "m",
+      worktreePath: "C:/wt",
+      worktreeId: "w1",
+      opId: null,
+    }),
+    { kind: "finish-merge", base: "main", head: null },
+  );
+  assert.deepEqual(
+    pendingLocalPrWrite("abort-merge", { worktreePath: "C:/wt", opId: null }),
+    { kind: "abort-merge", base: null, head: null },
+  );
+});
+
+test("a finish or abort never reads as a merge or an update-from", () => {
+  const entries = [
+    { key: localPrWriteKey("finish-merge", "C:/a"), vars: { base: "main" } },
+    {
+      key: localPrWriteKey("abort-merge", "C:/a"),
+      vars: { worktreePath: "x" },
+    },
+  ];
+  const writes = pendingWritesFor(entries, "C:/a", readPendingLocalPrWrite);
+  assert.equal(pendingWriteOfKind(writes, "merge"), undefined);
+  assert.equal(pendingWriteOfKind(writes, "update-from"), undefined);
+  assert.equal(pendingWriteOfKind(writes, "finish-merge")?.base, "main");
+});
+
+test("a release write's tag is its bare-string vars or their `tag` field", () => {
+  assert.equal(releaseWriteTag("v1.0.0"), "v1.0.0");
+  assert.equal(releaseWriteTag({ tag: "v2", cleanupTag: true }), "v2");
+  assert.equal(releaseWriteTag({ tag: "v3", assetName: "a.zip" }), "v3");
+  for (const junk of [undefined, null, 7, ["v1"], { tag: 7 }, { name: "v1" }])
+    assert.equal(releaseWriteTag(junk), null, JSON.stringify(junk));
+});
+
+test("a release write's key files it by kind and repo under one prefix", () => {
+  assert.deepEqual(releaseWriteKey("delete-release", "C:/a"), [
+    RELEASE_WRITES_FAMILY,
+    "delete-release",
+    "C:/a",
+  ]);
+  const entries = [
+    { key: releaseWriteKey("delete-local-tag", "C:/a"), vars: "v1" },
+    { key: releaseWriteKey("delete-local-tag", "C:/b"), vars: "v1" },
+  ];
+  const writes = pendingWritesFor(entries, "C:/a", (kind, vars) => ({
+    kind,
+    tag: releaseWriteTag(vars),
+  }));
+  assert.deepEqual(writes, [{ kind: "delete-local-tag", tag: "v1" }]);
+});
+
+test("the new PR write kinds hold only their own PR", () => {
+  for (const kind of ["delete-comment", "delete-review-comment"]) {
+    const w = [write(kind, { number: 7, commentId: "c" })];
+    assert.equal(isPendingFor(w, kind, 7, "origin"), true, kind);
+    assert.equal(isPendingFor(w, kind, 8, "origin"), false, kind);
+  }
+  const discard = [write("discard-review", { number: 7, reviewId: "r" })];
+  assert.equal(isPendingFor(discard, "discard-review", 7, "upstream"), true);
+  assert.equal(isPendingFor(discard, "discard-review", 8, "origin"), false);
+});
+
+const scoped = (entries, scope) =>
+  pendingWritesFor(entries, "C:/a", (kind) => kind, scope);
+
+test("a scope matches a key's trailing lens; the other lens never holds", () => {
+  const entries = [
+    { key: ["commit-comment-write", "create", "C:/a", "origin"], vars: {} },
+  ];
+  assert.deepEqual(scoped(entries, ["origin"]), ["create"]);
+  assert.deepEqual(scoped(entries, ["upstream"]), []);
+  // A reader passing no scope keeps holding on every trailing value.
+  assert.deepEqual(scoped(entries, []), ["create"]);
+});
+
+test("a scope matches a key's trailing site; another site never holds", () => {
+  const entries = [
+    { key: ["jira-write", "comment", "C:/a", "acme.atlassian.net"], vars: {} },
+  ];
+  assert.deepEqual(scoped(entries, ["acme.atlassian.net"]), ["comment"]);
+  assert.deepEqual(scoped(entries, ["other.atlassian.net"]), []);
+});
+
+test("a key without the trailing element, or holding null, still matches", () => {
+  const entries = [
+    { key: ["jira-write", "due-date", "C:/a"], vars: {} },
+    { key: ["jira-write", "comment", "C:/a", null], vars: {} },
+  ];
+  assert.deepEqual(scoped(entries, ["acme.atlassian.net"]), [
+    "due-date",
+    "comment",
+  ]);
+  // A reader that can't name its site (null) holds on every write.
+  assert.deepEqual(
+    scoped(
+      [{ key: ["jira-write", "comment", "C:/a", "x.net"], vars: {} }],
+      [null],
+    ),
+    ["comment"],
+  );
+});
+
+test("a multi-element scope must match each trailing element in order", () => {
+  const entries = [
+    {
+      key: ["review-history-write", "clear", "C:/a", "origin", "remote", "7"],
+      vars: undefined,
+    },
+  ];
+  assert.deepEqual(scoped(entries, ["origin", "remote", "7"]), ["clear"]);
+  assert.deepEqual(scoped(entries, ["origin", "remote", "8"]), []);
+  assert.deepEqual(scoped(entries, ["origin", "local", "7"]), []);
 });

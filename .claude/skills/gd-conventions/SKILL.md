@@ -674,13 +674,13 @@ one grep away on the named symbol. Grows via Conventions-sync.
   parameter would oblige its delegating call to pass one) — a repo-scoped create
   written anywhere else is unratcheted, and the wider class stays a review
   concern. The creates `useAddRemote`, `useAddCollaborator`, `useAddSubmodule`,
-  `useAddUserWorktree`, `useAddDiscussionComment`, `useAddMrSpentTime` and
-  `useForkRepo` (repo-access.ts — RepositoryMenu reads its observer as the
-  re-entry guard) stay unpinned BY DECISION: their callers read `isPending` as
-  a re-entry guard, which a pin idles, so the isPending → cache-reader
-  migration comes first. (`useSubmitReview`, `useAddIssueSpentTime` and `useForkRepoByName` — a
-  different hook from `useForkRepo` — are pinned, their re-entry guards on
-  mutation-cache readers.) A cache WRITE
+  `useAddUserWorktree`, `useAddMrSpentTime` and `useForkRepo` (repo-access.ts —
+  RepositoryMenu reads its observer as the re-entry guard) stay unpinned BY
+  DECISION: their callers read `isPending` as a re-entry guard, which a pin
+  idles, so the isPending → cache-reader migration comes first.
+  (`useSubmitReview`, `useAddIssueSpentTime`, `useAddDiscussionComment` and
+  `useForkRepoByName` — a different hook from `useForkRepo` — are pinned, their
+  re-entry guards on mutation-cache readers.) A cache WRITE
   (`setQueryData`/`setQueriesData`) in `onSuccess`/`onError`/`onSettled` keys
   from the callback's own parameters, never hook scope. The snapshot already
   runs the settle callbacks in effect at the start, so this is defense in depth:
@@ -709,8 +709,27 @@ one grep away on the named symbol. Grows via Conventions-sync.
   `board-writes.ts`). A projection that CASTS the variables
   casts through the same exported type the mutation's generic uses
   (`ThreadWriteVars`, `DiscussionUpvoteVars`), so a renamed field fails to
-  compile; the runtime-guarded readers (`boardWriteVars`, `pendingPrWriteTarget`)
-  `typeof`-check each field instead.
+  compile; the runtime-guarded readers (`boardWriteVars`, `pendingPrWriteTarget`,
+  `releaseWriteTag`, `usePendingStatusUpdateWrites`) `typeof`-check each field
+  instead. A per-record write in a `[family, kind, repo]` family is read with
+  `usePendingRepoWrites` + `pendingWriteMatching` (typed twins:
+  `pendingIssueWrite`, `pendingDiscussionWrite`), matched on the record its
+  variables name.
+- **Record-scoped pending** — a detail view or strip that one mounted instance
+  reuses across records (the roster is the guard's `MEMBERS` list, below; a new
+  reused view joins it in the same change) never reads a mutation observer's
+  `isPending`/`isPaused`: that is instance state, so the next record shows the
+  previous one's spinner or held control. It reads the cache per record (the
+  bullet above). A run spanning several mutations takes a submit-time record
+  slot `{repo, …id}` behind a one-run gate (the promote dialogs' `pendingPub`);
+  a non-idempotent local write that must hold from the click, before the
+  batched cache notification lands, adds a slot set as an object token and
+  cleared compare-and-clear, so one press's settle never frees another's
+  (LocalIssueView's `statusSavingFor` is the reference). Guard:
+  `scripts/check-reused-view-pending.mjs` scans the member files, with reviewed
+  allowlist entries pinned to their enclosing function and binding (query
+  reads, repo-wide working-tree writes, mounts keyed per record); a plain
+  `useState` busy flag and a view outside its member list stay review concerns.
 - **Plugin-store open/reload** — an app-data store opens via
   `memoizedStoreLoader` and re-reads via `reloadToleratingEmptyStore`
   (`src/lib/plugin-store.ts`), never a hand-rolled `??= load(storeName(…))` or a
