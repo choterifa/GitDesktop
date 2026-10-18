@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(args.len(), 6);
         assert_eq!(args[3], format!("query={}", status_updates_query()));
         assert_eq!(args[5], format!("id={id}"));
-        for pair in args[2..].chunks_exact(2) {
+        for pair in args[2..].as_chunks::<2>().0 {
             assert_eq!(pair[0], "-f");
         }
     }
@@ -721,7 +721,8 @@ mod tests {
 
     #[test]
     fn scope_errors_map_to_each_hint_and_other_errors_survive() {
-        let mappers: [(fn(AppError) -> AppError, &str); 2] = [
+        type Mapper = (fn(AppError) -> AppError, &'static str);
+        let mappers: [Mapper; 2] = [
             (read_scope_error, READ_SCOPE_HINT),
             (write_scope_error, WRITE_SCOPE_HINT),
         ];

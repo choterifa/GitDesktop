@@ -52,7 +52,9 @@ context: the standing brief and the repo playbook of conventions and gotchas.
   ./src/`. In a task worktree even that tree-wide check false-fails on CRLF, so
   the trustworthy gate is the per-file LF-copy `biome ci` form (gd-conventions),
   or whatever the spec's Verification field names. Never run repo-wide
-  `cargo fmt` in `src-tauri`; `rustfmt <file>` on individual new files only.
+  `cargo fmt` in `src-tauri`; `rustfmt --edition 2021 <file>` on individual
+  new files only, never on a `mod.rs` (rustfmt follows its `mod` declarations
+  into every child file).
 - **No scratch or temp files inside the repo** — working files belong in the
   session scratchpad or `C:/temp`. The one sanctioned exception: a run that may
   create files judges formatting with the per-file LF-copy `biome ci` gate,
@@ -66,7 +68,7 @@ context: the standing brief and the repo playbook of conventions and gotchas.
   in this repo; only `tsc -b` (or `pnpm build`) typechecks.
 - `pnpm run checks` — the repo guard scripts CI runs.
 - `cargo test --manifest-path src-tauri/Cargo.toml`
-- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
 - `cd site && pnpm build` — the marketing site.
 
 ## When the run was given a task spec
