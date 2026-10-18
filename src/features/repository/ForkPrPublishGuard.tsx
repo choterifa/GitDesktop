@@ -1,4 +1,5 @@
 import { WarningIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +15,12 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { forgeEnsureForkRemote } from "@/lib/git/api";
-import { usePush } from "@/lib/git/queries";
+import {
+  branchPushHoldReason,
+  refuseWhilePushRuns,
+  usePendingBranchPushes,
+  usePush,
+} from "@/lib/git/queries";
 import type { ForkPrMatch } from "@/lib/git/types";
 import {
   ACT_PENDING_REASON,
@@ -53,12 +59,20 @@ export function ForkPrPublishGuard({
   onPublishAnyway: () => void;
 }) {
   const push = usePush(repoPath);
+  const queryClient = useQueryClient();
   const [ensuring, setEnsuring] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const noteId = useId();
 
   const open = match !== null;
   const pending = ensuring || push.isPending;
+  // Another surface's push in this repo (its own push is `pending`): both routes
+  // would queue behind it on the network lock, so both hold until it settles.
+  const pendingPushes = usePendingBranchPushes(repoPath);
+  const otherPushHeld = !pending && pendingPushes.length > 0;
+  const otherPushReason = branchPushHoldReason(
+    pendingPushes.some((p) => p.paused),
+  );
   // Both routes push, so both hold while offline; the dialog can be open when
   // the connection drops.
   const offlineHold = useOfflineHold();
@@ -83,13 +97,18 @@ export function ForkPrPublishGuard({
     return true;
   }
 
+  // One push at a time: another surface's push can start while the dialog is
+  // open, and a second one would queue behind it on the network lock.
+  const pushRunning = () => refuseWhilePushRuns(queryClient, repoPath);
+
   // Add the fork remote (idempotent) and push the local branch onto the PR's
   // head ref — no fetch first: the match is ancestry-verified locally, so this
   // fast-forwards unless the contributor pushed meanwhile, which surfaces as a
   // normal push error. The push mutation invalidates the whole repo subtree,
   // which is where the PR list and details live.
   async function pushToFork() {
-    if (!match || refuseWhileOffline() || switchedAway()) return;
+    if (!match || refuseWhileOffline() || switchedAway() || pushRunning())
+      return;
     setEnsuring(true);
     let remote: string;
     try {
@@ -104,9 +123,9 @@ export function ForkPrPublishGuard({
       return;
     }
     setEnsuring(false);
-    // Again below the remote setup, an await the connection can drop and the
-    // user can switch repositories during.
-    if (refuseWhileOffline() || switchedAway()) return;
+    // Again below the remote setup, an await the connection can drop, the user
+    // can switch repositories, and another push can start during.
+    if (refuseWhileOffline() || switchedAway() || pushRunning()) return;
     try {
       await push.mutateAsync({
         setUpstream: false,
@@ -187,16 +206,28 @@ export function ForkPrPublishGuard({
           </Button>
           <DisabledReasonButton
             variant="outline"
-            disabled={pending || !!offlineHold}
-            // `pending` is the fork route's push, never this button's own.
-            reason={pending ? "Pushing to the fork…" : offlineHold}
+            disabled={pending || otherPushHeld || !!offlineHold}
+            // `pending` is this dialog's fork push, never this button's own
+            // publish; another surface's push holds it the same way.
+            reason={(() => {
+              switch (true) {
+                case pending:
+                  return "Pushing to the fork…";
+                case otherPushHeld:
+                  return otherPushReason;
+                default:
+                  return offlineHold;
+              }
+            })()}
             onClick={onPublishAnyway}
           >
             Publish to {destination} anyway
           </DisabledReasonButton>
           {showPushToFork ? (
             <DisabledReasonButton
-              disabled={!canPushToFork || pending || !!offlineHold}
+              disabled={
+                !canPushToFork || pending || otherPushHeld || !!offlineHold
+              }
               // The permission note already describes its own hold (a plain
               // disable that offline never flips); a running push outranks offline.
               reason={(() => {
@@ -205,6 +236,8 @@ export function ForkPrPublishGuard({
                     return undefined;
                   case pending:
                     return ACT_PENDING_REASON;
+                  case otherPushHeld:
+                    return otherPushReason;
                   default:
                     return offlineHold;
                 }
