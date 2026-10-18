@@ -1,11 +1,12 @@
 import { CopyIcon, DotsThreeVerticalIcon } from "@phosphor-icons/react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CommitAuthorAvatar } from "@/components/commit-author-avatar";
 import { DetailRail, DetailRailRow } from "@/components/detail-rail";
 import { DiffStat } from "@/components/diff-stat";
 import type { MarkdownRefs } from "@/components/markdown/markdown-refs";
+import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
 import { PathText } from "@/components/path-text";
 import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import type { CommitParent } from "@/lib/git/api";
 import { splitUnifiedDiff } from "@/lib/git/diff-split";
 import {
   commitParentsOptions,
+  repoStatusOptions,
   useCheckoutCommit,
   useCherryPick,
   useCommitAuthorAvatarIndex,
@@ -50,7 +52,7 @@ import {
   useRemoteCommitDiff,
   useRevertCommit,
 } from "@/lib/git/queries";
-import { providerLabel } from "@/lib/git/types";
+import { providerLabel, type RepoStatus } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { useConfirm } from "@/lib/stores/confirm";
 import { refuseIfSwitched } from "@/lib/stores/notifications";
@@ -63,9 +65,11 @@ import {
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
+  HISTORY_REFRESHING_HINT,
   type MergeParentOp,
   revertCommitConfirm,
 } from "./commit-confirms";
+import { headAgrees } from "./editable-set";
 import { FileRowActions } from "./FileRowActions";
 import { MergeParentDialog, type MergePickTarget } from "./HistoryDialogs";
 import { useAmendWithConfirm } from "./useAmendCommit";
@@ -73,6 +77,14 @@ import { useAmendWithConfirm } from "./useAmendCommit";
 /** Where a revert or cherry-pick from the detail view goes once the commit's
  *  parents are read. */
 type MergeRoute = "dialog" | "plain" | "stale";
+
+/** Module-level so the selector's identity is stable; structural sharing keeps
+ *  an equal result stable too, so working-tree edits in the polled status don't
+ *  re-render the view. */
+const selectHead = (s: RepoStatus) => ({
+  oid: s.branch?.oid ?? null,
+  name: s.branch?.name ?? null,
+});
 
 export function CommitDetailView({
   repoPath,
@@ -235,6 +247,12 @@ export function CommitDetailView({
   // Same actions as the history list's right-click menu (minus the
   // dialog-driven ones), surfaced behind a visible ⋯ for discoverability.
   const log = useLog(repoPath);
+  // HEAD's oid (the Amend gate) and branch name (the cherry-pick prompt) alone,
+  // on the shared status entry other observers poll.
+  const head = useQuery({
+    ...repoStatusOptions(repoPath),
+    select: selectHead,
+  }).data;
   const { requestAmend, forcePushDialog } = useAmendWithConfirm(repoPath);
   const checkoutCommit = useCheckoutCommit(repoPath);
   const revertCommit = useRevertCommit(repoPath);
@@ -249,7 +267,11 @@ export function CommitDetailView({
   >(null);
   const prefetchFileDiff = usePrefetchCommitFileDiff(repoPath);
   const hoverPrefetch = useHoverPrefetch();
-  const isLatest = log.data?.pages[0]?.[0]?.hash === hash;
+  const logTop = log.data?.pages[0]?.[0]?.hash;
+  const isLatest = logTop === hash;
+  // Amend needs the log top AND status HEAD: an outside commit reaches status
+  // first, and an amend chosen in that window would land already held.
+  const isHead = isLatest && headAgrees(logTop, head?.oid);
   const onError = (e: unknown) => toastError(e);
 
   if (details.isPending || files.isPending) {
@@ -344,14 +366,12 @@ export function CommitDetailView({
     void revertCommit.mutateAsync({ hash }).catch(onError);
   }
 
-  // No branch name: this view doesn't subscribe to repo status, and doing so for
-  // one prompt's wording would re-render the diff pane on every status poll.
   async function doCherryPick() {
     if ((await routeMergeCommit("cherry-pick")) !== "plain") return;
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
-      .ask(cherryPickCommitConfirm(hash, null));
+      .ask(cherryPickCommitConfirm(hash, head?.name ?? null));
     if (!ok || refuseIfSwitched(pickIn, "nothing was cherry-picked")) return;
     if (promotionBlocksCheckout(repoPath)) {
       toast.info(PROMOTION_BLOCKS_CHECKOUT);
@@ -462,10 +482,12 @@ export function CommitDetailView({
             </DropdownMenuTrigger>
             <DropdownMenuContent className="min-w-56" align="end">
               <DropdownMenuItem
-                disabled={!isLatest}
+                className={MENU_HELD_ROW_CLASS}
+                disabled={!isHead}
                 onClick={() => requestAmend(hash)}
               >
                 Amend commit…
+                {isLatest && !isHead && HISTORY_REFRESHING_HINT}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={doCheckoutCommit}>
                 Checkout commit

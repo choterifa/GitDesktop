@@ -35,9 +35,9 @@ export function checkoutTagSuccessToast(tag: string) {
   return checkedOutDetached(tag);
 }
 
-/** What each op does, for its plain confirm. `branch` names the destination when
- *  the caller already holds repo status; without it the copy says "the current
- *  branch" rather than subscribing a view to status for one string. */
+/** What each op does, for its plain confirm. `branch` names the destination; a
+ *  null name (status not yet read, or a detached HEAD) falls back to "the
+ *  current branch". */
 const OP_EFFECT: Record<
   MergeParentOp,
   (hash: string, branch: string | null) => string
@@ -119,6 +119,10 @@ export const mergeParentPrompt = (op: MergeParentOp, hash: string) => ({
  *  reason inline (no tooltip) and would otherwise widen the menu. The full
  *  sentence reaches users through the Rust error itself — no TS copy exists. */
 export const RANGE_MERGE_ITEM_REASON = "includes a merge — pick it on its own";
+
+/** The disabled-reason suffix while the log and status reads disagree: what's
+ *  unpushed, and which commit is HEAD, are unknown until they agree again. */
+export const HISTORY_REFRESHING_HINT = " (refreshing history…)";
 
 /** A parentless commit has nothing to soft-reset to, so undo deletes the branch
  *  ref instead — the one undo that doesn't just re-stage in place. Scoped to the
