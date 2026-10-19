@@ -5,10 +5,12 @@ import { toast } from "sonner";
 import { usePlanStore } from "@/features/plan/store";
 import { useResearchStore } from "@/features/research/store";
 import { track } from "@/lib/analytics";
+import { presentError } from "@/lib/error-summary";
 import { validateRepo } from "@/lib/git/api";
 import type { RepoInfo } from "@/lib/git/types";
 import { migrateRepoData } from "@/lib/repo-data-migration";
 import { scriptsKeys } from "@/lib/scripts/queries";
+import { repoDisplayName } from "@/lib/settings/api";
 import {
   useAddRecentRepo,
   useRelocateRecentRepo,
@@ -19,7 +21,7 @@ import { useConfirm } from "@/lib/stores/confirm";
 import { repoNameFromPath } from "@/lib/stores/notifications";
 import { useUiStore } from "@/lib/stores/ui";
 import { isAppError } from "@/lib/tauri/invoke";
-import { toastError } from "@/lib/toast";
+import { toastComposedError, toastError } from "@/lib/toast";
 import { createOpenClaims } from "./open-claims";
 import { warmRepoShell } from "./repo-shell-prefetch";
 
@@ -133,7 +135,7 @@ export function useOpenRepoByPath() {
         // (alias or name), else the moved folder's basename.
         const oldRow = recentRepos?.find((r) => r.path === oldPath);
         const oldName =
-          oldRow?.alias?.trim() || oldRow?.name || repoNameFromPath(oldPath);
+          (oldRow && repoDisplayName(oldRow)) || repoNameFromPath(oldPath);
         const confirmed = await useConfirm.getState().ask({
           title: `Relocate "${oldName}"?`,
           body: `GitDesktop will point this entry at ${info.root} — its alias, local PRs, issues, review history, and settings will follow the folder. If this is a different repository, that data is merged in and can't be undone.`,
@@ -216,12 +218,20 @@ export function useOpenRepoByPath() {
             });
           }
         } else {
-          toastError(e);
+          // A folder git can't read is still a repository: git's own message,
+          // and no Locate/Remove offer to drop it from recents.
+          const row = recentRepos?.find((r) => r.path === path);
+          const name = (row && repoDisplayName(row)) || repoNameFromPath(path);
+          toastComposedError({
+            title: `Couldn't open ${name}`,
+            errors: [e],
+            description: presentError(e).summary,
+          });
         }
         return false;
       }
     },
-    [recordOpenAndTrack, locateAndReopen, removeRecent],
+    [recordOpenAndTrack, locateAndReopen, removeRecent, recentRepos],
   );
 }
 

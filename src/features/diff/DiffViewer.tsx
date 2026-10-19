@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dialog";
 import { ConflictFileView } from "@/features/repository/ConflictFileView";
 import { ConflictResolveView } from "@/features/repository/ConflictResolveView";
+import { statusReadFailed } from "@/features/repository/StatusReadError";
 import { clipTitleFromText } from "@/lib/clip-title";
 import type { SelectedLine } from "@/lib/git/api";
 import {
@@ -219,6 +220,7 @@ export function DiffViewer({ repoPath }: { repoPath: string }) {
         message={restingDiffMessage(
           status.isPending,
           status.data?.entries.length ?? 0,
+          statusReadFailed(status),
         )}
       />
     );
