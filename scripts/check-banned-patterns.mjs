@@ -426,6 +426,23 @@ const RAW_COPY_ICON_BUTTON_RE =
 // the two duplicates actually took, not the whole class.
 const KIND_BADGE_DEF_RE = /\bconst\s+KIND_BADGE\b/;
 
+// Reads "Binary files" as a whole string (line-break escape or `^` leads,
+// RegExp() strings too), a template's closing line, or a regex literal (plus
+// `[\n]`, `(?<=\n)`, `(?<![^\n])` leads); exact labels and quoted/code-spanned
+// mentions trip it: reword or allowlist. Not read: singular "Binary file" (UI
+// copy); extra text, other escapes or interpolation in or beside the words;
+// split or joined literals; a repeat in an exempt or allowlisted file; and
+// lines that stripComments blanks.
+const BINARY_MARKER_RE = new RegExp(
+  [
+    /(["'`])(?:\\{1,2}[nr]|\\x0[aA]|\\u000[aA]|\\u\{0*[aA]\}|\^)*[Bb]inary [Ff]iles ?\1/
+      .source,
+    /^\s*[Bb]inary [Ff]iles ?`/.source,
+    /\/(?:\\[nr]|\\x0[aA]|\\u000[aA]|\\u\{0*[aA]\}|\^|\[\\n\]|\(\?<!\[\^\\n\]\)|\(\?<=\\n\))*[Bb]inary [Ff]iles ?\??\//
+      .source,
+  ].join("|"),
+);
+
 // `<Activity` as a JSX open tag. The lookahead is what separates it from the
 // app's own `<ActivityDock>`/`<ActivityBell>`/`<ActivityStrip>` components, and
 // comment stripping is what keeps the many prose mentions of `<Activity>` clean.
@@ -5098,6 +5115,19 @@ export const CHECKS = [
     allowlist: [],
     message:
       "the change-kind letter, screen-reader label, and colour token come from KIND_BADGE in src/lib/git/change-kind-badge.ts — a second definition drifts one surface at a time, so the Changes list and the commit dialog's staged summary stop agreeing on the same file; import it rather than re-spelling the table",
+  },
+  {
+    name: "binary-marker-single-source",
+    // The helper module IS the idiom; everything else imports sectionIsBinary.
+    appliesTo: (file) => file !== "src/lib/git/diff-split.ts",
+    scan: perLine(BINARY_MARKER_RE),
+    allowlist: [
+      // stripBinarySections already matches the line-anchored
+      // "\nBinary files " literal.
+      "src/lib/ai/prompt.ts",
+    ],
+    message:
+      'the git binary-marker check lives in sectionIsBinary (src/lib/git/diff-split.ts) — a re-spelled "Binary files" literal or regex re-mints the loose-match class (a text diff whose CONTENT mentions binary files read as binary) or drifts from the line-anchored form one site at a time; import the helper',
   },
   {
     name: "lone-activity-boundary",

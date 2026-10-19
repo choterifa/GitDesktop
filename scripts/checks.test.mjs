@@ -258,6 +258,7 @@ const finishAndSurface = scanner("generator-dialog-finish-and-surface");
 const diffStatPair = scanner("hand-rolled-diff-stat");
 const diffStatSlot = scanner("list-row-diff-stat-slot");
 const kindBadge = scanner("kind-badge-single-source");
+const binaryMarker = scanner("binary-marker-single-source");
 const nullFallback = scanner("null-suspense-fallback");
 const preparingSlotHide = scanner("preparing-slot-hide");
 const bareGroupLabel = scanner("bare-group-label");
@@ -1445,6 +1446,99 @@ test("kind-badge-single-source exempts the shared module only", () => {
   assert.equal(appliesTo("src/lib/git/change-kind-badge.ts"), false);
   assert.equal(appliesTo("src/features/repository/FileRow.tsx"), true);
   assert.equal(appliesTo("src/features/commit/CommitDialog.tsx"), true);
+});
+
+test("binary-marker-single-source flags a re-spelled marker check", () => {
+  // Fixtures stay in this file: a shell argument would collapse the `\\n`.
+  for (const source of [
+    'isBinary: section.includes("Binary files "),',
+    'isBinary: section.includes("Binary files"),',
+    'isBinary: part.includes("\\nBinary files "),',
+    "isBinary: section.includes('Binary files '),",
+    "isBinary: section.includes(`\\nBinary files `),",
+    "const binary = /Binary files /.test(s);",
+    "const binary = /^Binary files /m.test(s);",
+    "const binary = /\\nBinary files /.test(s);",
+  ])
+    assert.deepEqual(binaryMarker(source), [1], `should flag ${source}`);
+  // Wrapped by the formatter: the literal still sits whole on its own line.
+  assert.deepEqual(
+    binaryMarker(
+      [
+        "isBinary: (fileSections.get(effectivePath) ?? '').includes(",
+        '  "Binary files ",',
+        "),",
+      ].join("\n"),
+    ),
+    [2],
+  );
+});
+
+test("binary-marker-single-source reads other newline spellings, cases and regex leads", () => {
+  for (const source of [
+    // String arm: any run of newline escapes, RegExp() strings, either case.
+    's.includes("\\r\\nBinary files ")',
+    's.includes("\\n\\nBinary files ")',
+    's.includes("\\x0aBinary files ")',
+    's.includes("\\u000aBinary files ")',
+    's.includes("\\u{a}Binary files ")',
+    's.toLowerCase().includes("\\nbinary files ")',
+    'new RegExp("^Binary files ", "m")',
+    'new RegExp("\\\\nBinary files ")',
+    // Template arm: the marker after a real newline inside a template.
+    "  Binary files `)",
+    // Regex arm: newline tokens, a class, the house lookbehinds, ` ?`, a case flag.
+    "/^\\nBinary files/.test(s)",
+    "/[\\n]Binary files /.test(s)",
+    "/\\x0aBinary files /.test(s)",
+    "/(?<![^\\n])Binary files /.test(s)",
+    "/(?<=\\n)Binary files /.test(s)",
+    "/Binary files ?/.test(s)",
+    "/binary files /i.test(s)",
+    // Fails closed by design: a quoted mention inside prose.
+    "'rows saying \"Binary files\" read bin'",
+  ])
+    assert.deepEqual(binaryMarker(source), [1], `should flag ${source}`);
+});
+
+test("binary-marker-single-source near misses stop at the arm they target", () => {
+  for (const source of [
+    // Template arm: opens on the words, but text, not a backtick, follows.
+    "  Binary files read \\`bin\\` in the list",
+    // String arm: quote and words match, but text, not the quote, follows.
+    's.includes("Binary files differ")',
+    // Regex arm: lead and words match, but pattern, not the slash, follows.
+    "/^Binary files .* differ$/m.test(s)",
+    // The singular is UI copy, so no arm reads it.
+    'const label = "Binary file";',
+    's.includes("\\nBinary file")',
+  ])
+    assert.deepEqual(binaryMarker(source), [], `should ignore ${source}`);
+});
+
+test("binary-marker-single-source leaves prose and the helper call alone", () => {
+  for (const source of [
+    // The live prose negatives: the words sit mid-string.
+    '"repo-relative. Binary files are rejected.",',
+    "its Staged row and what's still outside it on its Changes row. Binary files read",
+    'const label = "Binary files read `bin`";',
+    'import { sectionIsBinary } from "@/lib/git/diff-split";',
+    "isBinary: sectionIsBinary(section),",
+    // Comment stripping keeps a documented spelling clean.
+    '// the loose `includes("Binary files ")` matched hunk content',
+  ])
+    assert.deepEqual(binaryMarker(source), [], `should ignore ${source}`);
+});
+
+test("binary-marker-single-source exempts the helper module only", () => {
+  const { appliesTo, allowlist } = CHECKS.find(
+    (c) => c.name === "binary-marker-single-source",
+  );
+  assert.equal(appliesTo("src/lib/git/diff-split.ts"), false);
+  assert.equal(appliesTo("src/features/pulls/RemotePrView.tsx"), true);
+  assert.equal(appliesTo("src/features/pulls/PrCommitDetail.tsx"), true);
+  assert.equal(appliesTo("src/lib/ai/prompt.ts"), true);
+  assert.deepEqual(allowlist, ["src/lib/ai/prompt.ts"]);
 });
 
 test("null-suspense-fallback flags the literal on one line or wrapped", () => {
