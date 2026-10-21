@@ -103,6 +103,10 @@ publish to GitHub, GitLab, or Bitbucket, and fork.
   GitDesktop at its new home from the "no longer a git repository" notice.
   The entry keeps its alias and badges, and its local PRs, issues, review
   history, automations, and MCP server settings follow along.
+- **Folder workspace**: open a parent folder to discover its Git repositories
+  and operate on them side by side. Each panel has its own branch, changes,
+  staging, commit, fetch, pull, and push controls; open a repository's full view
+  for its history, pull requests, and other tools.
 - **macOS menu bar**: **File** carries **New / Open / Clone Repository…** and
   an **Open Recent** list of your last ten repos; **Settings…** sits in the
   GitDesktop menu. Items work from any screen.

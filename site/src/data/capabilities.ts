@@ -501,6 +501,11 @@ export const capabilities: Capability[] = [
   {
     group: "Repository & workspace",
     label:
+      "Open a folder of repositories side by side, with independent branch, staging, commit & sync controls",
+  },
+  {
+    group: "Repository & workspace",
+    label:
       "Worktree manager — create, switch, rename, lock, promote & remove, with a last-active time per worktree",
     highlight: true,
   },

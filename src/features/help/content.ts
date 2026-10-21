@@ -130,6 +130,16 @@ If a repo's folder was moved or deleted, opening it offers to **Locate…** its 
 settings, and its local PRs, issues, and review history follow along to the new
 location{{ai}}, as do its automations and MCP server settings{{/ai}}.
 
+## Open several repositories from one folder
+
+Choose **Open repository** and select a parent folder that contains multiple Git
+repositories. GitDesktop discovers repositories up to four folders below it and opens
+them side by side. Each panel has its own branch selector, changes, staging, commit,
+fetch, fast-forward pull, and push/publish controls, so an action stays scoped to that
+repository. A folder with one repository opens that repository normally. Choose **Open
+full view** on a panel for its history, pull requests, and other repository tools; close
+that view to return to the folder workspace.
+
 ## The repository menu
 
 Click the **⋮** menu next to the repo name for repo-wide actions:

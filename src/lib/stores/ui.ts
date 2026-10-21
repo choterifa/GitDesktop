@@ -8,12 +8,13 @@ import { startViewTransition } from "@/lib/view-transition";
 export type AppView =
   | "welcome"
   | "repo"
+  | "folder"
   | "settings"
   | "help"
   | "explore"
   | "mywork";
 /** The views that can sit UNDER an overlay — where closing one returns to. */
-type NonOverlayView = "welcome" | "repo";
+type NonOverlayView = "welcome" | "repo" | "folder";
 /** Views that overlay a real screen. Derived from {@link AppView}, and
  *  `OVERLAY_VIEWS` below is exhaustive over it, so a new AppView member stops
  *  compiling until it is classified as one or the other. */
@@ -111,6 +112,11 @@ export interface SelectedIssue {
   /** Local issue id, the remote issue number as a string, or the Jira issue key
    *  (e.g. `PROJ-123`). */
   id: string;
+}
+
+export interface FolderWorkspace {
+  root: string;
+  repositories: RepoInfo[];
 }
 
 /** Selected security finding, one variant per category the Findings tab lists.
@@ -311,6 +317,7 @@ interface UiState {
   queuedMerges: Record<string, true>;
   repoPath: string | null;
   repoName: string | null;
+  folderWorkspace: FolderWorkspace | null;
   repoTab: RepoTab;
   /** Branch to compare the current branch against, on the Compare tab. */
   compareBranch: string | null;
@@ -426,6 +433,8 @@ interface UiState {
   interactionEpoch: number;
 
   openRepo: (info: RepoInfo) => void;
+  openFolderWorkspace: (workspace: FolderWorkspace) => void;
+  closeFolderWorkspace: () => void;
   closeRepo: () => void;
   /** Open a repo (if not already open) and select a PR — used by a notification
    *  row's click-through. `section` is the sub-tab to land on, or null to leave
@@ -725,6 +734,7 @@ export const useUiStore = create<UiState>()((set, get) => {
     queuedMerges: {},
     repoPath: null,
     repoName: null,
+    folderWorkspace: null,
     repoTab: "history",
     compareBranch: null,
     selectedPr: null,
@@ -776,12 +786,49 @@ export const useUiStore = create<UiState>()((set, get) => {
         repoViewMotion(),
       );
     },
-    closeRepo: () => {
+    openFolderWorkspace: (workspace) => {
+      bumpEpochNow();
+      startViewTransition(() =>
+        set({
+          view: "folder",
+          previousView: "folder",
+          folderWorkspace: workspace,
+          repoPath: null,
+          repoName: null,
+          repoTab: "changes",
+          ...CROSS_REPO_RESET,
+        }),
+      );
+    },
+    closeFolderWorkspace: () => {
       bumpEpochNow();
       startViewTransition(() =>
         set({
           view: "welcome",
           previousView: "welcome",
+          folderWorkspace: null,
+          repoPath: null,
+          repoName: null,
+          repoTab: "changes",
+          ...CROSS_REPO_RESET,
+        }),
+      );
+    },
+    closeRepo: () => {
+      bumpEpochNow();
+      const state = get();
+      const returnToFolder = Boolean(
+        state.repoPath &&
+          state.folderWorkspace?.repositories.some(
+            (repo) => normPath(repo.root) === normPath(state.repoPath ?? ""),
+          ),
+      );
+      const nextView = returnToFolder ? "folder" : "welcome";
+      startViewTransition(() =>
+        set({
+          view: nextView,
+          previousView: nextView,
+          ...(!returnToFolder ? { folderWorkspace: null } : {}),
           repoPath: null,
           repoName: null,
           repoTab: "changes",

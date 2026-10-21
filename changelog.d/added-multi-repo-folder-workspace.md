@@ -1,0 +1,1 @@
+- Open multiple repositories from one folder and manage each repository side by side.

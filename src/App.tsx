@@ -14,6 +14,7 @@ import { ExploreScreen } from "@/features/explore/ExploreScreen";
 import { HelpScreen } from "@/features/help/HelpScreen";
 import { MyWorkScreen } from "@/features/mywork/MyWorkScreen";
 import { RepoNotificationsDialogHost } from "@/features/notifications/RepoNotificationsDialog";
+import { FolderWorkspaceScreen } from "@/features/repository/FolderWorkspaceScreen";
 import { RepositoryView } from "@/features/repository/RepositoryView";
 import { usePickAndOpenRepo } from "@/features/repository/useOpenRepoByPath";
 import { SettingsScreen } from "@/features/settings/SettingsScreen";
@@ -312,6 +313,7 @@ function App() {
       <div className="flex h-screen flex-col overflow-clip">
         {view === "welcome" && <WelcomeScreen />}
         {view === "repo" && <RepositoryView />}
+        {view === "folder" && <FolderWorkspaceScreen />}
         {view === "settings" && <SettingsScreen />}
         {view === "help" && <HelpScreen />}
         {view === "explore" && <ExploreScreen />}

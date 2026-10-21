@@ -1,12 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { usePlanStore } from "@/features/plan/store";
 import { useResearchStore } from "@/features/research/store";
 import { track } from "@/lib/analytics";
 import { presentError } from "@/lib/error-summary";
-import { validateRepo } from "@/lib/git/api";
+import { discoverRepos, validateRepo } from "@/lib/git/api";
 import type { RepoInfo } from "@/lib/git/types";
 import { migrateRepoData } from "@/lib/repo-data-migration";
 import { scriptsKeys } from "@/lib/scripts/queries";
@@ -297,11 +298,51 @@ export function useOpenWorktree() {
  */
 export function usePickAndOpenRepo() {
   const openByPath = useOpenRepoByPath();
+  const addRecentRepo = useAddRecentRepo();
+  const openFolderWorkspace = useUiStore((s) => s.openFolderWorkspace);
+  const { t } = useTranslation("repository");
   return useCallback(async () => {
     const path = await openDialog({
       directory: true,
-      title: "Open repository",
+      title: t("folderWorkspace.openDialog"),
     });
-    if (typeof path === "string") await openByPath(path, "picker");
-  }, [openByPath]);
+    if (typeof path !== "string") return;
+    const stillCurrent = claimRepoOpen();
+    try {
+      const info = await validateRepo(path);
+      await openByPath(info.root, "picker", stillCurrent);
+      return;
+    } catch (error) {
+      if (!isAppError(error) || error.kind !== "notARepo") {
+        toastError(error);
+        return;
+      }
+    }
+    try {
+      const repositories = await discoverRepos(path);
+      if (!stillCurrent()) return;
+      if (repositories.length === 0) {
+        toast.error(t("folderWorkspace.noRepositories"));
+        return;
+      }
+      if (repositories.length === 1) {
+        await openByPath(repositories[0].root, "picker", stillCurrent);
+        return;
+      }
+      void Promise.all(
+        repositories.map((repo) =>
+          addRecentRepo
+            .mutateAsync({ path: repo.root, name: repo.name })
+            .catch(() => undefined),
+        ),
+      );
+      openFolderWorkspace({ root: path, repositories });
+    } catch (error) {
+      if (isAppError(error) && error.kind === "invalidArgument") {
+        toast.error(t("folderWorkspace.scanFailed"));
+      } else {
+        toastError(error);
+      }
+    }
+  }, [addRecentRepo, openByPath, openFolderWorkspace, t]);
 }

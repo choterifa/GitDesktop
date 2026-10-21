@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::State;
@@ -367,6 +368,115 @@ pub async fn validate_repo(path: String) -> AppResult<RepoInfo> {
         .unwrap_or(&root)
         .to_string();
     Ok(RepoInfo { root, name })
+}
+
+const DISCOVERY_MAX_DEPTH: usize = 4;
+const DISCOVERY_MAX_DIRECTORIES: usize = 2000;
+const DISCOVERY_MAX_REPOSITORIES: usize = 24;
+const DISCOVERY_IGNORED_DIRECTORIES: &[&str] = &[
+    ".cache",
+    ".git",
+    ".next",
+    ".nuxt",
+    ".pnpm-store",
+    ".turbo",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "pods",
+    "target",
+    "vendor",
+];
+
+fn scan_repo_folders(
+    dir: &Path,
+    depth: usize,
+    visited: &mut usize,
+    repos: &mut Vec<RepoInfo>,
+) -> AppResult<()> {
+    // A nested repo owns its descendants (including submodules); don't surface a
+    // submodule as a sibling checkout in the folder workspace.
+    if dir.join(".git").exists() {
+        if repos.len() == DISCOVERY_MAX_REPOSITORIES {
+            return Err(AppError::InvalidArgument(format!(
+                "Folder contains more than {DISCOVERY_MAX_REPOSITORIES} repositories; choose a narrower folder."
+            )));
+        }
+        let root = dir.to_string_lossy().into_owned();
+        let name = dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.clone());
+        repos.push(RepoInfo { root, name });
+        return Ok(());
+    }
+    if depth >= DISCOVERY_MAX_DEPTH {
+        return Ok(());
+    }
+
+    let mut children = Vec::<PathBuf>::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if DISCOVERY_IGNORED_DIRECTORIES.contains(&name.as_str()) {
+            continue;
+        }
+        children.push(entry.path());
+    }
+    children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    for child in children {
+        *visited += 1;
+        if *visited > DISCOVERY_MAX_DIRECTORIES {
+            return Err(AppError::InvalidArgument(format!(
+                "Folder scan exceeded {DISCOVERY_MAX_DIRECTORIES} directories; choose a narrower folder."
+            )));
+        }
+        scan_repo_folders(&child, depth + 1, visited, repos)?;
+    }
+    Ok(())
+}
+
+/// Finds Git checkouts below a selected parent folder. Stops at each checkout so
+/// submodules and nested repositories are not mistaken for sibling projects.
+#[tauri::command]
+pub async fn discover_repositories(path: String) -> AppResult<Vec<RepoInfo>> {
+    let root = PathBuf::from(path);
+    if !root.is_dir() {
+        return Err(AppError::InvalidArgument(
+            "The selected workspace path is not a directory.".to_string(),
+        ));
+    }
+    let scan_root = root.clone();
+    let mut repos = tokio::task::spawn_blocking(move || {
+        let mut repos = Vec::new();
+        let mut visited = 0;
+        scan_repo_folders(&scan_root, 0, &mut visited, &mut repos)?;
+        repos.sort_by(|a, b| a.root.cmp(&b.root));
+        Ok::<_, AppError>(repos)
+    })
+    .await
+    .map_err(|error| AppError::Io(std::io::Error::other(error)))??;
+
+    // A stray or damaged `.git` marker isn't enough to show an unusable panel.
+    // Reuse the same Git validation as the regular open flow before exposing it.
+    let mut valid_repos = Vec::with_capacity(repos.len());
+    for repo in repos.drain(..) {
+        match validate_repo(repo.root.clone()).await {
+            Ok(validated) => valid_repos.push(validated),
+            Err(AppError::NotARepo(_)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let mut repos = valid_repos;
+    repos.sort_by(|a, b| a.root.cmp(&b.root));
+    Ok(repos)
 }
 
 /// Whether `path` is still a directory on disk — no git spawn, so "the folder is

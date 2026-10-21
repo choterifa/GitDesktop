@@ -141,6 +141,7 @@ pub fn run() {
         .manage(store_lock_commands::StoreLockState::default())
         .invoke_handler(tauri::generate_handler![
             git::repo::check_git_installed,
+            git::repo::discover_repositories,
             git::repo::validate_repo,
             git::repo::path_is_dir,
             git::repo::clone_repo,

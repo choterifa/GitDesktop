@@ -12,6 +12,10 @@ export const checkGitInstalled = () => invoke<GitInfo>("check_git_installed");
 export const validateRepo = (path: string) =>
   invoke<RepoInfo>("validate_repo", { path });
 
+/** Finds Git checkouts below a selected parent directory. */
+export const discoverRepos = (path: string) =>
+  invoke<RepoInfo[]>("discover_repositories", { path });
+
 /** Whether a path is still a directory on disk — a bare fs check, no git. Lets a
  *  deleted checkout be named as such instead of surfacing as whatever the
  *  repo-scoped read failed with. */
