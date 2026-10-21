@@ -617,6 +617,11 @@
   "Select a pull request": "Select a pull request",
   "folderWorkspace": {
     "title": "Folder workspace · {{count}} repositories",
+    "recentHeading": "Folder workspaces",
+    "repoCount": "{{count}} repositories",
+    "openRecentAria": "Open folder {{folder}} with {{count}} repositories",
+    "history": "History",
+    "changes": "Changes",
     "openDialog": "Open a folder with repositories…",
     "noRepositories": "No Git repositories were found in this folder.",
     "scanFailed": "This folder couldn't be scanned. It may be too large or no longer available.",

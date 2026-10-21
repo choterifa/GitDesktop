@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { HistoryGraph } from "@/features/repository/HistoryGraph";
 import { useBranches, useCheckoutBranch } from "@/lib/git/queries/branches";
 import { useRemotes } from "@/lib/git/queries/remotes";
 import { useRepoStatus } from "@/lib/git/queries/status";
@@ -103,6 +104,7 @@ function RepoPanel({ folder, repo }: { folder: string; repo: RepoInfo }) {
   const pull = usePull(repo.root);
   const push = usePush(repo.root);
   const [message, setMessage] = useState("");
+  const [panelView, setPanelView] = useState<"history" | "changes">("history");
 
   const entries = status.data?.entries ?? [];
   const staged = entries.filter((entry) => entry.staged !== null);
@@ -403,104 +405,149 @@ function RepoPanel({ folder, repo }: { folder: string; repo: RepoInfo }) {
         </span>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-        <ChangeList
-          action="stage"
-          entries={unstaged}
-          paths={stageablePaths}
-          busy={!statusReady || !operationReady || worktreeBusy}
-          onRun={(paths) => void stage.mutateAsync(paths).catch(toastError)}
-          label={t("folderWorkspace.unstaged")}
-          empty={
-            status.isPending
-              ? t("folderWorkspace.loadingStatus")
-              : status.isError
-                ? t("folderWorkspace.statusUnavailable")
-                : t("folderWorkspace.noUnstaged")
-          }
-          allLabel={t("folderWorkspace.stageAll")}
-          t={t}
-        />
-        <ChangeList
-          action="unstage"
-          entries={staged}
-          paths={unstagedPaths}
-          busy={!statusReady || !operationReady || worktreeBusy}
-          onRun={(paths) => void unstage.mutateAsync(paths).catch(toastError)}
-          label={t("folderWorkspace.staged")}
-          empty={
-            status.isPending
-              ? t("folderWorkspace.loadingStatus")
-              : status.isError
-                ? t("folderWorkspace.statusUnavailable")
-                : t("folderWorkspace.noStaged")
-          }
-          allLabel={t("folderWorkspace.unstageAll")}
-          t={t}
-        />
+      <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          aria-pressed={panelView === "history"}
+          className={panelView === "history" ? "bg-muted font-medium" : ""}
+          onClick={() => setPanelView("history")}
+        >
+          {t("folderWorkspace.history")}
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          aria-pressed={panelView === "changes"}
+          className={panelView === "changes" ? "bg-muted font-medium" : ""}
+          onClick={() => setPanelView("changes")}
+        >
+          {t("folderWorkspace.changes")}
+          {hasChanges ? (
+            <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+              {entries.length}
+            </span>
+          ) : null}
+        </Button>
       </div>
 
-      <footer className="border-t border-border p-3">
-        <label className="mb-1.5 block text-[10px] font-medium text-muted-foreground">
-          {t("folderWorkspace.commitMessage")}
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            value={message}
-            onChange={(event) => setMessage(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                void commitStaged();
-              }
-            }}
-            placeholder={t("folderWorkspace.commitPlaceholder")}
-            aria-label={t("folderWorkspace.commitMessage")}
-            className="h-8 min-w-0 flex-1 border border-input bg-background px-2 text-xs outline-none placeholder:text-muted-foreground/80 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
-            disabled={
-              !statusReady ||
-              !operationReady ||
-              staged.length === 0 ||
-              commit.isPending
-            }
+      {panelView === "history" ? (
+        <div className="min-h-0 flex-1">
+          <HistoryGraph
+            repoPath={repo.root}
+            active
+            onSelectCommit={(hash) => openRepo(repo, hash)}
           />
-          <Button
-            type="button"
-            size="sm"
-            disabled={
-              !statusReady ||
-              !operationReady ||
-              !message.trim() ||
-              staged.length === 0 ||
-              commit.isPending ||
-              !branch
-            }
-            onClick={() => void commitStaged()}
-          >
-            {commit.isPending ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <CheckIcon data-icon="inline-start" aria-hidden />
-            )}
-            {t("folderWorkspace.commit")}
-          </Button>
         </div>
-        {hasChanges ? (
-          <p className="mt-1.5 text-[10px] text-muted-foreground">
-            {t("folderWorkspace.commitBeforeSwitch")}
-          </p>
-        ) : null}
-        {operationActive ? (
-          <p className="mt-1.5 text-[10px] text-warning">
-            {t("folderWorkspace.finishOperationInFullView")}
-          </p>
-        ) : null}
-        {remotes.isSuccess && !hasRemote ? (
-          <p className="mt-1.5 text-[10px] text-muted-foreground">
-            {t("folderWorkspace.noRemote")}
-          </p>
-        ) : null}
-      </footer>
+      ) : (
+        <>
+          <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+            <ChangeList
+              action="stage"
+              entries={unstaged}
+              paths={stageablePaths}
+              busy={!statusReady || !operationReady || worktreeBusy}
+              onRun={(paths) => void stage.mutateAsync(paths).catch(toastError)}
+              label={t("folderWorkspace.unstaged")}
+              empty={
+                status.isPending
+                  ? t("folderWorkspace.loadingStatus")
+                  : status.isError
+                    ? t("folderWorkspace.statusUnavailable")
+                    : t("folderWorkspace.noUnstaged")
+              }
+              allLabel={t("folderWorkspace.stageAll")}
+              t={t}
+            />
+            <ChangeList
+              action="unstage"
+              entries={staged}
+              paths={unstagedPaths}
+              busy={!statusReady || !operationReady || worktreeBusy}
+              onRun={(paths) =>
+                void unstage.mutateAsync(paths).catch(toastError)
+              }
+              label={t("folderWorkspace.staged")}
+              empty={
+                status.isPending
+                  ? t("folderWorkspace.loadingStatus")
+                  : status.isError
+                    ? t("folderWorkspace.statusUnavailable")
+                    : t("folderWorkspace.noStaged")
+              }
+              allLabel={t("folderWorkspace.unstageAll")}
+              t={t}
+            />
+          </div>
+
+          <footer className="border-t border-border p-3">
+            <label className="mb-1.5 block text-[10px] font-medium text-muted-foreground">
+              {t("folderWorkspace.commitMessage")}
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                value={message}
+                onChange={(event) => setMessage(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    (event.ctrlKey || event.metaKey)
+                  ) {
+                    event.preventDefault();
+                    void commitStaged();
+                  }
+                }}
+                placeholder={t("folderWorkspace.commitPlaceholder")}
+                aria-label={t("folderWorkspace.commitMessage")}
+                className="h-8 min-w-0 flex-1 border border-input bg-background px-2 text-xs outline-none placeholder:text-muted-foreground/80 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                disabled={
+                  !statusReady ||
+                  !operationReady ||
+                  staged.length === 0 ||
+                  commit.isPending
+                }
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={
+                  !statusReady ||
+                  !operationReady ||
+                  !message.trim() ||
+                  staged.length === 0 ||
+                  commit.isPending ||
+                  !branch
+                }
+                onClick={() => void commitStaged()}
+              >
+                {commit.isPending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <CheckIcon data-icon="inline-start" aria-hidden />
+                )}
+                {t("folderWorkspace.commit")}
+              </Button>
+            </div>
+            {hasChanges ? (
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                {t("folderWorkspace.commitBeforeSwitch")}
+              </p>
+            ) : null}
+            {operationActive ? (
+              <p className="mt-1.5 text-[10px] text-warning">
+                {t("folderWorkspace.finishOperationInFullView")}
+              </p>
+            ) : null}
+            {remotes.isSuccess && !hasRemote ? (
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                {t("folderWorkspace.noRemote")}
+              </p>
+            ) : null}
+          </footer>
+        </>
+      )}
     </section>
   );
 }

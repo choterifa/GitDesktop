@@ -2,6 +2,7 @@ import {
   BuildingsIcon,
   CloudIcon,
   FolderIcon,
+  FolderOpenIcon,
   GitForkIcon,
   GlobeSimpleIcon,
   LockSimpleIcon,
@@ -10,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { ProviderIcon } from "@/components/provider-icon";
 import {
@@ -26,6 +28,7 @@ import { copyText } from "@/lib/clipboard";
 import { suppressContextMenu } from "@/lib/context-menu";
 import { applyFrozenOrder, frozenPathKey } from "@/lib/frozen-order";
 import {
+  discoverRepos,
   forgeRepoUrl,
   forgeRepoVisibility,
   openInTerminal,
@@ -46,6 +49,7 @@ import {
   usePersistRepoOwners,
   useSettings,
 } from "@/lib/settings/queries";
+import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -53,7 +57,7 @@ import {
   FILTER_ROW_CLASS,
   LIST_VIEWPORT_CLASS,
 } from "./repo-list-sizes";
-import { useOpenRepoByPath } from "./useOpenRepoByPath";
+import { claimRepoOpen, useOpenRepoByPath } from "./useOpenRepoByPath";
 
 const RECENT_COUNT = 5;
 const OTHER_GROUP = "Other";
@@ -64,6 +68,45 @@ const REPO_LISTBOX_ID = "repo-list-listbox";
  *  unique key (already the row's `data-repo-path`). */
 const repoOptionId = (path: string) =>
   `repo-list-${path.replace(/[^\w-]/g, "_")}`;
+
+interface RecentFolderGroup {
+  path: string;
+  name: string;
+  repositories: RecentRepo[];
+}
+
+function parentFolder(path: string): string {
+  const clean = path.replace(/[\\/]+$/, "");
+  const separator = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  if (separator < 0) return clean;
+  return separator === 2 && clean[1] === ":"
+    ? clean.slice(0, separator + 1)
+    : clean.slice(0, separator);
+}
+
+function folderName(path: string): string {
+  return (
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .at(-1) || path
+  );
+}
+
+function groupRecentFolders(repos: RecentRepo[]): RecentFolderGroup[] {
+  const groups = new Map<string, RecentFolderGroup>();
+  for (const repo of repos) {
+    const path = parentFolder(repo.path);
+    const key = path.replace(/\\/g, "/").toLocaleLowerCase();
+    const group = groups.get(key);
+    if (group) group.repositories.push(repo);
+    else
+      groups.set(key, { path, name: folderName(path), repositories: [repo] });
+  }
+  return [...groups.values()]
+    .filter((group) => group.repositories.length > 1)
+    .sort((a, b) => b.repositories.length - a.repositories.length);
+}
 
 // Paths whose visibility probe has already been attempted this app session, so
 // a failing probe (e.g. a signed-out provider) is retried at most once per
@@ -118,11 +161,14 @@ export function RepoList({
   onOpened,
   onAliasRepo,
   onRemoveRepo,
+  showFolderWorkspaces = false,
 }: {
   currentPath?: string | null;
   onOpened?: () => void;
   onAliasRepo: (repo: RecentRepo) => void;
   onRemoveRepo: (repo: RecentRepo) => void;
+  /** Shows parent folders containing multiple recent repos (Welcome only). */
+  showFolderWorkspaces?: boolean;
 }) {
   const { t } = useTranslation("repository");
   const settings = useSettings();
@@ -131,9 +177,13 @@ export function RepoList({
   const persistOwners = usePersistRepoOwners();
   const queryClient = useQueryClient();
   const open = useOpenRepoByPath();
+  const openFolderWorkspace = useUiStore((s) => s.openFolderWorkspace);
   const [filter, setFilter] = useState("");
   const [highlight, setHighlight] = useState(-1);
   const [openingPath, setOpeningPath] = useState<string | null>(null);
+  const [openingFolderPath, setOpeningFolderPath] = useState<string | null>(
+    null,
+  );
   // The row order at an open's click, held until the open resolves false: the
   // recents write moves the opened row to the top while the switch still waits on
   // its warm-up, and a successful open unmounts this list (popover close, the
@@ -256,6 +306,19 @@ export function RepoList({
   }, [owners.data, recents]);
 
   const q = filter.trim().toLowerCase();
+  const folderGroups = showFolderWorkspaces
+    ? groupRecentFolders(recents).filter(
+        (group) =>
+          !q ||
+          group.name.toLowerCase().includes(q) ||
+          group.path.toLowerCase().includes(q) ||
+          group.repositories.some(
+            (repo) =>
+              repo.name.toLowerCase().includes(q) ||
+              (repo.alias ?? "").toLowerCase().includes(q),
+          ),
+      )
+    : [];
   // Frozen BEFORE the Recent slice and the owner grouping, so section membership
   // holds too; rows that moved between sections would remount under new keys.
   const ordered = applyFrozenOrder(recents, frozenOrder, (r) =>
@@ -313,6 +376,24 @@ export function RepoList({
       onOpened?.();
     } finally {
       setOpeningPath(null);
+    }
+  }
+
+  async function handleOpenFolder(path: string) {
+    const stillCurrent = claimRepoOpen();
+    setOpeningFolderPath(path);
+    try {
+      const repositories = await discoverRepos(path);
+      if (!stillCurrent()) return;
+      if (repositories.length === 0) {
+        toast.error(t("folderWorkspace.noRepositories"));
+        return;
+      }
+      openFolderWorkspace({ root: path, repositories });
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setOpeningFolderPath(null);
     }
   }
 
@@ -389,6 +470,44 @@ export function RepoList({
         />
       </div>
       <ScrollArea className={LIST_VIEWPORT_CLASS} ref={listRef}>
+        {folderGroups.length > 0 ? (
+          <div className="border-b border-border px-1 pb-1">
+            <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              {t("folderWorkspace.recentHeading")}
+            </p>
+            {folderGroups.map((group) => (
+              <button
+                key={group.path}
+                type="button"
+                title={group.path}
+                aria-label={t("folderWorkspace.openRecentAria", {
+                  folder: group.name,
+                  count: group.repositories.length,
+                })}
+                className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-muted/60 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                disabled={openingFolderPath !== null || openingPath !== null}
+                onClick={() => void handleOpenFolder(group.path)}
+              >
+                {openingFolderPath === group.path ? (
+                  <Spinner className="size-3.5 shrink-0" />
+                ) : (
+                  <FolderOpenIcon
+                    className="size-3.5 shrink-0 text-primary"
+                    aria-hidden
+                  />
+                )}
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  {group.name}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {t("folderWorkspace.repoCount", {
+                    count: group.repositories.length,
+                  })}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <ContextMenu>
           <ContextMenuTrigger
             render={

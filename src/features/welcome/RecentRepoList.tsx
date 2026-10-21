@@ -1,6 +1,6 @@
 import { FolderDashedIcon } from "@phosphor-icons/react";
-import { useTranslation } from "react-i18next";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   RemoveRepoDialog,
   RepoAliasDialog,
@@ -44,6 +44,7 @@ export function RecentRepoList() {
           <RepoList
             onAliasRepo={setAliasTarget}
             onRemoveRepo={setRemoveTarget}
+            showFolderWorkspaces
           />
         </div>
       )}

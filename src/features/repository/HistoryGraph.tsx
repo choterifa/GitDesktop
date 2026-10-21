@@ -431,9 +431,11 @@ function VirtualGraphRows({
 export function HistoryGraph({
   repoPath,
   active,
+  onSelectCommit,
 }: {
   repoPath: string;
   active: boolean;
+  onSelectCommit?: (hash: string) => void;
 }) {
   const { t } = useTranslation("history");
   const graph = useHistoryGraph(repoPath, active);
@@ -510,7 +512,7 @@ export function HistoryGraph({
       <VirtualGraphRows
         layout={layout}
         graphWidth={graphWidth}
-        onSelect={selectCommit}
+        onSelect={onSelectCommit ?? selectCommit}
       />
       {graph.isFetchNextPageError ? (
         <div

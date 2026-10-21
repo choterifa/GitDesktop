@@ -432,7 +432,7 @@ interface UiState {
    *  BEFORE invoking a navigator and never re-reads it after. */
   interactionEpoch: number;
 
-  openRepo: (info: RepoInfo) => void;
+  openRepo: (info: RepoInfo, commitHash?: string) => void;
   openFolderWorkspace: (workspace: FolderWorkspace) => void;
   closeFolderWorkspace: () => void;
   closeRepo: () => void;
@@ -768,7 +768,7 @@ export const useUiStore = create<UiState>()((set, get) => {
     draftKeyRemaps: {},
     interactionEpoch: 0,
 
-    openRepo: (info) => {
+    openRepo: (info, commitHash) => {
       bumpEpochNow();
       startViewTransition(
         () =>
@@ -782,6 +782,7 @@ export const useUiStore = create<UiState>()((set, get) => {
             // commitDrafts (keyed by repo+branch) and CommitBox reloads the new
             // repo's draft once its branch is known.
             ...CROSS_REPO_RESET,
+            ...(commitHash ? { selectedCommitHash: commitHash } : {}),
           }),
         repoViewMotion(),
       );

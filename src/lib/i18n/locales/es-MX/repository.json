@@ -617,6 +617,11 @@
   "Select a pull request": "Selecciona una solicitud de incorporación de cambios",
   "folderWorkspace": {
     "title": "Espacio de carpeta · {{count}} repositorios",
+    "recentHeading": "Carpetas de trabajo",
+    "repoCount": "{{count}} repositorios",
+    "openRecentAria": "Abrir la carpeta {{folder}} con {{count}} repositorios",
+    "history": "Historial",
+    "changes": "Cambios",
     "openDialog": "Abrir una carpeta con repositorios…",
     "noRepositories": "No se encontraron repositorios Git en esta carpeta.",
     "scanFailed": "No se pudo revisar esta carpeta. Puede ser demasiado grande o ya no estar disponible.",
