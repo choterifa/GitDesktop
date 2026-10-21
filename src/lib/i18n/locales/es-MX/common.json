@@ -304,5 +304,13 @@
   "Some projects aren't shown.": "No se muestran algunos proyectos.",
   "Unavailable": "No disponible",
   "more": "más",
-  "Repository commit graph": "Grafo de commits del repositorio"
+  "Repository commit graph": "Grafo de commits del repositorio",
+  "Couldn't refresh the status — showing the last read.": "No se pudo actualizar el estado; se muestra la última lectura.",
+  "Retry reading the status": "Volver a leer el estado",
+  "Show the status error details": "Mostrar los detalles del error de estado",
+  "The branch switched to {{branch}} before the amend ran, so the amend landed there. The commit it replaced is in the reflog.": "La rama cambió a {{branch}} antes de ejecutar la modificación, así que el commit se aplicó allí. El commit que reemplazó sigue en el reflog.",
+  "HEAD was detached before the amend ran, so the amend landed there. The commit it replaced is in the reflog.": "HEAD quedó separado antes de ejecutar la modificación, así que el commit se aplicó allí. El commit que reemplazó sigue en el reflog.",
+  "Another Git process committed first, so the amend rewrote {{actual}} instead of {{expected}}. The original {{actual}} is in the reflog.": "Otro proceso de Git creó un commit primero; por eso la modificación reescribió {{actual}} en vez de {{expected}}. El commit original {{actual}} sigue en el reflog.",
+  "Another Git process committed first, so the amend rewrote a different commit than the one shown. The original is in the reflog.": "Otro proceso de Git creó un commit primero, así que la modificación reescribió uno distinto del que se muestra. El original sigue en el reflog.",
+  "Loading changes…": "Cargando cambios…"
 }

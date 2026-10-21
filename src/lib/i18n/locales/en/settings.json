@@ -688,5 +688,15 @@
   "store.": "store.",
   "No custom commands yet. Add one, or define": "No custom commands yet. Add one, or define",
   "in a repo to share them with your team.": "in a repo to share them with your team.",
-  "Removed \"{{name}}\"": "Removed \"{{name}}\""
+  "Removed \"{{name}}\"": "Removed \"{{name}}\"",
+  "Settings saved, but some secret values couldn't be stored in your keychain. Save again to retry.": "Settings saved, but some secret values couldn't be stored in your keychain. Save again to retry.",
+  "Secret \"{{key}}\" on \"{{name}}\"": "Secret \"{{key}}\" on \"{{name}}\"",
+  "the environment variable": "the environment variable",
+  "the header": "the header",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its name can only use letters, numbers, dots, dashes and underscores.": "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its name can only use letters, numbers, dots, dashes and underscores.",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its value isn't a string.": "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its value isn't a string.",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: Windows allows at most {{count}} characters.": "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: Windows allows at most {{count}} characters.",
+  "Secret associated with {{secretType}} \"{{key}}\" can only use letters, numbers, dots, dashes and underscores in its name.": "Secret associated with {{secretType}} \"{{key}}\" can only use letters, numbers, dots, dashes and underscores in its name.",
+  "Secret associated with {{secretType}} \"{{key}}\" is too long for your keychain: Windows allows at most {{count}} characters.": "Secret associated with {{secretType}} \"{{key}}\" is too long for your keychain: Windows allows at most {{count}} characters.",
+  "This server's id (edited in your settings file) can only use letters, numbers, dots, dashes and underscores to store secrets.": "This server's id (edited in your settings file) can only use letters, numbers, dots, dashes and underscores to store secrets."
 }

@@ -115,7 +115,11 @@ import {
   type RemotePrResolveHandle,
 } from "@/lib/git/api";
 import { displayLogin } from "@/lib/git/bot-login";
-import { splitUnifiedDiff } from "@/lib/git/diff-split";
+import {
+  binaryRowPaths,
+  sectionIsBinary,
+  splitUnifiedDiff,
+} from "@/lib/git/diff-split";
 import { useForgeGhHost } from "@/lib/git/host";
 import {
   forgeFeatureReady,
@@ -2388,6 +2392,19 @@ export function RemotePrView({
     () => splitUnifiedDiff(prDiff.data ?? ""),
     [prDiff.data],
   );
+  // The pane keeps rendering the previous PR's diff through a switch, so its lines
+  // can belong to another PR than the `number` a new thread would be created under.
+  // Both reads key on shownNumber but settle independently, and showsLoadingFrame
+  // hides the details placeholder only in the hold's loading phase.
+  const diffStale = detailsPlaceholder || prDiff.isPlaceholderData;
+  // No binary flag from a previous PR's placeholder diff or details.
+  const binaryPaths = useMemo(
+    () =>
+      diffStale
+        ? new Set<string>()
+        : binaryRowPaths(pr?.files ?? [], fileSections),
+    [diffStale, pr?.files, fileSections],
+  );
 
   // Reset per-PR view state when a different PR is shown — a render-time state
   // adjustment, not an effect. Keyed on the lens-bearing identity, not the number:
@@ -2879,10 +2896,9 @@ export function RemotePrView({
                 variant="outline"
                 size="sm"
                 className="cursor-pointer"
-                disabled={details.isFetching}
                 onClick={() => details.refetch()}
               >
-                {details.isFetching ? "Retrying…" : "Retry"}
+                Retry
               </Button>
             </div>
           ) : undefined
@@ -3001,9 +3017,7 @@ export function RemotePrView({
       ? {
           filePath: effectivePath,
           text: fileSections.get(effectivePath) ?? "",
-          isBinary: (fileSections.get(effectivePath) ?? "").includes(
-            "Binary files ",
-          ),
+          isBinary: sectionIsBinary(fileSections.get(effectivePath) ?? ""),
           isTruncated: false,
         }
       : undefined;
@@ -3014,9 +3028,6 @@ export function RemotePrView({
   const fileDiffLookup = (path: string): string | undefined =>
     fileSections.get(path);
 
-  // The pane keeps rendering the previous PR's diff through a switch, so its lines
-  // can belong to another PR than the `number` a new thread would be created under.
-  const diffStale = detailsPlaceholder || prDiff.isPlaceholderData;
   // The inline line-comment composer for the Files tab: only when the provider allows
   // creating a thread, anchored to the selected file (its section prefills a
   // suggestion's code). Absent otherwise ⇒ read-only diff.
@@ -4452,6 +4463,7 @@ export function RemotePrView({
           {!filesMissing && (
             <PrFilesPane
               files={pr.files}
+              binaryPaths={binaryPaths}
               effectivePath={effectivePath}
               onSelectPath={setSelectedPath}
               fileDiff={fileDiff}

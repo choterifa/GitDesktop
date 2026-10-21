@@ -208,8 +208,10 @@ export function useRetryFocusRescue(retryShown: boolean) {
  *  that arrives after it is in the DOM, so a healthy section keeps it empty
  *  and sr-only (never display:none, which drops it from the a11y tree). The
  *  actions sit outside the region so they aren't read as part of the status.
- *  Retry unmounts when a refresh lands or a pressed retry parks offline, so the
- *  always-mounted wrapper is the landing spot that keeps focus off `<body>`. */
+ *  The box holding Retry and any `extraAction` unmounts when a refresh lands,
+ *  or when a pressed retry parks offline with no `extraAction` beside it, so
+ *  the always-mounted wrapper is the landing spot that keeps focus off
+ *  `<body>` when focus was inside that box. */
 export function DegradedListNotice(props: {
   noun: string;
   degraded: boolean;
@@ -234,9 +236,9 @@ export function DegradedListNotice(props: {
     extraAction,
     className,
   } = props;
-  const { hostRef, retryRef } = useRetryFocusRescue(
-    degraded && onRetry !== undefined,
-  );
+  const actionsShown =
+    degraded && (onRetry !== undefined || extraAction != null);
+  const { hostRef, retryRef } = useRetryFocusRescue(actionsShown);
   return (
     <div
       ref={hostRef}
@@ -259,18 +261,23 @@ export function DegradedListNotice(props: {
             )
           : null}
       </p>
-      {degraded && onRetry && (
-        <button
-          ref={retryRef}
-          type="button"
-          aria-label={localizedRetryLabel(retryLabel, noun, tx)}
-          onClick={onRetry}
-          className={DEGRADED_ACTION_CLASS}
-        >
-          {tx("Retry")}
-        </button>
+      {/* display:contents keeps both actions items of the row's flex; the box
+          exists only so the rescue can see focus inside either one. */}
+      {actionsShown && (
+        <span ref={retryRef} className="contents">
+          {onRetry && (
+            <button
+              type="button"
+              aria-label={localizedRetryLabel(retryLabel, noun, tx)}
+              onClick={onRetry}
+              className={DEGRADED_ACTION_CLASS}
+            >
+              {tx("Retry")}
+            </button>
+          )}
+          {extraAction}
+        </span>
       )}
-      {degraded && extraAction}
     </div>
   );
 }

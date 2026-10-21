@@ -1,11 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DetailRail, DetailRailRow } from "@/components/detail-rail";
 import { PathText } from "@/components/path-text";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRetryFocusRescue } from "@/features/conversations/ConversationListPanel";
 import { DiffPlaceholder } from "@/features/diff/DiffPlaceholder";
 import { DiffSurface } from "@/features/diff/DiffSurfaceLazy";
+import {
+  openStatusErrorDetails,
+  StatusReadErrorState,
+  StatusRefreshFailedStrip,
+  statusReadFailed,
+  useRetainedStatusError,
+} from "@/features/repository/StatusReadError";
+import { STATUS_READ_FAILED_REASON } from "@/features/repository/sync-controls-state";
 import { gitDiffFile, gitStatus } from "@/lib/git/api";
 import type { ChangeKind, FileEntry } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
@@ -38,6 +48,7 @@ const KIND_LABEL: Record<ChangeKind, string> = {
  */
 export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
   const tx = useSessionText();
+  const { t: repositoryT } = useTranslation("repository");
   const status = useQuery({
     queryKey: ["session-worktree-status", repoPath] as const,
     queryFn: () => gitStatus(repoPath),
@@ -46,11 +57,30 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
     // the same holds for every `networkMode` in this file.
     networkMode: "always",
   });
+  const retainedError = useRetainedStatusError({
+    repoPath,
+    error: status.error ?? status.failureReason,
+  });
   // Anything the agent touched: it writes into the working tree (unstaged) and
   // creates new (untracked) files; it never stages, but include staged
   // defensively so nothing is hidden.
   const entries = (status.data?.entries ?? []).filter(
     (e) => e.unstaged || e.staged,
+  );
+  const readFailed = statusReadFailed(status);
+  // The error block unmounts when the first good read lands. Only when focus
+  // was inside it then and fell to <body> does the landing above the view
+  // take it.
+  const { hostRef: landingRef, retryRef: errorBlockRef } =
+    useRetryFocusRescue(readFailed);
+  // First in every arm so the region stays mounted across them: it announces
+  // only text that arrives after it is in the DOM.
+  const statusLiveRegion = (
+    <span role="status" className="sr-only">
+      {readFailed
+        ? repositoryT(STATUS_READ_FAILED_REASON, { keySeparator: false })
+        : null}
+    </span>
   );
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -78,17 +108,56 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
     networkMode: "always",
   });
 
-  if (status.isPending) {
+  // Ahead of the skeleton, on the sticky gate.
+  if (readFailed) {
     return (
-      <div className="space-y-3 p-4">
-        <Skeleton className="h-5 w-2/3" />
-        <Skeleton className="h-32 w-full" />
-      </div>
+      <>
+        {statusLiveRegion}
+        <div className="flex h-full flex-col">
+          <StatusReadErrorState
+            compact
+            error={status.error ?? status.failureReason ?? retainedError}
+            onRetry={() => void status.refetch()}
+            repoPath={repoPath}
+            rescueRef={errorBlockRef}
+          />
+        </div>
+      </>
     );
   }
+  if (status.isPending) {
+    return (
+      <>
+        {statusLiveRegion}
+        <div className="space-y-3 p-4">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </>
+    );
+  }
+  const landing = (
+    <span ref={landingRef} tabIndex={-1} className="outline-none" />
+  );
+  const refreshStrip = (
+    <StatusRefreshFailedStrip
+      degraded={status.isError}
+      onRetry={() => void status.refetch()}
+      onDetails={() => openStatusErrorDetails(status.error)}
+    />
+  );
   if (entries.length === 0) {
     return (
-      <DiffPlaceholder message={tx("The agent is working — no file changes yet this turn.")} />
+      <>
+        {statusLiveRegion}
+        <div className="flex h-full flex-col">
+          {landing}
+          {refreshStrip}
+          <div className="min-h-0 flex-1">
+            <DiffPlaceholder message={tx("The agent is working — no file changes yet this turn.")} />
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -101,8 +170,12 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
   });
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b px-4 py-3 text-xs">
+    <>
+      {statusLiveRegion}
+      <div className="flex h-full flex-col">
+        {landing}
+        {refreshStrip}
+        <header className="flex items-center gap-2 border-b px-4 py-3 text-xs">
         <span className="font-medium">{tx("Working changes")}</span>
         <span className="text-muted-foreground">· {tx("uncommitted this turn")}</span>
         <span className="flex-1" />
@@ -157,6 +230,7 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
           )}
         </main>
       </DetailRailRow>
-    </div>
+      </div>
+    </>
   );
 }

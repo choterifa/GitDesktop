@@ -84,6 +84,11 @@ the same change (`listKeyboardNav` in `src/lib/list-keyboard-nav.ts`) — an
 invariant, not polish. A list container that co-hosts a text editor (inline
 edit field, reply box) passes `ignoreTextEntry` so arrows keep moving the
 caret; leave it off where arrows deliberately drive nav from a filter input.
+Palette-style pickers (the command palette, the task picker) derive their
+cursor through `clampHighlight`/`stepHighlight`
+(`src/features/shortcuts/palette-highlight.ts`), so the marker, Enter and the
+scroll read one clamped index; `scripts/palette-highlight.test.mjs` pins every
+picker in its `CALL_SITES`.
 Destructive paths stay behind confirmation via the
 shared `useConfirm`/`ConfirmDialogHost` primitive (`src/lib/stores/confirm.ts`,
 host in `src/components/confirm-dialog-host.tsx`) — never a bespoke confirm
@@ -564,7 +569,10 @@ one grep away on the named symbol. Grows via Conventions-sync.
 - **Retry focus rescue** — a Retry control whose press can unmount it (an
   error arm swapping to a skeleton or notice) rides `useRetryFocusRescue`
   (ConversationListPanel) with a stable `tabIndex={-1}` host element; focus
-  must never fall to `<body>` on the shown→hidden edge.
+  must never fall to `<body>` on the shown→hidden edge. A detail pane's
+  error-arm Retry carries no disabled state or in-flight label (the arm
+  unmounts the moment the retry fetches), pinned by
+  `scripts/detail-pane-retry.test.mjs`.
 - **Empty-picker copy** — a picker's line while it draws no options rides
   `emptyPickerCopy` (remote-section-state); a read parked with nothing loaded,
   or over a failure, says offline; only a successful read may claim none.

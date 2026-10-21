@@ -1019,7 +1019,7 @@ export function RepositoryView() {
                     onClick={() => selectCommit(null)}
                   >
                     <ArrowLeftIcon data-icon="inline-start" />
-                    Back to graph
+                    {t("Back to graph")}
                   </Button>
                 </div>
                 <div className="min-h-0 flex-1">
@@ -1053,7 +1053,7 @@ export function RepositoryView() {
             ) : (
               <DiffPlaceholder
                 icon={GitBranchIcon}
-                message="Pick a branch to compare against"
+                message={t("Pick a branch to compare against")}
               />
             )}
           </TabPanel>
@@ -1068,7 +1068,7 @@ export function RepositoryView() {
             ) : (
               <DiffPlaceholder
                 icon={GitPullRequestIcon}
-                message="Select a pull request"
+                message={t("Select a pull request")}
               />
             )}
           </TabPanel>

@@ -119,5 +119,10 @@
   "outdated": "outdated",
   "duplicate": "duplicate",
   "abuse": "abuse",
-  "Opened discussion #{{number}}": "Opened discussion #{{number}}"
+  "Opened discussion #{{number}}": "Opened discussion #{{number}}",
+  "You're offline — this discussion will load once you're back online.": "You're offline — this discussion will load once you're back online.",
+  "Couldn't load this discussion from GitHub.": "Couldn't load this discussion from GitHub.",
+  "Couldn't refresh this discussion — showing the last loaded version.": "Couldn't refresh this discussion — showing the last loaded version.",
+  "You're offline — showing the last opened discussion; this one will load once you're back online.": "You're offline — showing the last opened discussion; this one will load once you're back online.",
+  "You're offline — showing the last loaded version.": "You're offline — showing the last loaded version."
 }

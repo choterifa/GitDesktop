@@ -15,6 +15,7 @@ import {
   EXPR_OPENERS,
   lineOf,
   maskNonCode,
+  matchBrace,
   ScanError,
 } from "./lib/ts-mask.mjs";
 
@@ -425,6 +426,23 @@ const RAW_COPY_ICON_BUTTON_RE =
 // under a different name is invisible here, so this holds the copy-paste route
 // the two duplicates actually took, not the whole class.
 const KIND_BADGE_DEF_RE = /\bconst\s+KIND_BADGE\b/;
+
+// Reads "Binary files" as a whole string (line-break escape or `^` leads,
+// RegExp() strings too), a template's closing line, or a regex literal (plus
+// `[\n]`, `(?<=\n)`, `(?<![^\n])` leads); exact labels and quoted/code-spanned
+// mentions trip it: reword or allowlist. Not read: singular "Binary file" (UI
+// copy); extra text, other escapes or interpolation in or beside the words;
+// split or joined literals; a repeat in an exempt or allowlisted file; and
+// lines that stripComments blanks.
+const BINARY_MARKER_RE = new RegExp(
+  [
+    /(["'`])(?:\\{1,2}[nr]|\\x0[aA]|\\u000[aA]|\\u\{0*[aA]\}|\^)*[Bb]inary [Ff]iles ?\1/
+      .source,
+    /^\s*[Bb]inary [Ff]iles ?`/.source,
+    /\/(?:\\[nr]|\\x0[aA]|\\u000[aA]|\\u\{0*[aA]\}|\^|\[\\n\]|\(\?<!\[\^\\n\]\)|\(\?<=\\n\))*[Bb]inary [Ff]iles ?\??\//
+      .source,
+  ].join("|"),
+);
 
 // `<Activity` as a JSX open tag. The lookahead is what separates it from the
 // app's own `<ActivityDock>`/`<ActivityBell>`/`<ActivityStrip>` components, and
@@ -4775,6 +4793,381 @@ const mutationDefaults = (fileView) => {
   return [...hits];
 };
 
+// MCP keychain writes. Target model, holding for all three pinned files since
+// no file is allowlisted: a keychain write reaches Rust only through mcp.ts's
+// two pinned definitions; those are called only from the flush module's two
+// pinned functions; that module is reachable only through SettingsScreen's one
+// pinned import; and its functions run only as the two pinned statements,
+// directly inside the Save handler's body. Every token is matched on RAW source,
+// comments and strings included, and a pinned Save statement holding a comment
+// is never accepted, so no lexing gap can hide one.
+
+/** The API pair and the flush module's two functions, by name. */
+const MCP_KEYCHAIN_NAME_RE =
+  /\b(?:setMcpSecret|deleteMcpSecret|flushMcpSecretSets|flushMcpSecretDeletes)\b/g;
+/** Any mcp_secret-family word, whatever surrounds it: matched word by word, so
+ *  Tauri command names and every other spelling of the family alike. */
+const MCP_SECRET_COMMAND_RE = /\b[a-z0-9_]*mcp_secrets?[a-z0-9_]*\b/g;
+/** Words of that family that only read. A new read-only command goes here and
+ *  in its test pin. */
+export const MCP_SECRET_READ_ONLY = new Set(["mcp_secret_exists"]);
+/** The flush module's file stem: naming it in any form reaches the module. */
+const MCP_FLUSH_MODULE_TOKEN = "flush-mcp-secrets";
+
+/** mcp.ts's two keychain definitions, each pinned as its whole statement. Any
+ *  other token mention in that file fails: a wrapper, a second invoke, a
+ *  command constant, a re-export under another name. */
+export const MCP_SECRET_API = {
+  file: "src/lib/git/api/mcp.ts",
+  definitions: [
+    'export const setMcpSecret = (serverId: string, key: string, value: string) => COLD_START ? Promise.resolve(coldStartSetSecret(mcpRef(serverId, key), value)) : invoke<void>("set_mcp_secret", { serverId, key, value });',
+    'export const deleteMcpSecret = (serverId: string, key: string) => COLD_START ? Promise.resolve(coldStartDeleteSecret(mcpRef(serverId, key))) : invoke<void>("delete_mcp_secret", { serverId, key });',
+  ],
+};
+
+/** The flush module's code, each piece pinned as its whole statement: the API
+ *  import, the queue binding (a passthrough or wrapped queue would let a delete
+ *  land after a later set) and the two exported functions. Any other token
+ *  mention in that file fails (module-scope side effects included), and so does
+ *  any edit to a pinned statement, a deferred retry or a comment alike:
+ *  re-point the pins in the same change. */
+export const MCP_FLUSH_MODULE = {
+  file: "src/features/settings/mcp/flush-mcp-secrets.ts",
+  statements: [
+    'import { deleteMcpSecret, setMcpSecret } from "@/lib/git/api";',
+    "const inOrder = createCallQueue();",
+    "export async function flushMcpSecretSets( sets: readonly McpStagedSecret[], ): Promise<McpSetFailure[]> { const failed: McpSetFailure[] = []; for (const entry of sets) { try { await inOrder(() => setMcpSecret(entry.serverId, entry.key, entry.value)); } catch (error) { failed.push({ entry, error }); } } return failed; }",
+    "export function flushMcpSecretDeletes( deletes: readonly McpSecretDelete[], ): void { for (const { serverId, key } of deletes) void inOrder(() => deleteMcpSecret(serverId, key)).catch(() => undefined); }",
+  ],
+};
+
+/** The settings Save's own uses of the flush module. `imports` matches once,
+ *  anywhere in the file at a code position. `onSubmit` statements match on the
+ *  masked source, once each, only directly inside the Save body (the
+ *  `onSubmit: async (…) => {` entry of the file's one `useAppForm({…})` call):
+ *  after `;`, `{` or `}`, with every enclosing brace in the body a block
+ *  (try, finally, else, do, catch, if/for/while/switch/catch heads, or a bare
+ *  block), never a closure, method, object literal, case or label, and holding
+ *  nothing but code (a comment inside voids the match). */
+export const MCP_FLUSH_CALLER = {
+  file: "src/features/settings/SettingsScreen.tsx",
+  imports: [
+    'import { flushMcpSecretDeletes, flushMcpSecretSets, } from "./mcp/flush-mcp-secrets";',
+  ],
+  onSubmit: [
+    "const failed = await flushMcpSecretSets(plan.flush);",
+    "flushMcpSecretDeletes(deletes);",
+  ],
+};
+
+/** A pin as a global regex: tokens and punctuation exact, each run of spaces in
+ *  the pin `\s*` (`\s+` between two name characters), and no name character
+ *  just before it. */
+function mcpPinPattern(pin) {
+  const parts = pin.split(/(\s+)/);
+  let re = "";
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (/^\s+$/.test(part)) {
+      const joinsNames =
+        /[\w$]$/.test(parts[i - 1] ?? "") && /^[\w$]/.test(parts[i + 1] ?? "");
+      re += joinsNames ? "\\s+" : "\\s*";
+    } else re += escapeRe(part);
+  }
+  return new RegExp(`(?<![\\w$])${re}`, "g");
+}
+
+const isNameChar = (c) => c !== undefined && /[\w$]/.test(c);
+const skipSpace = (masked, i) => {
+  while (i < masked.length && /\s/.test(masked[i])) i++;
+  return i;
+};
+const prevCodeIndex = (masked, i) => {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(masked[j])) j--;
+  return j;
+};
+/** The name ending at `end` (inclusive), or "". */
+const wordEndingAt = (masked, end) => {
+  let s = end;
+  while (s >= 0 && isNameChar(masked[s])) s--;
+  return masked.slice(s + 1, end + 1);
+};
+
+/** Index just past the `>` closing the type arguments opened at `open`, or -1.
+ *  An arrow's `=>` inside them is not a closer. */
+function skipTypeArgs(masked, open) {
+  let depth = 0;
+  for (let i = open; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === "<") depth++;
+    else if (c === ">" && masked[i - 1] !== "=" && --depth === 0) return i + 1;
+    else if (c === ";") return -1;
+  }
+  return -1;
+}
+
+/** One depth-1 entry of an object literal, classified by its key. */
+function classifyFormEntry(masked, source, s, e) {
+  const text = masked.slice(s, e);
+  if (text.startsWith("...")) return { kind: "spread" };
+  if (text.startsWith("[")) return { kind: "computed" };
+  let i = s;
+  let method = false;
+  const modifier = /^(?:async|get|set)\s+(?=[\w$"'[*])/.exec(text);
+  if (modifier) {
+    method = true;
+    i += modifier[0].length;
+  }
+  if (masked[i] === "*") {
+    method = true;
+    i = skipSpace(masked, i + 1);
+  }
+  if (masked[i] === "[") return { kind: "computed" };
+  let name;
+  let kind;
+  let after;
+  if (source[i] === '"' || source[i] === "'") {
+    const close = masked.indexOf(source[i], i + 1);
+    if (close === -1 || close >= e) return { kind: "unknown" };
+    name = cookStringBody(source.slice(i + 1, close));
+    kind = "quoted";
+    after = close + 1;
+  } else {
+    const word = /^(?:[A-Za-z_$][\w$]*|\d[\w.]*)/.exec(masked.slice(i, e));
+    if (!word) return { kind: "unknown" };
+    name = word[0];
+    kind = "identifier";
+    after = i + word[0].length;
+  }
+  if (method) return { kind: "method", name };
+  const next = skipSpace(masked, after);
+  if (next >= e)
+    return kind === "identifier"
+      ? { kind: "shorthand", name }
+      : { kind: "unknown", name };
+  if (masked[next] === ":") return { kind, name, value: next + 1 };
+  if (masked[next] === "(" || masked[next] === "<")
+    return { kind: "method", name };
+  return { kind: "unknown", name };
+}
+
+/** The Save handler's body braces in the masked source: the `onSubmit` entry of
+ *  the file's one `useAppForm(…)` call, whose first argument must be an object
+ *  literal with no computed key, no spread after `onSubmit`, and exactly one
+ *  entry named `onSubmit` in any spelling, written as
+ *  `onSubmit: async (…)[: T] => {…}`. Null when any of that fails to hold, or a
+ *  `useAppForm<…>` type-argument list can't be read, so nothing is exempted and
+ *  the caller fails line 1. */
+function mcpSaveBody(masked, source) {
+  const calls = [];
+  for (const m of masked.matchAll(/(?<![\w$])useAppForm(?![\w$])/g)) {
+    let j = skipSpace(masked, m.index + m[0].length);
+    if (masked[j] === "<") {
+      j = skipTypeArgs(masked, j);
+      if (j === -1) return null;
+      j = skipSpace(masked, j);
+    }
+    if (masked[j] === "(") calls.push(j);
+  }
+  if (calls.length !== 1) return null;
+  const open = skipSpace(masked, calls[0] + 1);
+  if (masked[open] !== "{") return null;
+  const close = matchBrace(masked, open);
+  if (close === -1) return null;
+  const entries = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = open + 1; i <= close; i++) {
+    const c = masked[i];
+    if (i === close || (c === "," && depth === 0)) {
+      const s = skipSpace(masked, start);
+      let e = i;
+      while (e > s && /\s/.test(masked[e - 1])) e--;
+      if (e > s) entries.push(classifyFormEntry(masked, source, s, e));
+      start = i + 1;
+    } else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+  }
+  const saves = entries.filter((x) => x.name === "onSubmit");
+  if (saves.length !== 1) return null;
+  const at = entries.indexOf(saves[0]);
+  if (entries.some((x) => x.kind === "computed" || x.kind === "unknown"))
+    return null;
+  if (entries.slice(at + 1).some((x) => x.kind === "spread")) return null;
+  const save = saves[0];
+  if (save.kind !== "identifier") return null;
+  let j = skipSpace(masked, save.value);
+  if (!/^async(?![\w$])/.test(masked.slice(j, j + 6))) return null;
+  j = skipSpace(masked, j + 5);
+  if (masked[j] !== "(") return null;
+  const params = matchBrace(masked, j);
+  if (params === -1) return null;
+  j = skipSpace(masked, params + 1);
+  if (masked[j] === ":") {
+    let typeDepth = 0;
+    for (j = j + 1; j < close; j++) {
+      const c = masked[j];
+      if (c === "=" && masked[j + 1] === ">") {
+        if (typeDepth === 0) break;
+        j++;
+      } else if (c === "(" || c === "[" || c === "{" || c === "<") typeDepth++;
+      else if (c === ")" || c === "]" || c === "}" || c === ">") typeDepth--;
+    }
+  }
+  if (masked[j] !== "=" || masked[j + 1] !== ">") return null;
+  const bodyOpen = skipSpace(masked, j + 2);
+  if (masked[bodyOpen] !== "{") return null;
+  const bodyClose = matchBrace(masked, bodyOpen);
+  if (bodyClose === -1) return null;
+  // The arrow must be the entry's whole value.
+  const tail = masked.slice(bodyClose + 1, close);
+  const entryEnd = tail.search(/[,}]/);
+  if (!/^\s*$/.test(entryEnd === -1 ? tail : tail.slice(0, entryEnd)))
+    return null;
+  return { open: bodyOpen, close: bodyClose };
+}
+
+/** Whether every brace between the Save body's `{` (at `open`) and `at` is a
+ *  statement block: try, finally, else, do, catch, an if/for/while/switch/catch
+ *  head, or a bare block (see mcpBraceIsBlock). A closure, method, object
+ *  literal, type, case or label brace, or an open paren or bracket, makes it
+ *  false. */
+function mcpInBlocksOnly(masked, open, at) {
+  const stack = [];
+  const parenOpenFor = new Map();
+  const closedBlock = new Map();
+  for (let i = open + 1; i < at; i++) {
+    const c = masked[i];
+    if (c === "(" || c === "[") stack.push({ c, i });
+    else if (c === ")" || c === "]") {
+      const top = stack.pop();
+      if (!top || top.c === "{") return false;
+      parenOpenFor.set(i, top.i);
+    } else if (c === "{") {
+      stack.push({
+        c,
+        block: mcpBraceIsBlock(masked, open, i, parenOpenFor, closedBlock),
+      });
+    } else if (c === "}") {
+      const top = stack.pop();
+      if (!top || top.c !== "{") return false;
+      closedBlock.set(i, top.block);
+    }
+  }
+  return stack.every((x) => x.c === "{" && x.block);
+}
+
+const BLOCK_HEAD_KEYWORDS = new Set(["if", "for", "while", "switch", "catch"]);
+const BLOCK_KEYWORDS = new Set(["try", "finally", "else", "do", "catch"]);
+
+/** Whether the `{` at `i` opens a statement block. After `;` or `{` it is a
+ *  bare block; after `}` only when that `}` closed a block itself (so a
+ *  function's object-type return annotation, `(): { ok: true } {`, never makes
+ *  its body one); after `)` only behind an if/for/while/switch/catch head (or
+ *  `for await`); after a name only behind try, finally, else, do or a
+ *  binding-free catch. Anything else (`=>`, `:`, `=`, a function or method
+ *  name) is not a block. */
+function mcpBraceIsBlock(masked, open, i, parenOpenFor, closedBlock) {
+  const j = prevCodeIndex(masked, i);
+  if (j < open) return false;
+  const c = masked[j];
+  if (c === ";" || c === "{") return true;
+  if (c === "}") return closedBlock.get(j) === true;
+  if (c === ")") {
+    const paren = parenOpenFor.get(j);
+    if (paren === undefined) return false;
+    const k = prevCodeIndex(masked, paren);
+    const word = wordEndingAt(masked, k);
+    if (BLOCK_HEAD_KEYWORDS.has(word)) return true;
+    // `for await (…) {`
+    if (word === "await")
+      return (
+        wordEndingAt(masked, prevCodeIndex(masked, k - word.length + 1)) ===
+        "for"
+      );
+    return false;
+  }
+  if (isNameChar(c)) return BLOCK_KEYWORDS.has(wordEndingAt(masked, j));
+  return false;
+}
+
+/** Scanner: every MCP keychain token on the raw source (API and flush names,
+ *  mcp_secret-family words but the read-only ones, the flush module's stem),
+ *  but those inside an accepted pin in its own file, plus line 1 there when a
+ *  pin has no accepted match, a Save statement is accepted more than once, the
+ *  Save body can't be found, or ts-mask can't lex the file. */
+const mcpKeychainSites = ({ source }, file) => {
+  const hits = new Set();
+  const exempt = [];
+  const pinned =
+    file === MCP_SECRET_API.file ||
+    file === MCP_FLUSH_MODULE.file ||
+    file === MCP_FLUSH_CALLER.file;
+  if (pinned) {
+    let masked = null;
+    try {
+      masked = maskNonCode(source, file.endsWith(".tsx"));
+    } catch (e) {
+      if (!(e instanceof ScanError)) throw e;
+      hits.add(1);
+    }
+    if (masked !== null) {
+      // A pin matched on the source, accepted once at a code position.
+      const anywhere = (pin) => {
+        for (const m of source.matchAll(mcpPinPattern(pin))) {
+          if (masked[m.index] !== source[m.index]) continue;
+          exempt.push([m.index, m.index + m[0].length]);
+          return;
+        }
+        hits.add(1);
+      };
+      if (file === MCP_SECRET_API.file)
+        for (const pin of MCP_SECRET_API.definitions) anywhere(pin);
+      else if (file === MCP_FLUSH_MODULE.file)
+        for (const pin of MCP_FLUSH_MODULE.statements) anywhere(pin);
+      else {
+        for (const pin of MCP_FLUSH_CALLER.imports) anywhere(pin);
+        const body = mcpSaveBody(masked, source);
+        if (!body) hits.add(1);
+        for (const pin of MCP_FLUSH_CALLER.onSubmit) {
+          const accepted = body
+            ? [...masked.matchAll(mcpPinPattern(pin))].filter(
+                (m) =>
+                  m.index > body.open &&
+                  m.index + m[0].length < body.close &&
+                  source.slice(m.index, m.index + m[0].length) === m[0] &&
+                  ";{}".includes(masked[prevCodeIndex(masked, m.index)]) &&
+                  mcpInBlocksOnly(masked, body.open, m.index),
+              )
+            : [];
+          if (accepted.length === 1)
+            exempt.push([
+              accepted[0].index,
+              accepted[0].index + accepted[0][0].length,
+            ]);
+          else hits.add(1);
+        }
+      }
+    }
+  }
+  const tokens = [];
+  for (const m of source.matchAll(MCP_KEYCHAIN_NAME_RE)) tokens.push(m.index);
+  for (const m of source.matchAll(MCP_SECRET_COMMAND_RE))
+    if (!MCP_SECRET_READ_ONLY.has(m[0])) tokens.push(m.index);
+  for (
+    let at = source.indexOf(MCP_FLUSH_MODULE_TOKEN);
+    at !== -1;
+    at = source.indexOf(MCP_FLUSH_MODULE_TOKEN, at + 1)
+  )
+    tokens.push(at);
+  for (const at of tokens) {
+    if (exempt.some(([from, to]) => at >= from && at < to)) continue;
+    hits.add(lineOf(source, at));
+  }
+  return [...hits];
+};
+
 /**
  * A path-pinned check goes inert the moment its path moves: it scans nothing and
  * prints OK, which is the silent fail-open this file exists to prevent. Returns a
@@ -5100,6 +5493,19 @@ export const CHECKS = [
       "the change-kind letter, screen-reader label, and colour token come from KIND_BADGE in src/lib/git/change-kind-badge.ts — a second definition drifts one surface at a time, so the Changes list and the commit dialog's staged summary stop agreeing on the same file; import it rather than re-spelling the table",
   },
   {
+    name: "binary-marker-single-source",
+    // The helper module IS the idiom; everything else imports sectionIsBinary.
+    appliesTo: (file) => file !== "src/lib/git/diff-split.ts",
+    scan: perLine(BINARY_MARKER_RE),
+    allowlist: [
+      // stripBinarySections already matches the line-anchored
+      // "\nBinary files " literal.
+      "src/lib/ai/prompt.ts",
+    ],
+    message:
+      'the git binary-marker check lives in sectionIsBinary (src/lib/git/diff-split.ts) — a re-spelled "Binary files" literal or regex re-mints the loose-match class (a text diff whose CONTENT mentions binary files read as binary) or drifts from the line-anchored form one site at a time; import the helper',
+  },
+  {
     name: "lone-activity-boundary",
     // Both directions ride the allowlist: a hit anywhere else is a violation,
     // and TabPanel losing its own `<Activity>` reads as a stale entry. Residual:
@@ -5422,6 +5828,19 @@ export const CHECKS = [
     expectScanned: { atLeast: 500, hint: "every .ts/.tsx under src/" },
     message:
       "react-query mutation defaults are banned (gd-conventions, 'Mutation identity pinning') — @/lib/started-mutation installs mutationFn/onMutate/onSuccess/onError/onSettled trampolines on every construction, and react-query spreads a construction's own options over the client's defaults, so a default mutationFn or callback would be shadowed without a sound. The check passes only what it can prove harmless. Any mention of `setDefaultOptions`, `getDefaultOptions`, `setMutationDefaults`, `getMutationDefaults` or `defaultMutationOptions` fails, quoted, optional, escaped or bound alike (`getDefaultOptions()` hands out the live defaults object, and `defaultMutationOptions` is query-core's merge point, which a subclass or patch could override). Every `defaultOptions` mention fails unless it is a type position with no value (`defaultOptions?: T` ending at `;` `,` `)` or `}`, or `defaultOptions: T` ending a member with `;` or a parameter list with `)`, member modifiers skipped, with no `=` and no `/` in the annotation) or an object-entry key whose value is a literal holding only a bare `queries` entry and closing its entry (`,` `}` `;` or `)` next, past any `as T` / `satisfies T`). So shorthands, bindings, assignments, member reads and writes, getters, methods, parameter defaults, class-field initializers, non-literal values, a literal read after it closes (`.constructor(…)`, `['queries']`) and any other entry (`mutations`, a spread, a quoted or computed key) fail. Put the behavior in the construction, or teach the helper to merge the defaults first. Threat model: these scans target accidental use, not deliberate evasion, so spellings only an evader would write are named under Not seen rather than chased. Not seen: keys or members assembled at runtime (`qc[\"set\" + name]`), reach through `Object.values` / `Object.entries`, prototype pollution, and the shared comment stripper's lexing gaps (a `/*` inside a multi-line template literal, a regex literal, a backslash-continued string or JSX text blanks the scan up to the next `*/`, and a `//` in JSX text, a regex or a template tail blanks the rest of its line). Fails closed (false positives, an allowlist entry with rationale is the remedy): an annotated parameter followed by another parameter, which can't be told from an object entry; an interface member ending without `;`; JSX `defaultOptions={…}`; type-level references (`QueryClientConfig['defaultOptions']`, a `Pick`/`Omit` of it); a nested `defaultOptions` key inside `queries`; a `/` inside a string within an annotation (`Foo<\"a/b\">`); and a getter, method or quoted `queries` entry",
+  },
+  {
+    name: "mcp-secret-keychain-sites",
+    // Repo-wide: a keychain write fired from any draft surface would bypass
+    // Save/Discard. The target model and the pin rules sit on MCP_SECRET_API,
+    // MCP_FLUSH_MODULE and MCP_FLUSH_CALLER. No file is allowlisted: a row
+    // skips a whole file, so all three pinned files pin their code instead.
+    appliesTo: () => true,
+    scan: mcpKeychainSites,
+    allowlist: [],
+    expectScanned: { atLeast: 500, hint: "every .ts/.tsx under src/" },
+    message:
+      "MCP keychain writes stay behind the settings Save, so a Discard can take back every MCP server edit, secrets included. Target model, holding for all three files since none is allowlisted: a keychain write reaches Rust only through src/lib/git/api/mcp.ts's two pinned definitions (MCP_SECRET_API: setMcpSecret and deleteMcpSecret, each its whole statement); those are called only from src/features/settings/mcp/flush-mcp-secrets.ts's two pinned functions (MCP_FLUSH_MODULE: the API import, the queue binding and the two exported functions, each its whole statement); that module is reachable only through SettingsScreen's one pinned import; and its functions (flushMcpSecretSets, flushMcpSecretDeletes) run only as the two pinned statements, directly inside the Save handler's body (MCP_FLUSH_CALLER: the `onSubmit: async (…) => {…}` entry of SettingsScreen's one `useAppForm({…})` call). A draft surface stages its values in the settings screen's buffer instead. Every token is matched on raw source, comments and strings included: the four names, any mcp_secret-family word (word-level, so command names and every other spelling alike) but the read-only ones (MCP_SECRET_READ_ONLY), and the module stem `flush-mcp-secrets` in any form (an import, `export * from`, `import()`, `require`). A pin's tokens and punctuation are exact; where the pin has a space the source may have any whitespace, line breaks included, or none (at least one between two name characters). Each pin is accepted once: the definitions, the flush module's code and the import at a code position anywhere in their file (a comment inside breaks the match), each Save statement on the masked source holding nothing but code, after `;` `{` or `}`, with only block braces (try, finally, else, do, catch, if/for/while/switch/catch heads, bare blocks after `;` `{` or a block's `}`) between it and the Save body's own brace. Line 1 fails when a pin has no accepted match (or a Save statement more than one), when the Save body can't be found (not exactly one `useAppForm(` call with an object-literal first argument, a `useAppForm<…>` type-argument list the walk can't read, any computed key, a spread after onSubmit, not exactly one entry named onSubmit in any spelling, a duplicate onSubmit key included, or that entry not `onSubmit: async (…)[: T] => {…}`), or when ts-mask can't lex a pinned file: re-point the pins in the same change. Threat model: these scans target accidental use, not deliberate evasion, so spellings only an evader would write are named under Not seen rather than chased. Not seen: names or commands assembled at runtime through the @/lib/git/api barrel (`api[\"set\" + name]`, a template-built command, `Object.values(api)`); unicode- or hex-escaped spellings of a name or command; what fires onSubmit (`form.handleSubmit()` from a non-Save path: the guard pins where the flush sits, not what triggers it); the exempt statements' reachability and argument provenance (after `return`, under `if (false)`); an import whose specifier is computed rather than a literal naming the flush module (a glob, a concatenated stem, or the module importing itself through `import.meta.url`); the cold-start store helpers (`coldStartSetSecret(\"mcp-server/…\")`, test mode only: an `mcp-server/` token would false-close src/lib/settings/mcp.ts and src/lib/settings/api.ts); `createCallQueue`'s own body in src/features/settings/mcp/secret-ops.ts, which names no guarded token (its tests cover its ordering), and the module the flush file imports it from; a keychain-writing Rust command whose name lacks mcp_secret; and eval, `new Function` and prototype pollution. Fails closed (false positives; re-point the pins in the same change): a comment naming a token; a comment inside any pinned statement; any other mention of a token, a same-named local (a useState setter named setMcpSecret), a string or a type position included (the remedy is a rename); any edit to the flush module's pinned code (re-point MCP_FLUSH_MODULE); a Save written any other way (a method, a concise body, extracted to a const, wrapped in useCallback); a computed key or a later spread in the form options, or an entry there the classifier can't read (an escaped key, a depth-1 comma inside type arguments); a reworded pinned statement, or one the formatter rewraps with added punctuation (a trailing comma, parentheses); and a flush statement nested in a closure, in a case or label block, or behind a prefix (`void`, `=>`, a brace-less `if`)",
   },
 ];
 

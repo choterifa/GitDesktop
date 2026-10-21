@@ -727,7 +727,6 @@ export function RemoteIssueView({
                 variant="outline"
                 size="sm"
                 className="cursor-pointer"
-                disabled={details.isFetching}
                 onClick={() => details.refetch()}
               >
                 {details.isFetching ? t("shared.retrying") : t("shared.retry")}

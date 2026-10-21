@@ -162,6 +162,7 @@ function DiffThreadAnchor({
  *  Review threads anchored to the selected file render under their exact line. */
 export function PrFilesPane({
   files,
+  binaryPaths,
   effectivePath,
   onSelectPath,
   fileDiff,
@@ -188,6 +189,9 @@ export function PrFilesPane({
   blameRev,
 }: {
   files: PrFile[];
+  /** Rows to show as binary (`binaryRowPaths`: 0/0 forge counts over a marker
+   *  section); absent/empty = no rows flagged. */
+  binaryPaths?: ReadonlySet<string>;
   effectivePath: string | null;
   onSelectPath: (path: string) => void;
   fileDiff: ComponentProps<typeof DiffContent>["data"];
@@ -330,7 +334,14 @@ export function PrFilesPane({
       onClick={() => onSelectPath(file.path)}
     >
       <PathText path={file.path} className="flex-1 font-mono" />
-      <DiffStat added={file.additions} deleted={file.deletions} />
+      {/* Plain DiffStat, not DiffStatSlot: the binary flag arrives after the diff
+          loads, but the forge counts ship with the row, so the cell never starts
+          empty — and the sibling detail rails all render the plain form. */}
+      <DiffStat
+        added={file.additions}
+        deleted={file.deletions}
+        isBinary={binaryPaths?.has(file.path) ?? false}
+      />
     </button>
   ));
 

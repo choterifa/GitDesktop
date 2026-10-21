@@ -1088,7 +1088,6 @@ export function FindingDetailView({
           variant="outline"
           size="sm"
           className="cursor-pointer"
-          disabled={query.isFetching}
           onClick={() => query.refetch()}
         >
           {query.isFetching ? tx("Retrying…") : tx("Retry")}

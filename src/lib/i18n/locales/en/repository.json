@@ -608,5 +608,11 @@
       "gitlab": "active",
       "bitbucket": "updated"
     }
-  }
+  },
+  "Couldn't read the repository status": "Couldn't read the repository status",
+  "Details arrive with the next check": "Details arrive with the next check",
+  "Checks again automatically.": "Checks again automatically.",
+  "Back to graph": "Back to graph",
+  "Pick a branch to compare against": "Pick a branch to compare against",
+  "Select a pull request": "Select a pull request"
 }

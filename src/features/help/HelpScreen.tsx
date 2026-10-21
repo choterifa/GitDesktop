@@ -164,7 +164,12 @@ function GuideArticle({
     section.namespace,
     `sections.${section.id}.body`,
   );
-  const markdown = typeof articleValue === "string" ? articleValue : section.body;
+  // The English source lives in content.ts so the guide always reflects the
+  // current release. Keep the bundled es-MX article when available.
+  const markdown =
+    language.startsWith("en") || typeof articleValue !== "string"
+      ? section.body
+      : articleValue;
   const body = useMemo(
     () =>
       resolveBody(

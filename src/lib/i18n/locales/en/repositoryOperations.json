@@ -530,7 +530,9 @@
     }
   },
   "dialogs": {
-    "common": { "cancel": "Cancel" },
+    "common": {
+      "cancel": "Cancel"
+    },
     "settings": {
       "loadingTitle": "Repository settings",
       "loading": "Loading repository settings…"
@@ -603,7 +605,10 @@
       "description_other": "{{upstream}} was rewritten — {{count}} commits on your branch are no longer part of it.",
       "atRisk_one": "{{count}} commit at risk",
       "atRisk_other": "{{count}} commits at risk",
-      "action": { "keep": "Keep my commits", "drop": "Drop them" },
+      "action": {
+        "keep": "Keep my commits",
+        "drop": "Drop them"
+      },
       "explain": {
         "keep": "Replays them on top of {{upstream}}, so they stay on the branch under new commit ids.",
         "drop": "Rebases past them, so the branch continues from {{upstream}} without them."
@@ -669,11 +674,20 @@
       "merged": "merged",
       "mergedPrTitle": "Merged via pull request {{pr}} — matched by branch name",
       "mergedPr": "merged {{pr}}",
-      "past": { "archive": "Archived", "delete": "Deleted" },
+      "past": {
+        "archive": "Archived",
+        "delete": "Deleted"
+      },
       "success": "{{verb}} {{count}} branch(es)",
       "partialFailure": "{{verb}} {{count}}; {{failed}} failed",
-      "action": { "archive": "Archive", "delete": "Delete" },
-      "gerund": { "archive": "Archiving", "delete": "Deleting" },
+      "action": {
+        "archive": "Archive",
+        "delete": "Delete"
+      },
+      "gerund": {
+        "archive": "Archiving",
+        "delete": "Deleting"
+      },
       "selectedAction": "{{verb}} {{count}} branch(es)",
       "staleExcluded": "{{count}} stale branch(es) are excluded from {{verb}}: {{reason}}.",
       "excludedReason": {
@@ -849,5 +863,6 @@
       "forMyself": "For my own purposes",
       "ownDescription": "Pull requests, issues, and “View on GitHub” target your fork instead."
     }
-  }
+  },
+  "Couldn't read the repository status": "Couldn't read the repository status"
 }

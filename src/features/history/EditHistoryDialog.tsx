@@ -512,7 +512,7 @@ export function EditHistoryDialog({
         });
         toast.success(t("editHistory.rebasePaused"));
         onOpenChange(false);
-        setRepoTab("changes");
+        if (useUiStore.getState().repoPath === repoPath) setRepoTab("changes");
         onDone();
       } catch (e) {
         toastError(e);
@@ -542,9 +542,11 @@ export function EditHistoryDialog({
   return (
     <Dialog
       open={open}
-      // Close requests are ignored while the rewrite runs: it is a seconds-scale
-      // local operation whose outcome this dialog still owes the user, and
-      // unmounting mid-flight drops the hand-off to the Changes tab.
+      // Close requests are ignored while the rewrite runs: a seconds-scale
+      // local operation whose outcome this dialog still owes the user. A repo
+      // switch, or leaving the repository view, unmounts it anyway; the
+      // awaited continuation still settles, and its tab hand-off guards on
+      // the live repo.
       onOpenChange={(next) => {
         if (!next && busy) return;
         onOpenChange(next);

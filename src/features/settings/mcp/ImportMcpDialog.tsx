@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import { setMcpSecret } from "@/lib/git/api";
+import { isWindows } from "@/lib/hotkeys/binding";
 import type { McpServer } from "@/lib/settings/api";
 import { mcpHostAllowFixable, mcpHostGateReason } from "@/lib/settings/mcp";
 import {
@@ -22,6 +22,46 @@ import {
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { useSettingsText } from "../use-settings-text";
+import {
+  MAX_WINDOWS_SECRET_UTF16,
+  type McpSecretWriteProblem,
+  type McpStagedSecret,
+  secretWriteProblem,
+} from "./secret-ops";
+
+/** Why a candidate can't be imported: a secret the keychain would refuse (an
+ *  unsafe name, a non-string value from a hand-edited config, or a value over
+ *  the Windows cap) would commit a pair no Save could store, so the row is held. */
+function secretHold(
+  c: ImportCandidate,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string | null {
+  // Typed as strings, but a hand-edited config can hold any JSON value.
+  const writes: readonly { key: string; value: unknown }[] = c.secretWrites;
+  const problem = secretWriteProblem(writes, isWindows);
+  if (!problem) return null;
+  const secretType = tx(
+    c.server.transport === "stdio" ? "the environment variable" : "the header",
+  );
+  const values = { secretType, key: problem.key };
+  switch (problem.kind) {
+    case "name":
+      return tx(
+        'Secret associated with {{secretType}} "{{key}}" can\'t move to your keychain: its name can only use letters, numbers, dots, dashes and underscores.',
+        values,
+      );
+    case "value":
+      return tx(
+        'Secret associated with {{secretType}} "{{key}}" can\'t move to your keychain: its value isn\'t a string.',
+        values,
+      );
+    case "length":
+      return tx(
+        'Secret associated with {{secretType}} "{{key}}" can\'t move to your keychain: Windows allows at most {{count}} characters.',
+        { ...values, count: MAX_WINDOWS_SECRET_UTF16.toLocaleString("en-US") },
+      );
+  }
+}
 
 /**
  * Reviewed import of servers the user already configured for Claude — the open
@@ -45,14 +85,13 @@ export function ImportMcpDialog({
   /** Add a URL's host to the draft allow list — the one-click fix behind a
    *  gated row's note. Mutates the draft settings, not persisted settings. */
   onAllowHost: (url: string) => void;
-  onImport: (servers: McpServer[]) => void;
+  onImport: (servers: McpServer[], writes: McpStagedSecret[]) => void;
   onClose: () => void;
 }) {
   const tx = useSettingsText();
   const [loading, setLoading] = useState(true);
   const [candidates, setCandidates] = useState<ImportCandidate[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [importing, setImporting] = useState(false);
   // Read the registry through a ref so discovery runs once (keyed on repoPath)
   // and isn't re-triggered — wiping the user's ticks — by the parent handing a
   // new `existing` array reference on re-render. The allow list rides a ref for
@@ -72,15 +111,18 @@ export function ImportMcpDialog({
           toImportCandidate(d, existingNames, repoPath),
         );
         setCandidates(cands);
-        // Pre-tick everything that isn't already in the registry and isn't held
-        // by the host gate — a gated row is the user's call after allowing it.
+        // Pre-tick everything that isn't already in the registry, isn't held by
+        // the host gate (a gated row is the user's call after allowing it) and
+        // isn't held by a secret the keychain would refuse, a hold that is
+        // static per candidate.
         setPicked(
           new Set(
             cands
               .filter(
                 (c) =>
                   !c.duplicate &&
-                  !mcpHostGateReason(c.server, allowedHostsRef.current),
+                  !mcpHostGateReason(c.server, allowedHostsRef.current) &&
+                  secretHold(c, tx) === null,
               )
               .map((c) => c.server.id),
           ),
@@ -105,49 +147,54 @@ export function ImportMcpDialog({
       return next;
     });
 
-  async function runImport() {
+  function runImport() {
     // Re-check the host gate at fire time: a tick taken while the host was
     // allowed must not import if the draft allow list has since lost the entry.
+    // The secret hold is static per candidate; it is re-checked only so this
+    // filter matches pickedCount's.
     const chosen = candidates.filter(
       (c) =>
-        picked.has(c.server.id) && !mcpHostGateReason(c.server, allowedHosts),
+        picked.has(c.server.id) &&
+        !mcpHostGateReason(c.server, allowedHosts) &&
+        secretHold(c, tx) === null,
     );
     if (chosen.length === 0) return;
-    setImporting(true);
-    try {
-      // Stash secret-looking values in the keychain before the server lands in
-      // settings (so the value is never persisted there). Best-effort per entry.
-      for (const c of chosen) {
-        for (const s of c.secretWrites)
-          await setMcpSecret(c.server.id, s.key, s.value);
-      }
-      onImport(chosen.map((c) => c.server));
-      toast.success(
-        tx(
-          chosen.length === 1
-            ? "Imported one server — review and enable it"
-            : "Imported {{count}} servers — review and enable them",
-          { count: chosen.length },
-        ),
-      );
-    } catch (e) {
-      setImporting(false);
-      toastError(e);
-    }
+    // Secret-looking values go to the settings screen's Save buffer, never into
+    // the server itself; the keychain sees them only when Save commits.
+    onImport(
+      chosen.map((c) => c.server),
+      chosen.flatMap((c) =>
+        c.secretWrites.map((s) => ({
+          serverId: c.server.id,
+          key: s.key,
+          value: s.value,
+        })),
+      ),
+    );
+    toast.success(
+      tx(
+        chosen.length === 1
+          ? "Imported one server — review and enable it"
+          : "Imported {{count}} servers — review and enable them",
+        { count: chosen.length },
+      ),
+    );
   }
 
   // Counts what Import will actually write, so the button label can't promise a
   // row the gate would drop.
   const pickedCount = candidates.filter(
     (c) =>
-      picked.has(c.server.id) && !mcpHostGateReason(c.server, allowedHosts),
+      picked.has(c.server.id) &&
+      !mcpHostGateReason(c.server, allowedHosts) &&
+      secretHold(c, tx) === null,
   ).length;
 
   return (
     <Dialog
       open
       onOpenChange={(o) => {
-        if (!o && !importing) onClose();
+        if (!o) onClose();
       }}
     >
       <DialogContent className="sm:max-w-xl">
@@ -189,7 +236,11 @@ export function ImportMcpDialog({
               const gateReason = c.duplicate
                 ? null
                 : mcpHostGateReason(c.server, allowedHosts);
-              const held = c.duplicate || gateReason !== null;
+              const secretHoldReason = c.duplicate ? null : secretHold(c, tx);
+              const showKeychainCount =
+                c.server.secretKeys.length > 0 && secretHoldReason === null;
+              const held =
+                c.duplicate || gateReason !== null || secretHoldReason !== null;
               const allowFixable =
                 !c.duplicate && mcpHostAllowFixable(c.server, allowedHosts);
               return (
@@ -208,7 +259,7 @@ export function ImportMcpDialog({
                   >
                     <Checkbox
                       checked={picked.has(c.server.id)}
-                      disabled={held || importing}
+                      disabled={held}
                       onCheckedChange={(on) => toggle(c.server.id, on === true)}
                       className="mt-0.5"
                     />
@@ -234,13 +285,13 @@ export function ImportMcpDialog({
                           {tx("Already in your registry.")}
                         </p>
                       ) : (
-                        (c.renamed || c.server.secretKeys.length > 0) && (
+                        (c.renamed || showKeychainCount) && (
                           <p className="text-[10px] text-muted-foreground">
                             {c.renamed &&
                               tx("Renamed from “{{name}}”. ", {
                                 name: c.sourceName,
                               })}
-                            {c.server.secretKeys.length > 0 &&
+                            {showKeychainCount &&
                               tx(
                                 c.server.secretKeys.length === 1
                                   ? "One secret value moved to the keychain."
@@ -255,6 +306,11 @@ export function ImportMcpDialog({
                           {gateReason}
                           {allowFixable &&
                             ` ${tx("The agent CLI connects outside GitDesktop's AI allowlist, so allow it before importing.")}`}
+                        </p>
+                      )}
+                      {secretHoldReason && (
+                        <p className="text-[10px] text-warning">
+                          {secretHoldReason}
                         </p>
                       )}
                     </div>
@@ -278,14 +334,13 @@ export function ImportMcpDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={importing}>
+          <Button variant="outline" onClick={onClose}>
             {tx("Cancel")}
           </Button>
           <Button
             onClick={runImport}
-            disabled={pickedCount === 0 || importing || loading}
+            disabled={pickedCount === 0 || loading}
           >
-            {importing && <Spinner data-icon="inline-start" />}
             {tx("Import")}
             {pickedCount > 0 ? ` ${pickedCount}` : ""}
           </Button>

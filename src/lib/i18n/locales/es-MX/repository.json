@@ -608,5 +608,11 @@
       "gitlab": "tuvo actividad",
       "bitbucket": "se actualizó"
     }
-  }
+  },
+  "Couldn't read the repository status": "No se pudo leer el estado del repositorio",
+  "Details arrive with the next check": "Los detalles estarán disponibles después de la siguiente comprobación",
+  "Checks again automatically.": "Se volverá a comprobar automáticamente.",
+  "Back to graph": "Volver al gráfico",
+  "Pick a branch to compare against": "Elige una rama para compararla",
+  "Select a pull request": "Selecciona una solicitud de incorporación de cambios"
 }

@@ -1,3 +1,4 @@
+import { statusReadFailed } from "@/features/repository/StatusReadError";
 import { useRepoStatus } from "@/lib/git/queries";
 import { useTranslation } from "react-i18next";
 import { DiffPlaceholder } from "./DiffPlaceholder";
@@ -25,6 +26,8 @@ export function DiffRestingFallback({ repoPath }: { repoPath: string }) {
             status.data?.entries.length ?? 0,
             t("empty.noChanges"),
             t("empty.selectFile"),
+            statusReadFailed(status),
+            t("empty.statusReadFailed"),
           )}
         />
       </div>

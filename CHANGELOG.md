@@ -12,6 +12,152 @@ under `changelog.d/` (see its README); those are assembled here at release time 
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-10-21
+
+### Changed
+
+- Pushing or publishing a branch from the branch dropdown shows its progress on
+  that branch's row, and the list stays open so you can keep switching and
+  browsing while it runs.
+- When reapplying your stashed changes hits a conflict, the banner in Changes
+  says so and names the operation that finished; once every conflict is
+  resolved, it offers to drop the backup stash (after asking) or keep it.
+- Edit history's **Squash** and **Fixup** name the commit they combine into,
+  and the menu tells you when no older commit is kept to combine into. The
+  commit list also works from the keyboard: ↑ and ↓ move between commits,
+  Home and End jump to the first and last, Enter or Space opens a commit's
+  actions, Alt+↑ / Alt+↓ move it one place, and Alt+Home / Alt+End send it
+  to the top or bottom (Option on macOS).
+- Reworded and squashed commits now keep their original author in
+  **Edit history** and **Squash N commits**; a squash keeps its first
+  commit's author.
+- The rename dialog now notes when a branch tracks a remote branch (only the
+  local name changes), and `gd/session/` names are reserved for agent sessions.
+
+### Fixed
+
+- On Linux, cancelling or timing out an agent now stops exactly the
+  agent's own processes, and on macOS and Linux, AI reviews, Debug with AI,
+  conflict resolution and generated drafts also stop their helper processes
+  when they finish.
+- AI features that apply your AI ignore patterns work with any Git
+  `init.templateDir`, including templates that contain only hooks.
+- AI features that apply your AI ignore patterns keep working after your
+  system clears its temporary files while GitDesktop is open: generated branch
+  names, commit messages and pull request descriptions, AI code review, and AI
+  conflict resolution.
+- Skipping a conflict, closing AI resolution, or switching files while it is
+  still reading the conflict now ends that run right away.
+- AI reviews and agent sessions keep their complete final answer even when
+  it arrives late. A review that stops short of it is kept as incomplete
+  with everything it produced, and automated reviews post only complete
+  answers.
+- If another commit becomes the latest while you edit an amend message (say,
+  from a terminal or an agent), GitDesktop stops the amend, tells you why, and
+  keeps your message.
+- **Automated AI reviews read the pull request's description.** Re-reviews from
+  *On new commits to a reviewed PR*, the missed-review catch-up, and the review
+  that runs when you mark a draft ready for review now include the author's
+  latest description, so decisions you record there are respected the same way
+  as in reviews you start yourself. When the description is empty or can't be
+  read, the review is told so. The description and notes for reviewers reach
+  the model marked as the author's text, separate from the review's own
+  instructions.
+- Opening a repository that Git can't read shows what went wrong, with the
+  full details.
+- **Mark resolved** now appears within a couple of seconds when you finish a
+  conflicted file outside the conflict view, in the built-in terminal, an agent
+  session or another editor.
+- Creating a pull request, or publishing a local pull request or issue, keeps
+  the dialog's text in place all the way through its closing animation, and a
+  local issue's comment count holds steady while it publishes.
+- A discussion you're reading stays on screen when a background refresh
+  fails, with a line at the top of the discussion saying it couldn't
+  refresh and a Retry. A discussion that fails to load says why and offers
+  a Retry, and while you're offline, one that hasn't loaded yet says it will
+  load once you're back online.
+- An Edit history plan that edits one commit and drops another now runs when
+  `rebase.missingCommitsCheck` is set to `error`.
+- The History tab and Edit history now pick up a commit made outside the app
+  (in a terminal, by an agent, or in another tool) within a few seconds, and
+  commits you've already pushed aren't offered for editing or squashing in the
+  meantime.
+- Amend and Undo in the History context menu act only on the commit you
+  right-clicked, including while a filter is applied.
+- History's **Squash N commits…** now waits while a merge, rebase,
+  cherry-pick or revert is in progress, and the menu says to finish the
+  operation in Changes first, as **Edit history…** does. Switching
+  repositories also closes History's open dialogs (Edit history, Squash,
+  reset to commit, delete tag, cherry-pick to branch, merge parent, and
+  create branch or tag), so each one acts on the repository on screen.
+- TypeScript and JavaScript code after a comment inside a function's `{ … }`
+  parameters or a template string's `${ … }` keeps its syntax colors, and
+  the comment itself now shows in the comment color, apostrophes included,
+  in diffs, conflict views, and fenced code blocks.
+- While one local issue is publishing, another local issue's Publish dialog
+  keeps its Cancel and destination choice available.
+- Local pull requests behave the same way: while one is publishing, another's
+  Publish dialog keeps Cancel available, and the publishing one keeps showing
+  how many comments it carries over.
+- The MCP `push` tool sends a named branch only to a remote branch of the same
+  name: a branch tracking a differently named one, such as `origin/main`, is
+  refused, and the error names the `set_upstream: true` call that publishes it
+  under its own name.
+- Edits to your MCP server list in Settings, secrets included, apply
+  only when you press Save, and Discard leaves stored secrets exactly
+  as they were. Import flags any server whose secret can't be stored,
+  and imports the rest.
+- Files that aren't UTF-8 text (cp1252, Shift-JIS, GBK and the like) now keep
+  their bytes exact when you stage, discard or resolve conflicts in them. Their
+  diffs note that the file stages and discards as a whole, their conflicts
+  resolve with the whole-file accept buttons, and AI conflict resolution
+  explains why it leaves them to you.
+- The command palette keeps its highlight on a visible command while the
+  available commands change under it, and Enter always runs the highlighted
+  command.
+- In issue, pull request, commit, tag, discussion and project views, a change
+  that's still saving holds only its own record: every other record keeps its
+  controls live.
+- Binary files in a GitHub pull request's Files tab, and modified binaries
+  in a GitLab merge request's, now read `bin` like the app's other file
+  lists. A text file whose changes mention binary files now shows its diff
+  in the Files and Commits tabs.
+- Push now understands a branch whose remote branch has a different name (after
+  a rename, or a checkout from someone else's branch): the sync bar's **Push**
+  opens a menu to push to the branch it tracks or to publish under its own name
+  and track that. When Git knows the tracked branch is the remote's default
+  branch, only the publish option appears. When Git refuses such a push anyway,
+  the message says why and what to do.
+- The push-to-origin shortcut confirms the branch you're on and what it tracks
+  before pushing, so it follows a branch switch or tracking change made
+  outside the app. If the branch list hasn't caught up yet, it asks you to
+  press it again.
+- Local pull requests follow a branch renamed in GitDesktop (in the app or
+  through its MCP server): open pull requests whose head or base used the old
+  name now point at the new one.
+- Reset to upstream and Undo last commit now act only on the branch and
+  commit you saw: if another Git process (a terminal, an agent, or another
+  window) commits or switches branches before or while one runs, it stops
+  with a toast and a refreshed view, and nothing is reset or undone, so you
+  can decide again. Amend also stays tied to the branch, or detached HEAD,
+  you started it on: it waits while HEAD is elsewhere. When another Git
+  process moves HEAD just as an amend runs, the amend still completes, and
+  its toast says the amend raced another Git process and names the commit
+  or branch when it can tell; the replaced commit stays in the reflog. Undo
+  explains when there is nothing to undo onto (a detached first commit, or
+  a shallow clone whose latest commit's parent was never fetched), and asks
+  you to finish a merge, cherry-pick or revert in progress, or to resolve
+  conflicts, first. MCP agents get the same commit check through an
+  optional `expectedHead` on the `commit` (amend) and `undo_last_commit`
+  tools, and the `commit` result reports a raced amend in `raced`.
+- **Rewrite history**, **Squash N commits**, and a rebase started from an
+  **edit** action now stop with nothing rewritten when the branch gained
+  commits after their dialog was opened, so every commit stays in your
+  history. A rewrite interrupted partway can be undone with Abort, with
+  the branch still at its original tip.
+- When Git can't read a repository's status, the Changes view shows what
+  went wrong, with Retry and the full details, and keeps checking on its own.
+
 ## [0.13.5] - 2026-10-15
 
 ### Changed
@@ -5002,7 +5148,8 @@ built on Tauri 2; every GitHub feature runs through the GitHub CLI (`gh`).
 - Diff-renderer exceptions are caught by an error boundary instead of taking
   down the whole app.
 
-[Unreleased]: https://github.com/theBGuy/GitDesktop/compare/v0.13.5...HEAD
+[Unreleased]: https://github.com/theBGuy/GitDesktop/compare/v0.13.6...HEAD
+[0.13.6]: https://github.com/theBGuy/GitDesktop/compare/v0.13.5...v0.13.6
 [0.13.5]: https://github.com/theBGuy/GitDesktop/compare/v0.13.4...v0.13.5
 [0.13.4]: https://github.com/theBGuy/GitDesktop/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/theBGuy/GitDesktop/compare/v0.13.2...v0.13.3

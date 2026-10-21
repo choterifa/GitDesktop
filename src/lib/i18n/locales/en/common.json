@@ -304,5 +304,13 @@
   "Some projects aren't shown.": "Some projects aren't shown.",
   "Unavailable": "Unavailable",
   "more": "more",
-  "Repository commit graph": "Repository commit graph"
+  "Repository commit graph": "Repository commit graph",
+  "Couldn't refresh the status — showing the last read.": "Couldn't refresh the status — showing the last read.",
+  "Retry reading the status": "Retry reading the status",
+  "Show the status error details": "Show the status error details",
+  "The branch switched to {{branch}} before the amend ran, so the amend landed there. The commit it replaced is in the reflog.": "The branch switched to {{branch}} before the amend ran, so the amend landed there. The commit it replaced is in the reflog.",
+  "HEAD was detached before the amend ran, so the amend landed there. The commit it replaced is in the reflog.": "HEAD was detached before the amend ran, so the amend landed there. The commit it replaced is in the reflog.",
+  "Another Git process committed first, so the amend rewrote {{actual}} instead of {{expected}}. The original {{actual}} is in the reflog.": "Another Git process committed first, so the amend rewrote {{actual}} instead of {{expected}}. The original {{actual}} is in the reflog.",
+  "Another Git process committed first, so the amend rewrote a different commit than the one shown. The original is in the reflog.": "Another Git process committed first, so the amend rewrote a different commit than the one shown. The original is in the reflog.",
+  "Loading changes…": "Loading changes…"
 }

@@ -65,7 +65,7 @@ import {
   hunkScopedHljsHighlighter,
   installHljsGapIsolation,
 } from "./hljs-gap-isolation";
-import { installTsNoJsx } from "./hljs-ts-no-jsx";
+import { installPatchedJsGrammars } from "./hljs-ts-no-jsx";
 import { ImageDiff, ImagePanes, type ImageRevs, imageMime } from "./ImageDiff";
 import {
   canPreviewMarkdown,
@@ -372,8 +372,8 @@ highlighter.setMaxLineToIgnoreSyntax(SYNTAX_LINE_CAP);
 // tree-shaken.
 installHljsGapIsolation();
 // Before any tokenize, and before ensureCustomLanguages (createDiffFile) so a
-// user grammar registered under `typescript`/`tsx` still wins.
-installTsNoJsx(highlighter.getHighlighterEngine());
+// user grammar registered under `typescript`/`tsx`/`javascript` still wins.
+installPatchedJsGrammars(highlighter.getHighlighterEngine());
 
 /**
  * Build a parsed `DiffFile` from unified-diff text, with syntax highlighting

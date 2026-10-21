@@ -12,8 +12,9 @@ import {
 import { headBranchPin } from "@/lib/git/api";
 import { coAuthorTrailers } from "@/lib/git/co-authors";
 import { repoKeys, useCommit, useRepoStatus } from "@/lib/git/queries";
-import type { ChangeKind, FileEntry } from "@/lib/git/types";
+import type { AmendRace, ChangeKind, FileEntry } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useAiConfigured, useAiEnabled } from "@/lib/settings/queries";
 import { commitDraftKey, useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
@@ -22,6 +23,40 @@ import { useGenerateCommitMessage } from "./useGenerateCommitMessage";
 /** Why an amend holds, for the surfaces' banner: the commit moved, then the branch;
  *  `"none"` while it can run, or when not amending. */
 export type AmendHold = "none" | "commit" | "branch";
+
+/** The report for an amend that landed after another Git process moved HEAD: where
+ *  it landed (another branch, then a detached HEAD) outranks the commit it rewrote,
+ *  and a commit the reflog couldn't name, or a pin that was never read, takes the
+ *  generic form. */
+function racedAmendMessage(
+  raced: AmendRace,
+  expectedHead: string | null,
+  tx: ReturnType<typeof useCommonText>,
+): string {
+  if (raced.branch !== null) {
+    return tx(
+      "The branch switched to {{branch}} before the amend ran, so the amend landed there. The commit it replaced is in the reflog.",
+      { branch: raced.branch },
+    );
+  }
+  if (raced.detached) {
+    return tx(
+      "HEAD was detached before the amend ran, so the amend landed there. The commit it replaced is in the reflog.",
+    );
+  }
+  if (raced.rewrote !== null && expectedHead !== null) {
+    return tx(
+      "Another Git process committed first, so the amend rewrote {{actual}} instead of {{expected}}. The original {{actual}} is in the reflog.",
+      {
+        actual: raced.rewrote.slice(0, 7),
+        expected: expectedHead.slice(0, 7),
+      },
+    );
+  }
+  return tx(
+    "Another Git process committed first, so the amend rewrote a different commit than the one shown. The original is in the reflog.",
+  );
+}
 
 /**
  * The commit machinery behind both composing surfaces — the inline CommitBox and
@@ -53,6 +88,7 @@ export function useCommitSubmit(
   } = {},
 ) {
   const { t } = useTranslation("commit");
+  const tx = useCommonText();
   const queryClient = useQueryClient();
   const status = useRepoStatus(repoPath);
   const commit = useCommit(repoPath);
@@ -241,11 +277,17 @@ export function useCommitSubmit(
           },
         });
       }
-      toast.success(
-        t(wasAmending ? "toast.amended" : "toast.committed", {
-          hash: result.hash.slice(0, 7),
-        }),
-      );
+      // A raced amend still landed, so it closes and clears like any other; only the
+      // report differs, a warning since the commit itself succeeded.
+      if (result.raced) {
+        toast.warning(racedAmendMessage(result.raced, expectedHead, tx));
+      } else {
+        toast.success(
+          t(wasAmending ? "toast.amended" : "toast.committed", {
+            hash: result.hash.slice(0, 7),
+          }),
+        );
+      }
       // Amending rewrites an existing commit; only new commits fire
       // on-commit automations.
       if (!wasAmending) {

@@ -688,5 +688,15 @@
   "store.": "donde se guardan.",
   "No custom commands yet. Add one, or define": "Aún no hay comandos personalizados. Agrega uno o define",
   "in a repo to share them with your team.": "en un repositorio para compartirlos con tu equipo.",
-  "Removed \"{{name}}\"": "Se quitó «{{name}}»."
+  "Removed \"{{name}}\"": "Se quitó «{{name}}».",
+  "Settings saved, but some secret values couldn't be stored in your keychain. Save again to retry.": "Se guardó la configuración, pero no se pudieron guardar algunos secretos en el llavero. Vuelve a guardar para intentarlo de nuevo.",
+  "Secret \"{{key}}\" on \"{{name}}\"": "Secreto \"{{key}}\" en \"{{name}}\"",
+  "the environment variable": "la variable de entorno",
+  "the header": "el encabezado",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its name can only use letters, numbers, dots, dashes and underscores.": "No se puede guardar en el llavero el secreto asociado con {{secretType}} \"{{key}}\": su nombre solo puede contener letras, números, puntos, guiones y guiones bajos.",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: its value isn't a string.": "No se puede guardar en el llavero el secreto asociado con {{secretType}} \"{{key}}\": su valor no es una cadena de texto.",
+  "Secret associated with {{secretType}} \"{{key}}\" can't move to your keychain: Windows allows at most {{count}} characters.": "No se puede guardar en el llavero el secreto asociado con {{secretType}} \"{{key}}\": Windows permite un máximo de {{count}} caracteres.",
+  "Secret associated with {{secretType}} \"{{key}}\" can only use letters, numbers, dots, dashes and underscores in its name.": "El nombre del secreto asociado con {{secretType}} \"{{key}}\" solo puede contener letras, números, puntos, guiones y guiones bajos.",
+  "Secret associated with {{secretType}} \"{{key}}\" is too long for your keychain: Windows allows at most {{count}} characters.": "El secreto asociado con {{secretType}} \"{{key}}\" es demasiado largo para el llavero: Windows permite un máximo de {{count}} caracteres.",
+  "This server's id (edited in your settings file) can only use letters, numbers, dots, dashes and underscores to store secrets.": "El identificador de este servidor (que se edita en el archivo de configuración) solo puede contener letras, números, puntos, guiones y guiones bajos para guardar secretos."
 }

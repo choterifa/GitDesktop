@@ -119,5 +119,10 @@
   "outdated": "desactualizado",
   "duplicate": "duplicado",
   "abuse": "abuso",
-  "Opened discussion #{{number}}": "Se abrió la discusión n.º {{number}}"
+  "Opened discussion #{{number}}": "Se abrió la discusión n.º {{number}}",
+  "You're offline — this discussion will load once you're back online.": "Estás sin conexión. Este debate se cargará cuando vuelvas a conectarte.",
+  "Couldn't load this discussion from GitHub.": "No se pudo cargar este debate desde GitHub.",
+  "Couldn't refresh this discussion — showing the last loaded version.": "No se pudo actualizar este debate; se muestra la última versión cargada.",
+  "You're offline — showing the last opened discussion; this one will load once you're back online.": "Estás sin conexión. Se muestra el último debate abierto; este se cargará cuando vuelvas a conectarte.",
+  "You're offline — showing the last loaded version.": "Estás sin conexión. Se muestra la última versión cargada."
 }

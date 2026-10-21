@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { deleteMcpSecret, setMcpSecret } from "@/lib/git/api";
+import { isWindows } from "@/lib/hotkeys/binding";
 import { MCP_TRANSPORTS, type McpServer } from "@/lib/settings/api";
 import {
   emptyMcpServer,
@@ -33,11 +33,38 @@ import {
 } from "@/lib/settings/mcp";
 import { useRepoKeys } from "@/lib/settings/queries";
 import { repoNameFromPath } from "@/lib/stores/notifications";
-import { toastError } from "@/lib/toast";
 import { HostAllowNote } from "../HostAllowNote";
 import { useSettingsText } from "../use-settings-text";
 import { EntryEditor } from "./EntryEditor";
+import {
+  entryPlanFromRows,
+  isSafeMcpSecretKey,
+  MAX_WINDOWS_SECRET_UTF16,
+  type McpSecretWriteProblem,
+  secretWriteProblem,
+} from "./secret-ops";
 import type { EntryRow } from "./shared";
+
+/** The validation line for a typed secret value the keychain would refuse. */
+const SECRET_REFUSAL: Record<
+  McpSecretWriteProblem<string>["kind"],
+  (
+    tx: (source: string, options?: Record<string, unknown>) => string,
+    secretType: string,
+    key: string,
+  ) => string
+> = {
+  name: (tx, secretType, key) =>
+    tx(
+      'Secret associated with {{secretType}} "{{key}}" can only use letters, numbers, dots, dashes and underscores in its name.',
+      { secretType, key },
+    ),
+  length: (tx, secretType, key) =>
+    tx(
+      'Secret associated with {{secretType}} "{{key}}" is too long for your keychain: Windows allows at most {{count}} characters.',
+      { secretType, key, count: MAX_WINDOWS_SECRET_UTF16.toLocaleString("en-US") },
+    ),
+};
 
 function toRows(server: McpServer): EntryRow[] {
   const secretKeys = new Set(server.secretKeys);
@@ -51,8 +78,9 @@ function toRows(server: McpServer): EntryRow[] {
 }
 
 /** Add/edit dialog for one MCP server. Mounted with a `key` so each open starts
- *  from fresh local state. Save persists secret values to the OS keychain, then
- *  hands the (secret-free) server up to the settings form. */
+ *  from fresh local state. Save hands the (secret-free) server and its typed
+ *  secret values up to the settings form, which stages them; nothing reaches
+ *  the keychain until the screen's Save commits. */
 export function McpServerDialog({
   initial,
   others,
@@ -75,7 +103,10 @@ export function McpServerDialog({
   /** Add a URL's host to the draft allow list — the one-click fix behind the
    *  host note. Mutates the draft settings, not persisted settings. */
   onAllowHost: (url: string) => void;
-  onSave: (server: McpServer) => void;
+  onSave: (
+    server: McpServer,
+    secretWrites: { key: string; value: string }[],
+  ) => void;
   onClose: () => void;
 }) {
   const tx = useSettingsText();
@@ -84,7 +115,6 @@ export function McpServerDialog({
   const editing = initial !== null;
   const [draft, setDraft] = useState<McpServer>(initial ?? emptyMcpServer());
   const [rows, setRows] = useState<EntryRow[]>(initial ? toRows(initial) : []);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isStdio = draft.transport === "stdio";
@@ -143,58 +173,56 @@ export function McpServerDialog({
   // check, so removing it fails the null check.
   const selectedScope = scopedToThisRepo ? (thisRepoKey ?? curScope) : curScope;
 
+  // The one derivation of entries, secret names and typed secret values.
+  const plan = entryPlanFromRows(rows);
+
   // Reconstruct a candidate server from the live draft + rows for validation.
   function candidate(): McpServer {
-    const entries = rows.map((r) => ({
-      key: r.key.trim(),
-      value: r.secret ? "" : r.value,
-    }));
-    const secretKeys = rows.filter((r) => r.secret).map((r) => r.key.trim());
     return {
       ...draft,
       name: draft.name.trim(),
       args: draft.args,
-      env: isStdio ? entries : [],
-      headers: isStdio ? [] : entries,
-      secretKeys,
+      env: isStdio ? plan.entries : [],
+      headers: isStdio ? [] : plan.entries,
+      secretKeys: plan.secretKeys,
     };
   }
 
-  const validationError = validateMcpServer(candidate(), others, allowedHosts);
+  // The keychain refuses unsafe names and (on Windows) over-long values, so a
+  // typed value hitting either would commit a pair no Save could ever store;
+  // refuse it here instead.
+  function secretRefusal(): string | null {
+    const problem = secretWriteProblem(plan.secretWrites, isWindows);
+    if (problem)
+      return SECRET_REFUSAL[problem.kind](
+        tx,
+        tx(isStdio ? "the environment variable" : "the header"),
+        problem.key,
+      );
+    if (plan.secretWrites.length > 0 && !isSafeMcpSecretKey(draft.id))
+      return tx(
+        "This server's id (edited in your settings file) can only use letters, numbers, dots, dashes and underscores to store secrets.",
+      );
+    return null;
+  }
 
-  async function save() {
+  const validationError =
+    validateMcpServer(candidate(), others, allowedHosts) ?? secretRefusal();
+
+  function save() {
     if (validationError) {
       setError(validationError);
       return;
     }
-    const server = candidate();
-    setSaving(true);
     setError(null);
-    try {
-      // Write any newly-typed secret values to the keychain (keyed per server +
-      // entry name); only the names are kept in `secretKeys`, never the values.
-      for (const row of rows) {
-        if (row.secret && row.secretInput.trim())
-          await setMcpSecret(server.id, row.key.trim(), row.secretInput);
-      }
-      // Clean up keychain entries for keys that are no longer secret (renamed,
-      // removed, or flipped back to a plain value).
-      const liveSecretKeys = new Set(server.secretKeys);
-      for (const old of initial?.secretKeys ?? []) {
-        if (!liveSecretKeys.has(old)) await deleteMcpSecret(server.id, old);
-      }
-      onSave(server);
-    } catch (e) {
-      setSaving(false);
-      toastError(e);
-    }
+    onSave(candidate(), plan.secretWrites);
   }
 
   return (
     <Dialog
       open
       onOpenChange={(o) => {
-        if (!o && !saving) onClose();
+        if (!o) onClose();
       }}
     >
       <DialogContent className="sm:max-w-2xl">

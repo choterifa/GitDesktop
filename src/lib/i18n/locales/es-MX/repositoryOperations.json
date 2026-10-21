@@ -530,7 +530,9 @@
     }
   },
   "dialogs": {
-    "common": { "cancel": "Cancelar" },
+    "common": {
+      "cancel": "Cancelar"
+    },
     "settings": {
       "loadingTitle": "Configuración del repositorio",
       "loading": "Cargando la configuración del repositorio…"
@@ -672,11 +674,20 @@
       "merged": "fusionada",
       "mergedPrTitle": "Fusionada mediante la solicitud {{pr}}; coincidencia por nombre de rama",
       "mergedPr": "fusionada {{pr}}",
-      "past": { "archive": "Archivada", "delete": "Eliminada" },
+      "past": {
+        "archive": "Archivada",
+        "delete": "Eliminada"
+      },
       "success": "{{verb}} {{count}} rama(s)",
       "partialFailure": "{{verb}} {{count}}; {{failed}} fallaron",
-      "action": { "archive": "Archivar", "delete": "Eliminar" },
-      "gerund": { "archive": "Archivando", "delete": "Eliminando" },
+      "action": {
+        "archive": "Archivar",
+        "delete": "Eliminar"
+      },
+      "gerund": {
+        "archive": "Archivando",
+        "delete": "Eliminando"
+      },
       "selectedAction": "{{verb}} {{count}} rama(s)",
       "staleExcluded": "{{count}} rama(s) obsoleta(s) excluida(s) de {{verb}}: {{reason}}.",
       "excludedReason": {
@@ -852,5 +863,6 @@
       "forMyself": "Para mis propios fines",
       "ownDescription": "Las solicitudes de incorporación, incidencias y “Ver en GitHub” apuntarán a tu bifurcación."
     }
-  }
+  },
+  "Couldn't read the repository status": "No se pudo leer el estado del repositorio"
 }

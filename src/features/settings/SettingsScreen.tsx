@@ -2,6 +2,7 @@ import { ArrowLeftIcon } from "@phosphor-icons/react";
 import { useSelector } from "@tanstack/react-store";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { LazyPanelFallback } from "@/components/lazy-panel-fallback";
 import { NavRail } from "@/components/NavRail";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { subscribeMcpRehome } from "@/lib/settings/api";
 import { rehomeServerRepoKeys } from "@/lib/settings/mcp";
 import { useSaveSettings, useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
+import { toastComposedError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { AboutSection } from "./AboutSection";
 import { AccountsSection } from "./AccountsSection";
@@ -43,7 +45,22 @@ import {
 import { InstructionsSection } from "./InstructionsSection";
 import { KeyboardSection } from "./KeyboardSection";
 import { McpServersSection } from "./McpServersSection";
+import {
+  flushMcpSecretDeletes,
+  flushMcpSecretSets,
+} from "./mcp/flush-mcp-secrets";
+import {
+  type McpSecretsHandle,
+  type McpStagedSecret,
+  mcpSecretDeletes,
+  mcpSetFailureHeadings,
+  pruneStagedServer,
+  settleStaged,
+  stagedSetFlushPlan,
+  stageMcpSecretSets,
+} from "./mcp/secret-ops";
 import { NotificationsSection } from "./NotificationsSection";
+import { resetsAfterSave, stableStringify } from "./save-reset";
 import { settingsFormOpts, toDraft } from "./settings-form";
 import { TerminalSection } from "./TerminalSection";
 import { UpdatesSection } from "./UpdatesSection";
@@ -80,22 +97,6 @@ const PANELS = [
 
 type PanelId = (typeof PANELS)[number]["id"];
 
-/** JSON with object keys sorted, so the dirty check is insensitive to key
- *  order. The Tauri store round-trips nested objects (e.g. an imported
- *  TextMate grammar) with reordered keys, which would otherwise leave the
- *  Save bar stuck on "unsaved changes" forever. */
-function stableStringify(value: unknown): string {
-  return JSON.stringify(value, (_key, val) =>
-    val && typeof val === "object" && !Array.isArray(val)
-      ? Object.fromEntries(
-          Object.keys(val as Record<string, unknown>)
-            .sort()
-            .map((k) => [k, (val as Record<string, unknown>)[k]]),
-        )
-      : val,
-  );
-}
-
 /** Panels that only make sense when AI features are enabled. */
 const AI_PANELS = new Set<PanelId>([
   "ai",
@@ -123,6 +124,47 @@ export function SettingsScreen() {
   // hold its imperative save so "Save and close" persists it too.
   const [automationsDirty, setAutomationsDirty] = useState(false);
   const saveAutomationsRef = useRef<(() => void) | null>(null);
+  // Typed MCP secret values wait here until Save, in renderer memory only. It
+  // lives on the screen, not the MCP section, so it outlives pane switches
+  // exactly as the form draft does. The ref is the truth, written synchronously
+  // by every writer through commitStaged, so a Save pressed right after a stage
+  // sees it; the state only mirrors it for rendering.
+  const stagedRef = useRef<McpStagedSecret[]>([]);
+  const [stagedSecrets, setStagedSecrets] = useState<McpStagedSecret[]>([]);
+  function commitStaged(next: McpStagedSecret[]) {
+    stagedRef.current = next;
+    setStagedSecrets(next);
+  }
+  // The mcpServers this form last saw saved: the delete diff only removes
+  // secrets of servers it knew about, never one another window added.
+  const mcpBaseline = useRef<unknown>(null);
+  // Bumped by every Discard, so a Save can tell one ran during its write.
+  const discards = useRef(0);
+  const secretsDirty = stagedSecrets.length > 0;
+  const secrets: McpSecretsHandle = {
+    stage: (serverId, writes, liveSecretKeys) =>
+      commitStaged(
+        stageMcpSecretSets({
+          staged: stagedRef.current,
+          serverId,
+          writes,
+          liveSecretKeys,
+        }),
+      ),
+    pruneServer: (serverId) =>
+      commitStaged(pruneStagedServer(stagedRef.current, serverId)),
+  };
+  // Held for a whole Save, keychain flush included: the form's own isSubmitting
+  // clears at the mid-save form.reset, which would let a second Save overlap.
+  const saveLock = useRef(false);
+  const [saveLocked, setSaveLocked] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // A deep-link fired while Settings is already open (no remount) still routes
   // to the requested section; consume the target so it doesn't re-fire.
@@ -151,18 +193,91 @@ export function SettingsScreen() {
   const form = useAppForm({
     ...settingsFormOpts,
     onSubmit: async ({ value }) => {
-      const current = settings.data;
-      if (!current) return;
-      await saveSettings.mutateAsync({ ...current, ...value });
-      // keepDefaultValues everywhere we reset-with-values: otherwise reset
-      // rewrites the form's defaultValues and the per-render options sync
-      // (which still sees settingsFormOpts' static defaults) clobbers the
-      // values right back on the next render.
-      form.reset(value, { keepDefaultValues: true });
-      toast.success(tx("Settings saved"));
-      if (closeAfterSave.current) {
+      saveLock.current = true;
+      setSaveLocked(true);
+      try {
+        // Press-time captures: a Discard during the awaits below rewrites both
+        // the buffer and the baseline, and neither rewrite may reach this Save.
+        const stagedAtPress = stagedRef.current;
+        const baselineAtPress = mcpBaseline.current;
+        const discardsAtPress = discards.current;
+        const current = settings.data;
+        if (!current) return;
+        await saveSettings.mutateAsync({ ...current, ...value });
+        // keepDefaultValues everywhere we reset-with-values: otherwise reset
+        // rewrites the form's defaultValues and the per-render options sync
+        // (which still sees settingsFormOpts' static defaults) clobbers the
+        // values right back on the next render. An edit that landed during the
+        // write skips the reset and stays dirty for the next Save; a Discard
+        // during it put back pre-save values, so it resets as before.
+        if (
+          resetsAfterSave({
+            discarded: discards.current !== discardsAtPress,
+            current: form.state.values,
+            written: value,
+          })
+        )
+          form.reset(value, { keepDefaultValues: true });
+        // Sets and deletes fire only after the committed write, from what this
+        // form saw: a failed save writes nothing, a failed set stays staged, and
+        // a failed delete orphans at worst.
+        const plan = stagedSetFlushPlan({
+          staged: stagedAtPress,
+          committed: value.mcpServers,
+        });
+        const failed = await flushMcpSecretSets(plan.flush);
+        const keep = [...failed.map((f) => f.entry), ...plan.retain];
+        const next = settleStaged({
+          current: stagedRef.current,
+          pressed: stagedAtPress,
+          keep,
+        });
+        commitStaged(next);
+        const deletes = mcpSecretDeletes({
+          baseline: baselineAtPress,
+          saved: current.mcpServers,
+          committed: value.mcpServers,
+        });
+        mcpBaseline.current = value.mcpServers;
+        // Only failures still staged count: one a mid-flight Discard, prune or
+        // re-type removed is no longer the user's to retry.
+        const unstored = keep.filter((e) => next.includes(e)).length;
+        const andClose = closeAfterSave.current;
         closeAfterSave.current = false;
-        closeSettings();
+        if (unstored > 0) {
+          const title = tx("Settings saved, but some secret values couldn't be stored in your keychain. Save again to retry.");
+          // The keychain's own reason (a locked or missing keychain, a denied
+          // prompt) rides Details; a value only retained has no error to show.
+          const raised = failed.filter((f) => next.includes(f.entry));
+          if (raised.length > 0)
+            toastComposedError({
+              title,
+              errors: raised.map((f) => f.error),
+              headings: mcpSetFailureHeadings({
+                failures: raised,
+                committed: value.mcpServers,
+                format: (key, name) =>
+                  tx('Secret "{{key}}" on "{{name}}"', { key, name }),
+              }),
+            });
+          else toast.error(title);
+        } else {
+          toast.success(tx("Settings saved"));
+          // The flush awaited above: close only if nothing changed meanwhile,
+          // so an edit made during the save stays on screen with its Save bar.
+          if (
+            andClose &&
+            mounted.current &&
+            useUiStore.getState().view === "settings" &&
+            stagedRef.current.length === 0 &&
+            stableStringify(form.state.values) === stableStringify(value)
+          )
+            closeSettings();
+        }
+        flushMcpSecretDeletes(deletes);
+      } finally {
+        saveLock.current = false;
+        setSaveLocked(false);
       }
     },
   });
@@ -173,6 +288,7 @@ export function SettingsScreen() {
   useEffect(() => {
     if (settings.data && !seeded.current) {
       seeded.current = true;
+      mcpBaseline.current = settings.data.mcpServers;
       form.reset(toDraft(settings.data), { keepDefaultValues: true });
     }
   }, [settings.data, form]);
@@ -201,6 +317,7 @@ export function SettingsScreen() {
   // store change, but the component only re-renders when dirtiness FLIPS — not
   // on every keystroke across all 13 panels.
   const isSubmitting = useSelector(form.store, (s) => s.isSubmitting);
+  const saving = isSubmitting || saveLocked;
   const saved = settings.data ? toDraft(settings.data) : null;
   const savedStr = saved !== null ? stableStringify(saved) : null;
   const dirty = useSelector(
@@ -228,11 +345,12 @@ export function SettingsScreen() {
       publishNotificationsDraft(notificationsDraft);
   }, [notificationsDraft, publishNotificationsDraft]);
 
-  // Either the settings form or the Automations panel having unsaved edits
-  // should guard closing the screen.
-  const closeDirty = dirty || automationsDirty;
+  // Unsaved edits in the settings form, the Automations panel or the staged
+  // MCP secrets should guard closing the screen.
+  const closeDirty = dirty || automationsDirty || secretsDirty;
 
   function save(andClose: boolean) {
+    if (saveLock.current) return;
     // Persist the Automations panel's own draft alongside the settings form —
     // fire-and-forget, like the form save: the store write completes even as the
     // screen closes. Without this, "Save and close" would silently drop it.
@@ -242,6 +360,9 @@ export function SettingsScreen() {
   }
 
   function discard() {
+    discards.current += 1;
+    commitStaged([]);
+    mcpBaseline.current = settings.data?.mcpServers ?? null;
     if (saved) form.reset(saved, { keepDefaultValues: true });
   }
 
@@ -308,7 +429,7 @@ export function SettingsScreen() {
               )}
               {activePanel === "commands" && <CommandsSection form={form} />}
               {activePanel === "mcp-servers" && (
-                <McpServersSection form={form} />
+                <McpServersSection form={form} secrets={secrets} />
               )}
               {activePanel === "automations" && (
                 <AutomationsSection
@@ -360,7 +481,7 @@ export function SettingsScreen() {
         </div>
       )}
 
-      {dirty && (
+      {(dirty || secretsDirty) && (
         <footer
           role="status"
           className="flex shrink-0 items-center justify-between gap-3 border-t px-4 py-2.5"
@@ -372,14 +493,15 @@ export function SettingsScreen() {
             <Button variant="outline" size="sm" onClick={discard}>
               {tx("Discard")}
             </Button>
-            <Button
+            <DisabledReasonButton
               size="sm"
               onClick={() => save(false)}
-              disabled={isSubmitting}
+              disabled={saving}
+              reason={tx("Saving…")}
             >
-              {isSubmitting && <Spinner data-icon="inline-start" />}
+              {saving && <Spinner data-icon="inline-start" />}
               {tx("Save changes")}
-            </Button>
+            </DisabledReasonButton>
           </div>
         </footer>
       )}
@@ -406,16 +528,17 @@ export function SettingsScreen() {
             >
               {tx("Discard and close")}
             </Button>
-            <Button
+            <DisabledReasonButton
               onClick={() => {
                 setConfirmClose(false);
                 save(true);
               }}
-              disabled={isSubmitting}
+              disabled={saving}
+              reason={tx("Saving…")}
             >
-              {isSubmitting && <Spinner data-icon="inline-start" />}
+              {saving && <Spinner data-icon="inline-start" />}
               {tx("Save and close")}
-            </Button>
+            </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

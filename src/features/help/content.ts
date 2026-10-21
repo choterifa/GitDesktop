@@ -484,6 +484,11 @@ menu item appears only when you have it, greyed out while your access is being c
 The **Changes** tab ({{kbd:tab-changes}}) lists your modified files, split into
 **Staged** (included in the next commit) and **Changes** (not yet staged).
 
+If Git can't read the status (a broken submodule, for example), the tab says so with
+Git's message: **Retry** checks again, **Details** shows the full text with Copy, and
+the view keeps checking on its own. A check that fails after the list has loaded keeps
+the last list up, with a line above it saying it couldn't refresh.
+
 ## Staging
 
 - Click a file to see its diff. Toggle **unified / split** at the top of the diff.
@@ -590,10 +595,12 @@ Write a **summary** (there's a 72-character budget indicator) and an optional
   description from your staged diff (see *AI & automations*).
 {{/ai}}- After committing, **Undo** ({{kbd:undo-commit}}) reverses the last commit and
   returns your message to the box. Undoing a branch's *first* commit asks first — it
-  has no parent to fall back to, so the branch ref goes with it. If a commit lands,
-  or the branch is switched, from elsewhere before the undo runs, nothing is undone
-  and Undo says so; on a detached first commit there is nothing to undo onto, and
-  Undo says that instead.
+  has no parent to fall back to, so the branch ref goes with it. If another Git
+  process commits or switches branches after History last showed it, or while the
+  undo runs, Undo stops without undoing anything and says so. Undo also asks you
+  to finish or abort a merge, cherry-pick or revert in progress, and to resolve
+  any conflicts, first. On a detached first commit there is nothing to undo onto,
+  and Undo says that instead.
 
 > Discarding an **untracked** file moves it to the recycle bin, so it's recoverable —
 > it isn't deleted outright. The exception is a name Windows reserves for a device
@@ -629,7 +636,10 @@ and **Shift + ↑ / ↓** extends a range selection there.
   new commit lands, or HEAD detaches from that branch or reattaches from a detached
   start, the commit box holds the amend and says why until HEAD is back where you
   started; switching to another branch shows that branch's own draft instead. While it
-  holds, **Stop amending** ends amend mode with your message kept.
+  holds, **Stop amending** ends amend mode with your message kept. If another Git
+  process moves HEAD in the instant before the amend runs, the amend still completes,
+  and a toast says the amend raced another Git process and names the commit or branch
+  when it can tell; the replaced commit stays in the reflog.
 - **Revert** — create a new commit that undoes a commit's changes. It asks first, and
   says that history keeps both commits. Reverting or cherry-picking a merge commit asks
   which of its parents counts as the mainline instead, with Parent 1 (the usual choice)
@@ -654,11 +664,14 @@ and **Shift + ↑ / ↓** extends a range selection there.
   first and last, and {{key:enter}} or {{key:space}} opens the commit's action menu.
   {{key:alt+up}} and {{key:alt+down}} move the commit one place, as its arrow buttons do;
   {{key:alt+home}} and {{key:alt+end}} send it to the top or bottom.{{ai}} Reword can
-  regenerate a message with AI.{{/ai}} A "Result" count shows what you'll end up with. With
-  no **edit**, it applies all at once — a conflict rolls it back. If you choose **edit**, it
-  starts a rebase that **pauses** at that commit — amend it in the **Changes** tab (stage and
-  commit/amend as usual), then **Continue** from the banner there. A quick
-  **Squash N commits…** is also on the context menu when you select adjacent commits.
+  regenerate a message with AI.{{/ai}} A "Result" count shows what you'll end up with.
+  Reworded and squashed commits keep their original author; a squash keeps its first
+  commit's author. With no **edit**, it applies all at once — a conflict rolls it back. If
+  you choose **edit**, it starts a rebase that **pauses** at that commit — amend it in the
+  **Changes** tab (stage and commit/amend as usual), then **Continue** from the banner
+  there. A quick **Squash N commits…** is also on the context menu when you select adjacent
+  commits; both it and **Edit history** wait while a merge, rebase, cherry-pick or revert
+  is in progress, and the menu says to finish the operation in **Changes** first.
 - **Create a branch** or **create a tag** at a commit, **check out** a commit (it asks
   first and explains the detached HEAD you land in), or copy
   its SHA.
@@ -1074,8 +1087,9 @@ ids, the force-push confirmation warns that pushing would put the old history ba
 and the Pull menu offers a confirmed **Reset to _origin/…_** that lines the two up
 instead. The reset won't overwrite untracked files or folders unless they're ignored: if
 any sit where the upstream version has files, it stops and names them so you can move
-them aside first. If the branch moves, or you switch branches, before the reset runs,
-nothing is reset and the view refreshes so you can decide again.
+them aside first. If the branch moves or you switch branches before the reset runs,
+or another Git process commits or switches branches while it runs, nothing is reset
+and the view refreshes so you can decide again.
 
 ## Resolving conflicts
 
@@ -2618,7 +2632,11 @@ part in GitHub Discussions for the repo. (Discussions must be enabled on the rep
   into actionable work (the new issue links back to it).
 - If GitDesktop can see that your GitHub sign-in can't write discussions, the
   discussion list, the New discussion dialog, and the thread all say so up front and
-  offer an in-app reconnect (or a copyable refresh command) before a write fails.`,
+  offer an in-app reconnect (or a copyable refresh command) before a write fails.
+- A discussion you're reading stays on screen if a background refresh fails, with a line
+  at the top saying it couldn't refresh and a **Retry**. One that fails to load says why
+  and offers **Retry**, and while you're offline, one that hasn't loaded yet says it will
+  load once you're back online.`,
   },
   {
     id: "releases",
@@ -3091,8 +3109,10 @@ In the composer you can:
 
 Register **Model Context Protocol** servers under **Settings → MCP servers** — local
 (\`stdio\`) processes or remote (HTTP) endpoints, with environment variables / headers and
-**secrets kept in your OS keychain**, never in your settings file. Each session opts into
-the ones you choose from the composer's **MCP** picker. **Claude**, **Copilot**, and
+**secrets kept in your OS keychain**, never in your settings file. Edits to the list,
+secrets included, apply only when you press **Save**, and **Discard** leaves stored
+secrets exactly as they were. Each session opts into the ones you choose from the
+composer's **MCP** picker. **Claude**, **Copilot**, and
 **opencode** run MCP servers on the **host** *or* in a **container**; **Codex** runs them
 in a **container** only (local/\`stdio\` servers — host Codex can't approve MCP tool calls,
 so it needs the container's sandbox). **Remote (HTTP)** servers are checked against your
@@ -3207,8 +3227,9 @@ GitHub results are rougher — ones with a manifest add cleanly, the rest arrive
 
 Already have servers configured? Use **Import** in that panel to pull them in from the
 open repo's \`.mcp.json\` or your global Claude config — you pick which ones, they arrive
-**disabled** for you to review, and any secret-looking values are moved to your keychain.
-Nothing is inherited automatically; the source files are left untouched.
+**disabled** for you to review, and any secret-looking values are moved to your keychain
+when you save. A server whose secret can't be stored there is held, with the reason on its
+row. Nothing is inherited automatically; the source files are left untouched.
 
 Each server is **scoped** either **Global** (every repo) or to **one repo** — import sets
 this from where the server came from, and you can change it when editing. The panel groups

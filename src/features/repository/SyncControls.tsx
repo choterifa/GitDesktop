@@ -88,9 +88,11 @@ import {
   publishPendingReason,
   usePublishProviders,
 } from "./PublishRepoControl";
+import { statusReadFailed } from "./StatusReadError";
 import {
   deriveSyncControls,
   headFacts,
+  STATUS_READ_FAILED_REASON,
   type MismatchMenu,
   type MismatchMenuItem,
 } from "./sync-controls-state";
@@ -114,6 +116,10 @@ const FORCE_PUSH_DEGRADED: Record<PushGuard, string | undefined> = {
 
 export function SyncControls({ repoPath }: { repoPath: string }) {
   const { t } = useTranslation("repositoryOperations");
+  const syncReason = (reason: string | undefined) =>
+    reason === STATUS_READ_FAILED_REASON
+      ? t(reason, { keySeparator: false })
+      : reason;
   const status = useRepoStatus(repoPath);
   const remotes = useRemotes(repoPath);
   const settings = useSettings();
@@ -296,7 +302,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
   // goes back to pending on every refetch, which would flip the reason per poll.
   const syncInput = {
     head,
-    statusError: status.data === undefined && status.errorUpdateCount > 0,
+    statusError: statusReadFailed(status),
     remotes: remotes.data,
     remotesError: remotes.data === undefined && remotes.errorUpdateCount > 0,
     busy,
@@ -888,7 +894,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           // drops focus by turning the button natively disabled. A running sync
           // outranks offline: it is real, and fails live if the connection drops.
           disabled={sync.fetch.disabled}
-          reason={sync.fetch.reason}
+          reason={syncReason(sync.fetch.reason)}
           title={fetchHintTitle}
           aria-label={t("syncControls.fetch")}
           aria-keyshortcuts={fetchKeyshortcuts}
@@ -916,7 +922,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           // AT, the price of the mechanism). The wrapper hovers the reason, else
           // `pullTitle`.
           disabled={sync.pull.disabled}
-          reason={sync.pull.reason}
+          reason={syncReason(sync.pull.reason)}
           title={pullTitle}
           aria-label={
             sync.pullName === "Pull" ? t("syncControls.pull") : sync.pullName
@@ -953,7 +959,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
                 // reconcile options (need a tracking upstream) or "Update from
                 // upstream" (needs the fork's upstream remote).
                 disabled={sync.pullOptions.disabled}
-                reason={sync.pullOptions.reason}
+                reason={syncReason(sync.pullOptions.reason)}
                 className="border-l-0 px-1.5 focus-visible:relative focus-visible:z-10"
               >
                 <CaretDownIcon />
@@ -1027,7 +1033,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
                   variant="outline"
                   size="sm"
                   disabled={sync.push.disabled}
-                  reason={sync.push.reason}
+                  reason={syncReason(sync.push.reason)}
                   title={pushTitle}
                   aria-label={sync.pushName}
                   aria-keyshortcuts={pushKeyshortcuts}
@@ -1085,7 +1091,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
             variant="outline"
             size="sm"
             disabled={sync.push.disabled}
-            reason={sync.push.reason}
+            reason={syncReason(sync.push.reason)}
             title={pushTitle}
             aria-label={sync.pushName}
             aria-keyshortcuts={pushKeyshortcuts}

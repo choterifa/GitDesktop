@@ -13,6 +13,7 @@ import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { PALETTE_DIALOG_CLASS } from "./palette-dialog";
+import { clampHighlight, stepHighlight } from "./palette-highlight";
 
 /**
  * Searchable list of every action that's runnable *right now* — actions
@@ -47,7 +48,11 @@ export function CommandPalette({
       matchesActionText(tokens, t(actionLabelKey(a.id)), t(actionCategoryKey(a.category)))
     );
   });
-  const highlighted = items[Math.min(highlight, items.length - 1)];
+  // The marker, Enter and the scroll read this ONE clamped cursor; the arrows
+  // step from the same clamp inside stepHighlight. The list can shrink under
+  // the open palette, and a raw index would leave Enter on an unmarked row.
+  const active = clampHighlight(highlight, items.length);
+  const highlighted = items[active];
 
   // Keep the highlighted row in view while arrowing through.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scrolls to whichever row carries the highlight
@@ -55,7 +60,7 @@ export function CommandPalette({
     listRef.current
       ?.querySelector('[data-highlighted="true"]')
       ?.scrollIntoView({ block: "nearest" });
-  }, [highlight]);
+  }, [active]);
 
   function run(id: ActionId) {
     onOpenChange(false);
@@ -67,10 +72,10 @@ export function CommandPalette({
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHighlight((h) => Math.min(h + 1, items.length - 1));
+      setHighlight(stepHighlight(highlight, items.length, 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
+      setHighlight(stepHighlight(highlight, items.length, -1));
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (highlighted) run(highlighted.id);
@@ -106,10 +111,10 @@ export function CommandPalette({
                 <li key={action.id}>
                   <button
                     type="button"
-                    data-highlighted={index === highlight || undefined}
+                    data-highlighted={index === active || undefined}
                     className={cn(
                       "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
-                      index === highlight
+                      index === active
                         ? "bg-accent text-accent-foreground"
                         : "hover:bg-muted/60",
                     )}

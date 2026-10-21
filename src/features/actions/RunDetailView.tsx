@@ -1102,7 +1102,6 @@ export function RunDetailView({
         variant="outline"
         size="sm"
         className="cursor-pointer"
-        disabled={detail.isFetching}
         onClick={() => void detail.refetch()}
       >
         {detail.isFetching ? t("states.retrying") : t("states.retry")}
