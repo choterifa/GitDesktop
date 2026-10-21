@@ -650,11 +650,14 @@ selection to compare a range.
   first and last, and {{key:enter}} or {{key:space}} opens the commit's action menu.
   {{key:alt+up}} and {{key:alt+down}} move the commit one place, as its arrow buttons do;
   {{key:alt+home}} and {{key:alt+end}} send it to the top or bottom.{{ai}} Reword can
-  regenerate a message with AI.{{/ai}} A "Result" count shows what you'll end up with. With
-  no **edit**, it applies all at once — a conflict rolls it back. If you choose **edit**, it
-  starts a rebase that **pauses** at that commit — amend it in the **Changes** tab (stage and
-  commit/amend as usual), then **Continue** from the banner there. A quick
-  **Squash N commits…** is also on the context menu when you select adjacent commits.
+  regenerate a message with AI.{{/ai}} A "Result" count shows what you'll end up with.
+  Reworded and squashed commits keep their original author; a squash keeps its first
+  commit's author. With no **edit**, it applies all at once — a conflict rolls it back. If
+  you choose **edit**, it starts a rebase that **pauses** at that commit — amend it in the
+  **Changes** tab (stage and commit/amend as usual), then **Continue** from the banner
+  there. A quick **Squash N commits…** is also on the context menu when you select adjacent
+  commits; both it and **Edit history** wait while a merge, rebase, cherry-pick or revert
+  is in progress, and the menu says to finish the operation in **Changes** first.
 - **Create a branch** or **create a tag** at a commit, **check out** a commit (it asks
   first and explains the detached HEAD you land in), or copy
   its SHA.
@@ -2609,7 +2612,11 @@ part in GitHub Discussions for the repo. (Discussions must be enabled on the rep
   into actionable work (the new issue links back to it).
 - If GitDesktop can see that your GitHub sign-in can't write discussions, the
   discussion list, the New discussion dialog, and the thread all say so up front and
-  offer an in-app reconnect (or a copyable refresh command) before a write fails.`,
+  offer an in-app reconnect (or a copyable refresh command) before a write fails.
+- A discussion you're reading stays on screen if a background refresh fails, with a line
+  at the top saying it couldn't refresh and a **Retry**. One that fails to load says why
+  and offers **Retry**, and while you're offline, one that hasn't loaded yet says it will
+  load once you're back online.`,
   },
   {
     id: "releases",
@@ -3075,8 +3082,10 @@ In the composer you can:
 
 Register **Model Context Protocol** servers under **Settings → MCP servers** — local
 (\`stdio\`) processes or remote (HTTP) endpoints, with environment variables / headers and
-**secrets kept in your OS keychain**, never in your settings file. Each session opts into
-the ones you choose from the composer's **MCP** picker. **Claude**, **Copilot**, and
+**secrets kept in your OS keychain**, never in your settings file. Edits to the list,
+secrets included, apply only when you press **Save**, and **Discard** leaves stored
+secrets exactly as they were. Each session opts into the ones you choose from the
+composer's **MCP** picker. **Claude**, **Copilot**, and
 **opencode** run MCP servers on the **host** *or* in a **container**; **Codex** runs them
 in a **container** only (local/\`stdio\` servers — host Codex can't approve MCP tool calls,
 so it needs the container's sandbox). **Remote (HTTP)** servers are checked against your
