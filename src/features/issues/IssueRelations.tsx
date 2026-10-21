@@ -7,6 +7,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { type Ref, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useRetryFocusRescue } from "@/features/conversations/ConversationListPanel";
 import {
-  offlinePendingMessage,
   refreshFailed,
 } from "@/features/conversations/remote-section-state";
 import {
@@ -46,7 +46,6 @@ import type {
   RelatedIssue,
   RemoteLens,
 } from "@/lib/git/types";
-import { pendingWriteReason } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -88,10 +87,14 @@ export function sectionReadFailed(q: SectionRead & { data: unknown }): boolean {
 
 /** What {@link SectionReadLine} says while the read has nothing loaded, for a
  *  control that waits on the same read to name its hold in the same words. */
-export function sectionReadReason(query: SectionRead, noun: string): string {
-  if (query.isPaused) return offlinePendingMessage(noun);
-  if (refreshFailed(query)) return `Couldn't load ${noun}.`;
-  return `Loading ${noun}…`;
+export function sectionReadReason(
+  query: SectionRead,
+  noun: string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (query.isPaused) return t("shared.waitingForConnection", { noun });
+  if (refreshFailed(query)) return t("shared.loadFailed", { noun });
+  return t("shared.loadingNoun", { noun });
 }
 
 /** The line a section shows where its answer goes while its read has none: a
@@ -109,7 +112,8 @@ export function SectionReadLine({
   /** `useRetryFocusRescue`'s ref, for the Retry this renders on a failure. */
   retryRef: Ref<HTMLButtonElement>;
 }) {
-  const line = sectionReadReason(query, noun);
+  const { t } = useTranslation("issues");
+  const line = sectionReadReason(query, noun, t);
   if (query.isPaused)
     return <p className="text-[11px] text-muted-foreground">{line}</p>;
   if (refreshFailed(query))
@@ -119,11 +123,11 @@ export function SectionReadLine({
         <button
           ref={retryRef}
           type="button"
-          aria-label={`Retry loading ${noun}`}
+          aria-label={t("shared.retryLoading", { noun })}
           className="cursor-pointer underline hover:text-foreground"
           onClick={() => void query.refetch()}
         >
-          Retry
+          {t("shared.retry")}
         </button>
       </p>
     );
@@ -148,10 +152,11 @@ export type RowPending = { reason: string; paused: boolean };
 export function rowPending(
   pending: { paused: boolean } | undefined,
   inFlight: string,
+  offlineReason: string,
 ): RowPending | undefined {
   return pending
     ? {
-        reason: pendingWriteReason(pending.paused, inFlight),
+        reason: pending.paused ? offlineReason : inFlight,
         paused: pending.paused,
       }
     : undefined;
@@ -179,6 +184,7 @@ export function RelatedRow({
    *  visible but disabled. */
   removeDisabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <StateIcon state={issue.state} />
@@ -194,7 +200,7 @@ export function RelatedRow({
       <DisabledReasonButton
         variant="ghost"
         size="icon-xs"
-        aria-label={`Remove #${issue.number}`}
+        aria-label={t("relations.removeIssue", { number: issue.number })}
         disabled={pending !== undefined || !!removeDisabledReason}
         reason={removeDisabledReason ?? pending?.reason}
         // Full opacity only for the running spinner.
@@ -265,6 +271,7 @@ export function IssuePicker({
   /** The origin|upstream lens the parent issue surface resolved. */
   lens: RemoteLens;
 }) {
+  const { t } = useTranslation("issues");
   const open = useIssueList(repoPath, true, "open", undefined, lens);
   const closed = useIssueList(repoPath, true, "closed", undefined, lens);
   const candidates = [...(open.data ?? []), ...(closed.data ?? [])].filter(
@@ -285,11 +292,11 @@ export function IssuePicker({
       <ComboboxInput
         autoFocus
         className="w-full"
-        placeholder="Search issues by # or title"
+        placeholder={t("relations.searchIssues")}
         disabled={pending}
       />
       <ComboboxContent>
-        <ComboboxEmpty>No matching issues.</ComboboxEmpty>
+        <ComboboxEmpty>{t("relations.noMatchingIssues")}</ComboboxEmpty>
         <ComboboxList>
           {(item: IssueInfo) => (
             <ComboboxItem key={item.number} value={item}>
@@ -336,6 +343,7 @@ export function IssueSubIssues({
    *  can't reach a portaled dialog or popup, so this shuts them. */
   held?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const relations = useIssueRelations(repoPath, number, lens);
   const addSub = useAddSubIssue();
   const removeSub = useRemoveSubIssue(repoPath);
@@ -355,7 +363,9 @@ export function IssueSubIssues({
     (v) => v.parentId === issueId,
   );
   const addReason = addPending
-    ? pendingWriteReason(addPending.paused, "Adding the sub-issue…")
+    ? addPending.paused
+      ? t("shared.offlineQueued")
+      : t("relations.addingSubIssue")
     : undefined;
   const removing = (subId: string) =>
     rowPending(
@@ -365,6 +375,7 @@ export function IssueSubIssues({
         (v) => v.parentId === issueId && v.subId === subId,
       ),
       "Removing this sub-issue…",
+      t("shared.offlineQueued"),
     );
 
   const onError = (e: unknown) => toastError(e);
@@ -388,7 +399,9 @@ export function IssueSubIssues({
   // outranks it.
   const addHeldReason =
     disabledReason ??
-    (data ? undefined : sectionReadReason(relations, "sub-issues"));
+    (data
+      ? undefined
+      : sectionReadReason(relations, t("relations.subIssuesNoun"), t));
   const exclude = new Set<number>([
     number,
     ...(parent ? [parent.number] : []),
@@ -425,10 +438,13 @@ export function IssueSubIssues({
           type="button"
           onClick={() => open(parent.number)}
           className="flex w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
-          title={`Parent: #${parent.number} ${parent.title}`}
+          title={t("relations.parentIssueTitle", {
+            number: parent.number,
+            title: parent.title,
+          })}
         >
           <ArrowBendUpLeftIcon className="size-3.5 shrink-0" />
-          <span className="shrink-0">Parent</span>
+          <span className="shrink-0">{t("relations.parent")}</span>
           <StateIcon state={parent.state} />
           <span className="truncate">
             #{parent.number} {parent.title}
@@ -438,7 +454,7 @@ export function IssueSubIssues({
 
       <div className="space-y-1.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">Sub-issues</span>
+          <span className="text-xs font-medium">{t("relations.subIssues")}</span>
           {total > 0 && (
             <span className="text-[11px] text-muted-foreground tabular-nums">
               {completed}/{total}
@@ -454,22 +470,22 @@ export function IssueSubIssues({
                   <DisabledReasonButton
                     variant="ghost"
                     size="xs"
-                    aria-label="Add a sub-issue"
+                    aria-label={t("relations.addSubIssueAria")}
                     disabled={!!addHeldReason}
                     reason={addHeldReason}
                   />
                 }
               >
                 <PlusIcon data-icon="inline-start" />
-                Add sub-issue
+                {t("relations.addSubIssue")}
                 <CaretDownIcon data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-52">
                 <DropdownMenuItem onClick={() => setCreateOpen(true)}>
-                  Create new sub-issue…
+                  {t("relations.createSubIssueMenu")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setMode("existing")}>
-                  Add existing issue…
+                  {t("relations.addExistingIssueMenu")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -504,14 +520,14 @@ export function IssueSubIssues({
         {!data ? (
           <SectionReadLine
             query={relations}
-            noun="sub-issues"
+            noun={t("relations.subIssuesNoun")}
             retryRef={retryRef}
           />
         ) : (
           subIssues.length === 0 &&
           mode === null && (
             <p className="text-[11px] text-muted-foreground">
-              No sub-issues yet.
+              {t("relations.noSubIssues")}
             </p>
           )
         )}
@@ -528,7 +544,7 @@ export function IssueSubIssues({
               />
             </div>
             <Button variant="ghost" size="xs" onClick={() => setMode(null)}>
-              Cancel
+              {t("shared.cancel")}
             </Button>
           </div>
         )}
@@ -567,6 +583,7 @@ export function IssueRelationships({
    *  held while the read is out, and says so when it can't load. */
   reserve?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const dependencies = useIssueDependencies(repoPath, number, lens);
   const setDep = useSetIssueDependency(repoPath, lens);
   const selectIssue = useUiStore((s) => s.selectIssue);
@@ -588,15 +605,16 @@ export function IssueRelationships({
         (v) => v.number === number && match(v),
       ),
       inFlight,
+      t("shared.offlineQueued"),
     );
   const addReason = dependencyPending(
     (v) => v.add,
-    "Adding the relationship…",
+    t("relations.addingRelationship"),
   )?.reason;
   const removing = (relation: IssueRelation) => (target: number) =>
     dependencyPending(
       (v) => !v.add && v.relation === relation && v.target === target,
-      "Removing this relationship…",
+      t("relations.removingRelationship"),
     );
   // Any dependency write on this issue holds the picker, as before.
   const pickerPending =
@@ -646,7 +664,7 @@ export function IssueRelationships({
     <div ref={hostRef} tabIndex={-1} className="space-y-1.5 outline-none">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          Relationships
+          {t("relations.title")}
         </span>
         <span className="flex-1" />
         {addRelation === null && (
@@ -658,22 +676,22 @@ export function IssueRelationships({
                 <DisabledReasonButton
                   variant="ghost"
                   size="xs"
-                  aria-label="Add a relationship"
+                  aria-label={t("relations.addRelationshipAria")}
                   disabled={!!disabledReason}
                   reason={disabledReason}
                 />
               }
             >
               <PlusIcon data-icon="inline-start" />
-              Add
+              {t("shared.add")}
               <CaretDownIcon data-icon="inline-end" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-44">
               <DropdownMenuItem onClick={() => setAddRelation("blocked_by")}>
-                Blocked by…
+                {t("relations.blockedByMenu")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setAddRelation("blocking")}>
-                Blocking…
+                {t("relations.blockingMenu")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -682,7 +700,7 @@ export function IssueRelationships({
 
       {blockedBy.length > 0 && (
         <RelationList
-          label="Blocked by"
+          label={t("relations.blockedBy")}
           items={blockedBy}
           onOpen={open}
           onRemove={(t) => removeDependency("blocked_by", t)}
@@ -692,7 +710,7 @@ export function IssueRelationships({
       )}
       {blocking.length > 0 && (
         <RelationList
-          label="Blocking"
+          label={t("relations.blocking")}
           items={blocking}
           onOpen={open}
           onRemove={(t) => removeDependency("blocking", t)}
@@ -705,7 +723,7 @@ export function IssueRelationships({
         ? reserve && (
             <SectionReadLine
               query={dependencies}
-              noun="relationships"
+              noun={t("relations.relationshipsNoun")}
               retryRef={retryRef}
             />
           )
@@ -713,7 +731,7 @@ export function IssueRelationships({
           blocking.length === 0 &&
           addRelation === null && (
             <p className="text-[11px] text-muted-foreground">
-              No linked issues.
+              {t("relations.noLinkedIssues")}
             </p>
           )}
 
@@ -721,8 +739,8 @@ export function IssueRelationships({
         <div className="space-y-1">
           <p className="text-[11px] text-muted-foreground">
             {addRelation === "blocked_by"
-              ? "Add an issue that blocks this one"
-              : "Add an issue this one blocks"}
+              ? t("relations.addBlockingIssuePrompt")
+              : t("relations.addBlockedIssuePrompt")}
           </p>
           <div className="flex items-center gap-1.5">
             <div className="min-w-0 flex-1">
@@ -743,7 +761,7 @@ export function IssueRelationships({
               size="xs"
               onClick={() => setAddRelation(null)}
             >
-              Cancel
+              {t("shared.cancel")}
             </Button>
           </div>
         </div>

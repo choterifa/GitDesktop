@@ -6,11 +6,12 @@ import { ResearchComposer } from "@/features/research/ResearchView";
 import { type ResearchSeed, useResearchStore } from "@/features/research/store";
 import { SessionComposer } from "./SessionComposer";
 import { useSessionsStore } from "./store";
+import { useSessionText } from "./use-session-text";
 
 const EXAMPLES = [
-  "Add input validation to the login form",
-  "Write unit tests for the date utils",
-  "Refactor this file into smaller components",
+  "Agrega validación de entrada al formulario de inicio de sesión",
+  "Escribe pruebas unitarias para las utilidades de fechas",
+  "Divide este archivo en componentes más pequeños",
 ];
 
 type Mode = "delegate" | "plan" | "research";
@@ -24,6 +25,7 @@ type Mode = "delegate" | "plan" | "research";
  * and Research never write (no worktree); they sit upstream of Delegate.
  */
 export function SessionActivation({ repoPath }: { repoPath: string }) {
+  const tx = useSessionText();
   const [mode, setMode] = useState<Mode>("delegate");
   const [planSeed, setPlanSeed] = useState<PlanSeed | null>(null);
   const [researchSeed, setResearchSeed] = useState<ResearchSeed | null>(null);
@@ -94,9 +96,9 @@ export function SessionActivation({ repoPath }: { repoPath: string }) {
           }}
         >
           <TabsList>
-            <TabsTrigger value="delegate">Delegate a task</TabsTrigger>
-            <TabsTrigger value="plan">Plan a task</TabsTrigger>
-            <TabsTrigger value="research">Research</TabsTrigger>
+            <TabsTrigger value="delegate">{tx("Delegate a task")}</TabsTrigger>
+            <TabsTrigger value="plan">{tx("Plan a task")}</TabsTrigger>
+            <TabsTrigger value="research">{tx("Research")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -109,12 +111,10 @@ export function SessionActivation({ repoPath }: { repoPath: string }) {
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto p-6 text-center">
             <div className="flex max-w-md flex-col gap-2">
               <h2 className="text-base font-medium text-balance">
-                Delegate a task to an agent
+                {tx("Delegate a task to an agent")}
               </h2>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                The agent runs full-auto in an isolated worktree — your working
-                tree, index, and branch are never touched. Review its changes
-                and keep them when you're happy. Run several at once.
+                {tx("The agent runs full-auto in an isolated worktree — your working tree, index, and branch are never touched. Review its changes and keep them when you're happy. Run several at once.")}
               </p>
             </div>
           </div>

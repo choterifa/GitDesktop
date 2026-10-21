@@ -1,0 +1,17 @@
+{
+  "title": "Apariencia",
+  "description": "Personaliza el aspecto de GitDesktop. Los cambios se aplican al instante.",
+  "themeLabel": "Tema",
+  "themeDescription": "Sistema sigue el tema claro u oscuro de tu sistema operativo. Slate es un tema oscuro más suave, con tonos azul grisáceo para sesiones largas. También puedes cambiar de tema desde la paleta de comandos.",
+  "themes": {
+    "system": "Sistema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "slate": "Slate"
+  },
+  "language": {
+    "heading": "Idioma de la aplicación",
+    "label": "Idioma",
+    "description": "El cambio se aplica al instante y se guarda en este dispositivo."
+  }
+}

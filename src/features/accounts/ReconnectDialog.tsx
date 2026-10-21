@@ -22,6 +22,7 @@ import {
 import { isReconnectHostSafe, reconnectHostArg } from "@/lib/git/host";
 import { useInvalidateAfterReconnect } from "@/lib/git/queries";
 import { providerLabel, type ReconnectEvent } from "@/lib/git/types";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useSettings } from "@/lib/settings/queries";
 import { type ReconnectTarget, useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
@@ -120,6 +121,7 @@ function ReconnectFlow({
   scopes?: string[];
   onClose: () => void;
 }) {
+  const tx = useCommonText();
   const label = providerLabel(provider);
   const isGitHub = provider === "github";
   const settings = useSettings();
@@ -200,7 +202,9 @@ function ReconnectFlow({
       if (event.ok) {
         invalidate();
         toast.success(
-          event.login ? `Connected as @${event.login}` : "Connected",
+          event.login
+            ? tx("Connected as @{{login}}", { login: event.login })
+            : tx("Connected"),
         );
         autoCloseRef.current = setTimeout(onClose, 1200);
       }
@@ -257,7 +261,10 @@ function ReconnectFlow({
     if (phase.kind === "verify") primaryRef.current?.focus();
   }, [phase.kind]);
 
-  const title = mode === "login" ? `Sign in to ${label}` : `Reconnect ${label}`;
+  const title =
+    mode === "login"
+      ? tx("Sign in to {{provider}}", { provider: label })
+      : tx("Reconnect {{provider}}", { provider: label });
   const showHost = host !== "github.com" && host !== "gitlab.com";
 
   function openTerminalFallback() {
@@ -282,7 +289,11 @@ function ReconnectFlow({
       {phase.kind === "starting" && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Spinner />
-          <span>Starting {isGitHub ? "gh" : "glab"} sign-in…</span>
+          <span>
+            {tx("Starting {{cli}} sign-in…", {
+              cli: isGitHub ? "gh" : "glab",
+            })}
+          </span>
         </div>
       )}
 
@@ -291,15 +302,17 @@ function ReconnectFlow({
           {phase.code !== null && (
             <p
               className="select-all text-center font-mono text-2xl tracking-[0.15em]"
-              aria-label={`One-time code ${phase.code}`}
+              aria-label={tx("One-time code {{code}}", {
+                code: phase.code,
+              })}
             >
               {phase.code}
             </p>
           )}
           <p className="text-center text-xs text-muted-foreground">
             {phase.code !== null
-              ? VERIFY_WITH_CODE_COPY[provider]
-              : "Open this page to finish signing in."}
+              ? tx(VERIFY_WITH_CODE_COPY[provider])
+              : tx("Open this page to finish signing in.")}
           </p>
           <div className="flex items-center gap-2 text-xs">
             <code
@@ -310,8 +323,8 @@ function ReconnectFlow({
             </code>
             <CopyIconButton
               text={phase.url}
-              label="Copy link"
-              toast="Link copied"
+              label={tx("Copy link")}
+              toast={tx("Link copied")}
             />
           </div>
           <div className="flex items-center justify-center gap-2">
@@ -322,13 +335,13 @@ function ReconnectFlow({
               onClick={() => openUrl(phase.url).catch(toastError)}
             >
               <ArrowSquareOutIcon data-icon="inline-start" />
-              Open {host}
+              {tx("Open {{host}}", { host })}
             </Button>
           </div>
           {phase.code === null && lines.length > 0 && (
             <div className="space-y-1">
               <p id={linesLabelId} className="text-xs text-muted-foreground">
-                {LINES_LABEL[provider]}
+                {tx(LINES_LABEL[provider])}
               </p>
               <ProgressLines
                 lines={lines}
@@ -343,7 +356,7 @@ function ReconnectFlow({
             aria-live="polite"
           >
             <Spinner />
-            <span>Waiting for approval…</span>
+            <span>{tx("Waiting for approval…")}</span>
           </div>
         </div>
       )}
@@ -351,12 +364,12 @@ function ReconnectFlow({
       {phase.kind === "progress" && (
         <div className="min-w-0 space-y-2">
           <p className="text-xs text-muted-foreground">
-            {PROGRESS_COPY[provider]}
+            {tx(PROGRESS_COPY[provider])}
           </p>
           <ProgressLines
             lines={lines}
             tail={PROGRESS_TAIL}
-            label="CLI output"
+            label={tx("CLI output")}
             live="polite"
           />
         </div>
@@ -364,38 +377,40 @@ function ReconnectFlow({
 
       {phase.kind === "finished" && phase.ok && (
         <p className="text-xs text-success">
-          {phase.login ? `Connected as @${phase.login}` : "Connected"}
+          {phase.login
+            ? tx("Connected as @{{login}}", { login: phase.login })
+            : tx("Connected")}
         </p>
       )}
 
       {phase.kind === "finished" && !phase.ok && (
         <div className="space-y-3 text-xs">
           <p className="text-destructive">
-            {phase.message ?? "Sign-in didn't complete."}
+            {phase.message ?? tx("Sign-in didn't complete.")}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={start}>
-              Try again
+              {tx("Try again")}
             </Button>
             {repoPath && (
               <Button variant="ghost" size="sm" onClick={openTerminalFallback}>
                 <TerminalIcon data-icon="inline-start" />
-                Open terminal instead
+                {tx("Open terminal instead")}
               </Button>
             )}
           </div>
           {fallbackCommand && (
             <p className="text-muted-foreground">
-              Or run{" "}
+              {tx("Or run")}{" "}
               <button
                 type="button"
                 className="cursor-pointer font-mono underline underline-offset-2"
-                onClick={() => copyText(fallbackCommand, "Command copied")}
-                title="Copy command"
+                onClick={() => copyText(fallbackCommand, tx("Command copied"))}
+                title={tx("Copy command")}
               >
                 {fallbackCommand}
               </button>{" "}
-              in a terminal.
+              {tx("in a terminal.")}
             </p>
           )}
         </div>
@@ -407,13 +422,14 @@ function ReconnectFlow({
 /** Its own component so the narrowed non-null code reaches the click handler — a
  *  property narrowed in JSX widens again inside a closure. */
 function CopyCodeButton({ code }: { code: string }) {
+  const tx = useCommonText();
   return (
     <Button
       variant="outline"
       size="sm"
-      onClick={() => copyText(code, "Code copied")}
+      onClick={() => copyText(code, tx("Code copied"))}
     >
-      Copy code
+      {tx("Copy code")}
     </Button>
   );
 }

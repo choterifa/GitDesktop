@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -59,7 +60,6 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  CREATE_PENDING_GENERATE_REASON,
   useCancelOnIdentityChange,
   useFinishAndSurface,
 } from "@/features/conversations/useAiStream";
@@ -78,12 +78,7 @@ import {
 import type { CommitSummary, GeneratedNotes } from "@/lib/git/types";
 import { useGenerateChord } from "@/lib/hotkeys/useGenerateChord";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
-import {
-  ACT_PENDING_REASON,
-  AI_DRAFT_PENDING_REASON,
-  refuseWhileOffline,
-  useOfflineHold,
-} from "@/lib/offline-writes";
+import { refuseWhileOffline, useOfflineHold } from "@/lib/offline-writes";
 import { useAiEnabled } from "@/lib/settings/queries";
 import { originNoteFor } from "@/lib/stores/notifications";
 import { useUiStore } from "@/lib/stores/ui";
@@ -108,7 +103,7 @@ const RELEASE_DEFAULTS = {
 };
 
 /** The submit's hold while GitHub's own (non-AI) notes generator runs. */
-const GENERATED_NOTES_PENDING_REASON = "Wait for the generated notes to finish";
+const GENERATED_NOTES_PENDING_KEY = "states.generatedNotesPending";
 
 /**
  * Creates a GitHub release. The tag is a combobox — pick an existing tag, or
@@ -131,8 +126,11 @@ export function CreateReleaseDialog({
   /** Pre-fill + lock the tag (creating a release for an existing tag). */
   initialTag?: string;
 }) {
+  const { t } = useTranslation("tags");
   const createRelease = useCreateRelease(repoPath);
-  const offlineHold = useOfflineHold();
+  const offlineHold = useOfflineHold()
+    ? t("states.offlineUnavailable")
+    : undefined;
   const githubNotes = useGithubReleaseNotes(repoPath);
   const aiNotes = useGenerateReleaseNotes(repoPath);
   const busyGenerating = githubNotes.isPending || aiNotes.generating;
@@ -163,8 +161,8 @@ export function CreateReleaseDialog({
     // The AI stream alone: the From-GitHub mutation is not what a switch aborts.
     generating: aiNotes.generating,
     close: () => onOpenChange(false),
-    readyTitle: "Release notes ready",
-    readyDescription: "They're waiting in the dialog.",
+    readyTitle: t("toasts.notesReadyTitle"),
+    readyDescription: t("toasts.notesReadyDescription"),
     reopen: () => {
       // A tag switch drains the latch, so the notes are gone — say so instead of
       // opening an emptied dialog. The selection is read live: an unmounted
@@ -176,14 +174,12 @@ export function CreateReleaseDialog({
         liveTagRef.current !== settleTag ||
         (settleTag !== "" && liveTag !== settleTag)
       ) {
-        toast.info(
-          `Those notes were for ${settleTag} — they were discarded when you switched tags.`,
-        );
+        toast.info(t("toasts.notesDiscardedOnSwitch", { name: settleTag }));
         return;
       }
       // Only on the Tags tab: an <Activity> hide runs effect cleanups too.
       if (settleTag !== "" && !mountedRef.current && repoTab === "tags") {
-        toast.info(`Those notes for ${settleTag} are no longer available.`);
+        toast.info(t("toasts.notesNoLongerAvailable", { name: settleTag }));
         return;
       }
       onOpenChange(true);
@@ -265,7 +261,7 @@ export function CreateReleaseDialog({
       const submitGen = seedGenRef.current;
       const submitTag = initialTag;
       const tag = value.tag.trim();
-      if (!tag || refuseWhileOffline()) return;
+      if (!tag || refuseWhileOffline(t("states.offlineUnavailable"))) return;
       const hasTarget = !initialTag && isNewTagName(tag, tagNames);
       try {
         const url = await createRelease.mutateAsync({
@@ -282,10 +278,15 @@ export function CreateReleaseDialog({
         // draft's. The toast fires either way, naming where it came from.
         const originNote = originNoteFor(repoPath);
         const stillHere = originNote === undefined;
-        toast.success(value.draft ? "Draft saved" : `Released ${tag}`, {
-          description: originNote ? `${originNote} · ${url}` : url,
-          action: { label: "View", onClick: () => openUrl(url) },
-        });
+        toast.success(
+          value.draft
+            ? t("toasts.draftSaved")
+            : t("toasts.released", { name: tag }),
+          {
+            description: originNote ? `${originNote} · ${url}` : url,
+            action: { label: t("common.view"), onClick: () => openUrl(url) },
+          },
+        );
         // Closed whenever the form still holds THIS submit's draft — leaving an
         // already-released draft open is a duplicate factory. Adopting the tag
         // is a global write, so it takes the live-repo guard instead.
@@ -322,7 +323,7 @@ export function CreateReleaseDialog({
   // Only a typed new name is checked: an existing tag already passed git's rules.
   const tagError =
     !initialTag && tagTrimmed && !isExistingTag
-      ? validateTagName(tagTrimmed)
+      ? validateTagName(tagTrimmed, t)
       : null;
   const isNewTag = !initialTag && isNewTagName(tagTrimmed, tagNames);
   const canCreate = isNewTag && !createdTags.includes(tagTrimmed);
@@ -495,11 +496,11 @@ export function CreateReleaseDialog({
   // The chord's shortcut belongs on the item it drives; with AI off that item is
   // disabled and says why instead.
   const aiNotesHintTitle = generateChord.hint
-    ? `Summarize with AI${generateChord.hint}`
+    ? t("create.summarizeWithAiHint", { hint: generateChord.hint })
     : undefined;
   const aiNotesTitle = aiEnabled
     ? aiNotesHintTitle
-    : "Enable AI in Settings first.";
+    : t("create.enableAiInSettings");
 
   // The one submit gate, shared by the button and the form's native submit:
   // Enter must submit exactly when the button would. Publishing holds offline
@@ -516,11 +517,11 @@ export function CreateReleaseDialog({
     reason: (() => {
       switch (true) {
         case aiNotes.generating:
-          return AI_DRAFT_PENDING_REASON;
+          return t("states.aiDraftPending");
         case githubNotes.isPending:
-          return GENERATED_NOTES_PENDING_REASON;
+          return t(GENERATED_NOTES_PENDING_KEY);
         case isSubmitting:
-          return ACT_PENDING_REASON;
+          return t("states.applying");
         default:
           return offlineHold;
       }
@@ -545,11 +546,14 @@ export function CreateReleaseDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              {initialTag ? `Release ${initialTag}` : "New release"}
+              {initialTag
+                ? t("create.releaseTitle", { name: initialTag })
+                : t("create.newRelease")}
             </DialogTitle>
             <DialogDescription>
-              Publishes a {isGitLab ? "GitLab" : "GitHub"} release. A new tag is
-              created from the target on publish.
+              {t("create.description", {
+                provider: isGitLab ? "GitLab" : "GitHub",
+              })}
             </DialogDescription>
           </DialogHeader>
 
@@ -559,7 +563,7 @@ export function CreateReleaseDialog({
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="rel-tag">Tag</Label>
+                <Label htmlFor="rel-tag">{t("create.tag")}</Label>
                 {initialTag ? (
                   <Input
                     id="rel-tag"
@@ -615,7 +619,7 @@ export function CreateReleaseDialog({
                     />
                     <ComboboxContent>
                       <ComboboxEmpty>
-                        {canCreate ? null : "No matching tags."}
+                        {canCreate ? null : t("create.noMatchingTags")}
                       </ComboboxEmpty>
                       <ComboboxList>
                         {(t: { name: string }) => (
@@ -631,9 +635,9 @@ export function CreateReleaseDialog({
                           className="flex w-full items-center gap-1.5 border-t px-2 py-2 text-left text-xs hover:bg-accent"
                         >
                           <PlusIcon className="size-3.5 shrink-0" />
-                          Create new tag{" "}
-                          <span className="font-mono">{tagTrimmed}</span> on
-                          release
+                          {t("create.createNewTagPrefix")}{" "}
+                          <span className="font-mono">{tagTrimmed}</span>{" "}
+                          {t("create.createNewTagSuffix")}
                         </button>
                       )}
                     </ComboboxContent>
@@ -646,7 +650,10 @@ export function CreateReleaseDialog({
                 )}
               </div>
               {showTarget && (
-                <LabeledGroup label="Target" className="space-y-1.5">
+                <LabeledGroup
+                  label={t("create.target")}
+                  className="space-y-1.5"
+                >
                   <TargetPicker
                     // Agent-session branches are app-internal — never a release
                     // target (same rule as BranchSwitcher).
@@ -664,8 +671,10 @@ export function CreateReleaseDialog({
             <form.AppField name="title">
               {(field) => (
                 <field.TextField
-                  label="Title (optional)"
-                  placeholder={tagTrimmed || "Release title"}
+                  label={t("create.titleOptional")}
+                  placeholder={
+                    tagTrimmed || t("create.releaseTitlePlaceholder")
+                  }
                 />
               )}
             </form.AppField>
@@ -674,12 +683,12 @@ export function CreateReleaseDialog({
                 would ADD to this group's own `gap-1.5` (tailwind-merge doesn't
                 dedupe space-y against gap). */}
             <LabeledGroup
-              label="Release notes"
+              label={t("create.releaseNotes")}
               className="flex flex-1 flex-col gap-1.5 space-y-0"
               actions={
                 existingTags.length > 0 && (
                   <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span className="shrink-0">Previous tag</span>
+                    <span className="shrink-0">{t("create.previousTag")}</span>
                     <Combobox
                       items={tagNames.map((name) => ({ name }))}
                       itemToStringLabel={(t: { name: string }) => t.name}
@@ -700,10 +709,12 @@ export function CreateReleaseDialog({
                     >
                       <ComboboxInput
                         className="h-7 w-64 font-mono text-xs"
-                        placeholder="Automatic"
+                        placeholder={t("create.automatic")}
                       />
                       <ComboboxContent>
-                        <ComboboxEmpty>No matching tags.</ComboboxEmpty>
+                        <ComboboxEmpty>
+                          {t("create.noMatchingTags")}
+                        </ComboboxEmpty>
                         <ComboboxList>
                           {(t: { name: string }) => (
                             <ComboboxItem key={t.name} value={t}>
@@ -723,16 +734,15 @@ export function CreateReleaseDialog({
                   carry it. */}
               {existingTags.length > 0 && previousTagUnknown && (
                 <p className="text-[11px] text-muted-foreground">
-                  Not an existing tag, so generated notes ignore it and use
-                  their default range.
+                  {t("create.previousTagNotFound")}
                 </p>
               )}
               <MarkdownEditor
                 ref={notesEditorRef}
-                aria-label="Release notes"
+                aria-label={t("create.releaseNotes")}
                 value={notes}
                 onChange={(v) => form.setFieldValue("notes", v)}
-                placeholder="What's changed… (or generate notes above)"
+                placeholder={t("create.notesPlaceholder")}
                 fill
                 // No `rows`/`resize-y` in fill mode: the explicit floor plus
                 // `flex-1` set the height, and a manual drag fights the flex sizing.
@@ -753,7 +763,9 @@ export function CreateReleaseDialog({
                       ) : (
                         <XIcon data-icon="inline-start" />
                       )}
-                      {githubNotes.isPending ? "Generating…" : "Cancel"}
+                      {githubNotes.isPending
+                        ? t("states.generating")
+                        : t("common.cancel")}
                     </Button>
                   ) : (
                     <DropdownMenu>
@@ -769,14 +781,14 @@ export function CreateReleaseDialog({
                             disabled={!tagTrimmed || isSubmitting}
                             reason={
                               isSubmitting
-                                ? CREATE_PENDING_GENERATE_REASON
+                                ? t("states.generatePending")
                                 : undefined
                             }
                           />
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Generate notes
+                        {t("create.generateNotes")}
                         <CaretDownIcon data-icon="inline-end" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="min-w-56">
@@ -784,7 +796,7 @@ export function CreateReleaseDialog({
                           <DropdownMenuItem
                             onClick={() => void generateFromGithub()}
                           >
-                            From GitHub (commits & PRs)
+                            {t("create.fromGitHubNotes")}
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
@@ -792,7 +804,7 @@ export function CreateReleaseDialog({
                           title={aiNotesTitle}
                           onClick={generateWithAi}
                         >
-                          Summarize with AI
+                          {t("create.summarizeWithAi")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -807,7 +819,7 @@ export function CreateReleaseDialog({
                 <form.AppField name="latest">
                   {(field) => (
                     <field.CheckboxField
-                      label="Set as the latest release"
+                      label={t("create.setLatest")}
                       className="flex cursor-pointer items-center gap-2 text-xs"
                     />
                   )}
@@ -815,7 +827,7 @@ export function CreateReleaseDialog({
                 <form.AppField name="prerelease">
                   {(field) => (
                     <field.CheckboxField
-                      label="Pre-release"
+                      label={t("badges.prerelease")}
                       className="flex cursor-pointer items-center gap-2 text-xs"
                     />
                   )}
@@ -823,7 +835,7 @@ export function CreateReleaseDialog({
                 <form.AppField name="draft">
                   {(field) => (
                     <field.CheckboxField
-                      label="Save as draft"
+                      label={t("badges.draft")}
                       className="flex cursor-pointer items-center gap-2 text-xs"
                     />
                   )}
@@ -838,7 +850,7 @@ export function CreateReleaseDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -854,7 +866,7 @@ export function CreateReleaseDialog({
                   aria-describedby={offlineSubmit.describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  {draft ? "Save draft" : "Publish release"}
+                  {draft ? t("create.saveDraft") : t("create.publishRelease")}
                 </form.SubmitButton>
                 {offlineSubmit.blockedReason ? (
                   <span id={offlineSubmit.reasonId} className="sr-only">
@@ -886,6 +898,7 @@ function TargetPicker({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { t } = useTranslation("tags");
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"branches" | "commits">("branches");
   const [filter, setFilter] = useState("");
@@ -972,7 +985,7 @@ function TargetPicker({
               : `${value.slice(0, 7)}${
                   selectedCommit ? ` ${selectedCommit.subject}` : ""
                 }`
-            : "Choose a target"}
+            : t("create.chooseTarget")}
         </span>
         <CaretDownIcon className="ml-auto shrink-0 text-muted-foreground" />
       </PopoverTrigger>
@@ -986,7 +999,9 @@ function TargetPicker({
               setActiveIndex(-1);
             }}
             placeholder={
-              tab === "branches" ? "Filter branches…" : "Filter recent commits…"
+              tab === "branches"
+                ? t("create.filterBranches")
+                : t("create.filterRecentCommits")
             }
             className="h-8"
           />
@@ -999,8 +1014,10 @@ function TargetPicker({
           }}
         >
           <TabsList variant="line" className="px-2">
-            <TabsTrigger value="branches">Branches</TabsTrigger>
-            <TabsTrigger value="commits">Recent Commits</TabsTrigger>
+            <TabsTrigger value="branches">{t("create.branches")}</TabsTrigger>
+            <TabsTrigger value="commits">
+              {t("create.recentCommits")}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value={tab} className="mt-0">
             <div onKeyDown={onKeyDown} className="max-h-64 overflow-y-auto p-1">
@@ -1026,7 +1043,7 @@ function TargetPicker({
               ))}
               {rows.length === 0 && (
                 <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No matches.
+                  {t("create.noMatches")}
                 </p>
               )}
             </div>

@@ -20,13 +20,20 @@ import {
   useUpdateReviewDraft,
 } from "@/lib/pulls/review-drafts";
 import { useLatestRef } from "@/lib/use-latest-ref";
+import { usePullsText } from "./use-pulls-text";
 
 /** The anchor label for a draft: "Lines a–b" for a range, "Line b" otherwise. */
-function draftLabel(draft: ReviewDraft): string {
+function draftLabel(
+  draft: ReviewDraft,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string {
   if (draft.startLine && draft.startLine !== draft.line) {
-    return `Lines ${draft.startLine}–${draft.line}`;
+    return tx("Lines {{start}}–{{end}}", {
+      start: draft.startLine,
+      end: draft.line,
+    });
   }
-  return `Line ${draft.line}`;
+  return tx("Line {{line}}", { line: draft.line });
 }
 
 /**
@@ -48,6 +55,7 @@ export function DraftCommentCard({
   number: number;
   draft: ReviewDraft;
 }) {
+  const tx = usePullsText();
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(draft.body);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -89,10 +97,10 @@ export function DraftCommentCard({
     <div className="space-y-1.5 rounded border bg-background px-3 py-2 text-xs">
       <div className="flex items-center gap-2">
         <Badge variant="secondary" className="shrink-0 text-warning">
-          Pending
+          {tx("Pending")}
         </Badge>
         <span className="truncate font-mono text-muted-foreground">
-          {draftLabel(draft)}
+          {draftLabel(draft, tx)}
         </span>
         {!editing && (
           <>
@@ -106,7 +114,7 @@ export function DraftCommentCard({
                 setEditing(true);
               }}
             >
-              Edit
+              {tx("Edit")}
             </Button>
             <Button
               variant="ghost"
@@ -114,7 +122,7 @@ export function DraftCommentCard({
               className="text-destructive"
               onClick={() => setConfirmDelete(true)}
             >
-              Delete
+              {tx("Delete")}
             </Button>
           </>
         )}
@@ -127,7 +135,7 @@ export function DraftCommentCard({
           onCancel={() => setEditing(false)}
           canSubmit={canSave}
           pending={updateDraft.isPending}
-          ariaLabel="Edit pending comment"
+          ariaLabel={tx("Edit pending comment")}
           textareaClassName="max-h-48 min-h-16 resize-y"
         />
       ) : (
@@ -136,9 +144,11 @@ export function DraftCommentCard({
       <ConfirmDialog
         open={confirmDelete}
         onCancel={() => setConfirmDelete(false)}
-        title="Delete pending comment?"
-        body="This removes the draft comment from your pending review. It hasn't been posted yet."
-        confirmLabel="Delete"
+        title={tx("Delete pending comment?")}
+        body={tx(
+          "This removes the draft comment from your pending review. It hasn't been posted yet.",
+        )}
+        confirmLabel={tx("Delete")}
         confirmVariant="destructive"
         pending={removeDraft.isPending}
         onConfirm={() => void deleteDraft()}
@@ -167,6 +177,7 @@ export function PendingReviewBar({
   number: number;
   onSubmit: () => void;
 }) {
+  const tx = usePullsText();
   const drafts = useReviewDrafts(repoPath, lens, number);
   const clearDrafts = useClearReviewDrafts(repoPath, lens);
   // This PR's own clear, from the cache: the bar outlives a PR switch, and a
@@ -205,11 +216,19 @@ export function PendingReviewBar({
   return (
     <div className="flex items-center gap-3 border-y bg-muted/40 px-3 py-1.5 text-xs">
       <span className="min-w-0 flex-1 text-muted-foreground">
-        <span className="font-medium text-foreground">Review in progress</span>{" "}
-        · {count} pending comment{count === 1 ? "" : "s"}
+        <span className="font-medium text-foreground">
+          {tx("Review in progress")}
+        </span>{" "}
+        ·{" "}
+        {tx(
+          count === 1
+            ? "{{count}} pending comment"
+            : "{{count}} pending comments",
+          { count },
+        )}
       </span>
       <Button size="xs" onClick={onSubmit}>
-        Submit review…
+        {tx("Submit review…")}
       </Button>
       <Button
         size="xs"
@@ -217,14 +236,19 @@ export function PendingReviewBar({
         className="text-destructive"
         onClick={() => setConfirmDiscard(true)}
       >
-        Discard
+        {tx("Discard")}
       </Button>
       <ConfirmDialog
         open={confirmDiscard}
         onCancel={() => setConfirmDiscard(false)}
-        title="Discard pending review?"
-        body={`This deletes all ${count} pending comment${count === 1 ? "" : "s"}. They haven't been posted yet and can't be recovered.`}
-        confirmLabel="Discard review"
+        title={tx("Discard pending review?")}
+        body={tx(
+          count === 1
+            ? "This deletes all {{count}} pending comment. They haven't been posted yet and can't be recovered."
+            : "This deletes all {{count}} pending comments. They haven't been posted yet and can't be recovered.",
+          { count },
+        )}
+        confirmLabel={tx("Discard review")}
         confirmVariant="destructive"
         pending={clearing}
         onConfirm={() => void discard()}

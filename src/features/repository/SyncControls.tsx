@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
@@ -58,6 +59,7 @@ import {
   useRepoStatus,
   useUpdateFromUpstream,
 } from "@/lib/git/queries";
+import { syncControlCopy } from "@/lib/git/queries/sync-copy";
 import type { ForkPrMatch } from "@/lib/git/types";
 import {
   bindingToAriaKeyshortcuts,
@@ -66,7 +68,6 @@ import {
 import { useEffectiveBindings, useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import {
   ACT_PENDING_REASON,
-  OFFLINE_ITEM_REASON,
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
@@ -80,7 +81,7 @@ import {
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { formatRelativeTime } from "@/lib/time";
 import { toastError, toastErrorWithNote } from "@/lib/toast";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 import { ForkPrPublishGuard } from "./ForkPrPublishGuard";
 import {
   PublishRepoControl,
@@ -92,7 +93,6 @@ import {
   headFacts,
   type MismatchMenu,
   type MismatchMenuItem,
-  SYNC_BUSY_REASON,
 } from "./sync-controls-state";
 import { usePullDropGuard } from "./usePullDropGuard";
 import { useStashReapplyRecovery } from "./useStashReapplyRecovery";
@@ -113,6 +113,7 @@ const FORCE_PUSH_DEGRADED: Record<PushGuard, string | undefined> = {
 };
 
 export function SyncControls({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("repositoryOperations");
   const status = useRepoStatus(repoPath);
   const remotes = useRemotes(repoPath);
   const settings = useSettings();
@@ -276,7 +277,9 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
   // offline rather than park: a parked push or force push would land whenever
   // the connection returns. Reset to upstream is local and stays live.
   const offlineHold = useOfflineHold();
-  const offlineSuffix = offlineHold ? ` (${OFFLINE_ITEM_REASON})` : "";
+  const offlineSuffix = offlineHold
+    ? ` (${syncControlCopy("offlineItemReason")})`
+    : "";
   // Says whether publishing under the new name would land on a branch the last
   // fetch already saw there. Read only while the mismatch menu is open, as the
   // hook's doc requires; a disabled query still serves the warm-up's cached list,
@@ -298,7 +301,10 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
     remotesError: remotes.data === undefined && remotes.errorUpdateCount > 0,
     busy,
     // Held only by another surface's push, the bar names that push.
-    busyReason: ownBusy ? SYNC_BUSY_REASON : otherPushReason,
+    busyReason: ownBusy ? syncControlCopy("busyReason") : otherPushReason,
+    pullOptionsUnpublishedReason: syncControlCopy(
+      "pullOptionsUnpublishedReason",
+    ),
     offlineHold,
     remoteRebased,
     mixedRewrite,
@@ -435,7 +441,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
     // The Pull menu can be open from before a push started.
     if (refuseWhileOffline() || refuseWhilePushing()) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const plain = pullSuccessMessage(mode);
@@ -480,7 +486,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
   async function doUpdateFromUpstream() {
     if (refuseWhileOffline() || refuseWhilePushing()) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const updatedIn = repoPath;
@@ -558,7 +564,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -874,7 +880,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           adjacency magic (it has now misfired on two arrangements). The group's
           `*:focus-visible:z-10` also can't reach the Buttons through the spans,
           so each Button carries `focus-visible:relative focus-visible:z-10`. */}
-      <ButtonGroup aria-label="Sync actions">
+      <ButtonGroup aria-label={t("syncControls.actions")}>
         <DisabledReasonButton
           variant="outline"
           size="sm"
@@ -884,7 +890,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           disabled={sync.fetch.disabled}
           reason={sync.fetch.reason}
           title={fetchHintTitle}
-          aria-label="Fetch"
+          aria-label={t("syncControls.fetch")}
           aria-keyshortcuts={fetchKeyshortcuts}
           // max-md:pr-1.5 re-centers the glyph once the label is hidden: the
           // sm size is px-2.5 and the leading-icon rule already pulls the left
@@ -901,7 +907,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           )}
           {/* Labels drop below `md` so the header fits a 640px window; every
               icon, count, and accessible name stays put at every width. */}
-          <span className="hidden md:inline">Fetch</span>
+          <span className="hidden md:inline">{t("syncControls.fetch")}</span>
         </DisabledReasonButton>
         <DisabledReasonButton
           variant="outline"
@@ -912,7 +918,9 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           disabled={sync.pull.disabled}
           reason={sync.pull.reason}
           title={pullTitle}
-          aria-label={sync.pullName}
+          aria-label={
+            sync.pullName === "Pull" ? t("syncControls.pull") : sync.pullName
+          }
           aria-keyshortcuts={pullKeyshortcuts}
           className="border-l-0 focus-visible:relative focus-visible:z-10 max-md:pr-1.5"
           onClick={() => void doPull("ffOnly")}
@@ -924,7 +932,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
           ) : (
             <ArrowDownIcon data-icon="inline-start" />
           )}
-          <span className="hidden md:inline">Pull</span>
+          <span className="hidden md:inline">{t("syncControls.pull")}</span>
           {behindCount > 0 && (
             <span
               aria-hidden="true"
@@ -940,7 +948,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
               <DisabledReasonButton
                 variant="outline"
                 size="sm"
-                aria-label="Pull options"
+                aria-label={t("syncControls.pullOptions")}
                 // Reachable whenever there's a menu item to show: the pull
                 // reconcile options (need a tracking upstream) or "Update from
                 // upstream" (needs the fork's upstream remote).
@@ -1112,14 +1120,9 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Force push?</DialogTitle>
+            <DialogTitle>{t("dialogs.forcePush.title")}</DialogTitle>
             <DialogDescription>
-              Your branch and {forceUpstream} have diverged (usually after
-              amending or resetting a pushed commit). Force pushing rewrites the
-              remote branch to match your local one. Uses --force-with-lease
-              and, where your Git can check it, --force-if-includes — the pair
-              aborts rather than overwrite work your branch doesn't include,
-              even work a background fetch has already seen.
+              {t("dialogs.forcePush.description", { upstream: forceUpstream })}
             </DialogDescription>
           </DialogHeader>
           {/* The measured arms — both state what the counts SHOW, never how the
@@ -1131,29 +1134,31 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
               both hide while the status shows another HEAD. */}
           {forceEvidence && remoteRebased && (
             <p className="text-muted-foreground text-sm">
-              {forceUpstream} already carries every commit on your branch under
-              different ids. Force pushing would replace them with your copies;
-              "Reset to {forceUpstream}" in the Pull menu keeps the same work
-              and matches the remote instead.
+              {t("dialogs.forcePush.remoteRewritten", {
+                upstream: forceUpstream,
+              })}
             </p>
           )}
           {forceEvidence && localAtRisk > 0 && (
             <p className="text-muted-foreground text-sm">
-              {localAtRisk} commit{localAtRisk === 1 ? "" : "s"} exist
-              {localAtRisk === 1 ? "s" : ""} only on your branch
+              {t("dialogs.forcePush.localAtRisk", { count: localAtRisk })}
               {/* Only asserted where the counts actually found commits on the
                   other side — an amended tip plus one new local commit leaves
                   `remoteOnly` at zero, and the clause would be false. */}
               {remoteAhead > 0
-                ? `, and ${forceUpstream} has ${remoteAhead} commit${remoteAhead === 1 ? "" : "s"} yours doesn't`
+                ? `, ${t("dialogs.forcePush.remoteAhead", {
+                    upstream: forceUpstream,
+                    count: remoteAhead,
+                  })}`
                 : ""}
-              . Pull with rebase keeps yours and replays them on top of{" "}
-              {forceUpstream}.
+              {`. ${t("dialogs.forcePush.rebaseAdvice", {
+                upstream: forceUpstream,
+              })}`}
             </p>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={closeForceConfirm}>
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <DisabledReasonButton
               variant="destructive"
@@ -1171,7 +1176,7 @@ export function SyncControls({ repoPath }: { repoPath: string }) {
               onClick={() => void confirmForcePush()}
             >
               {forceActPending && <Spinner data-icon="inline-start" />}
-              Force push
+              {t("dialogs.forcePush.confirm")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>

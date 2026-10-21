@@ -89,6 +89,10 @@ export function pendingWriteReason(paused: boolean, inFlight: string): string {
 
 /** The menu-row twin of {@link pendingWriteReason}, under the same `paused`
  *  contract: the compact parenthetical a disabled item's label carries. */
-export function pendingItemReason(paused: boolean, inFlight: string): string {
-  return paused ? OFFLINE_ITEM_REASON : inFlight;
+export function pendingItemReason(
+  paused: boolean,
+  inFlight: string,
+  offlineReason = OFFLINE_ITEM_REASON,
+): string {
+  return paused ? offlineReason : inFlight;
 }

@@ -1,5 +1,6 @@
 import { TreeStructureIcon } from "@phosphor-icons/react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { RelativeTime } from "@/components/relative-time";
 import {
   Combobox,
@@ -88,6 +89,7 @@ export function BaseBranchCombobox({
    *  name it (the trigger is a labelable button). */
   triggerId?: string;
 }) {
+  const { t } = useTranslation("repository");
   // useBranches is cached app-wide; the remote list + worktrees fetch only while
   // the dialog is open (same open-gating idiom as CompareBranchCombobox).
   const branches = useBranches(repoPath);
@@ -196,12 +198,21 @@ export function BaseBranchCombobox({
         </span>
       </ComboboxTrigger>
       <ComboboxContent>
-        <ComboboxInput showTrigger={false} placeholder="Filter branches…" />
-        <ComboboxEmpty>No branches match</ComboboxEmpty>
+        <ComboboxInput
+          showTrigger={false}
+          placeholder={t("baseBranchPicker.filter")}
+        />
+        <ComboboxEmpty>{t("baseBranchPicker.noMatches")}</ComboboxEmpty>
         <ComboboxList>
           {(group: { value: string; items: string[] }) => (
             <ComboboxGroup key={group.value} items={group.items}>
-              <ComboboxLabel>{group.value}</ComboboxLabel>
+              <ComboboxLabel>
+                {t(
+                  group.value === "Local"
+                    ? "baseBranchPicker.local"
+                    : "baseBranchPicker.remote",
+                )}
+              </ComboboxLabel>
               <ComboboxCollection>
                 {(name: string) => (
                   <BaseBranchRow

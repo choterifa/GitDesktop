@@ -1,5 +1,6 @@
 import { useSelector } from "@tanstack/react-store";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,7 @@ import { useGenerateChord } from "@/lib/hotkeys/useGenerateChord";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError } from "@/lib/toast";
 import { useRetained } from "@/lib/use-retained";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 import {
   GenerateBranchNameButton,
   useBranchNameGenerateAction,
@@ -32,18 +33,6 @@ import {
   type CommittedNameSource,
   useGenerateBranchName,
 } from "./useGenerateBranchName";
-
-/** Why Generate holds while the rename runs: the name it would revise has
- *  already been sent. */
-const RENAME_PENDING_GENERATE_REASON = "Wait for the rename to finish";
-
-/** The field's warning for a name in the agent-session namespace. A warning, not
- *  a validator: validator messages never render, and the backend refuses it. */
-function sessionNameWarning(name: string): string | null {
-  return isSessionBranchName(name)
-    ? "gd/session/ is reserved for agent sessions — choose another name"
-    : null;
-}
 
 /**
  * Rename-branch dialog. Open when `target` is the branch being renamed (null =
@@ -91,6 +80,7 @@ export function RenameBranchDialog({
   committedStatus: "ready" | "pending" | "error";
   onOpenSettings: (section: "ai") => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const renameBranch = useRenameBranch(repoPath);
   const branchNameGen = useGenerateBranchName(repoPath);
   // The Generate affordance's copy — and so its enabled state — is retained
@@ -136,7 +126,7 @@ export function RenameBranchDialog({
     onSubmit: async ({ value }) => {
       if (!target) return;
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(promotionBlocksCheckoutCopy());
         return;
       }
       const newName = sanitizeRefName(value.name);
@@ -146,7 +136,7 @@ export function RenameBranchDialog({
           oldName: target,
           newName,
         });
-        toast.success(`Renamed to ${newName}`, {
+        toast.success(t("dialogs.rename.renamed", { name: newName }), {
           description: outcome.warning ?? undefined,
         });
         if (sessionRef.current === session) {
@@ -231,28 +221,21 @@ export function RenameBranchDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Rename branch</DialogTitle>
+            <DialogTitle>{t("dialogs.rename.title")}</DialogTitle>
             {/* The popup's aria-describedby, so the upstream note is announced
                 on open. It promises nothing about Push: that depends on the
                 push config. */}
             <DialogDescription>
-              Renames{" "}
+              {t("dialogs.rename.descriptionStart")}{" "}
               <span className="font-mono wrap-break-word">{shownTarget}</span>.
               {shownUpstream && (
                 <>
                   {" "}
-                  <span className="font-mono wrap-break-word">
-                    {shownTarget}
-                  </span>{" "}
-                  tracks{" "}
-                  <span className="font-mono wrap-break-word">
-                    {shownUpstream.remote}/{shownUpstream.branch}
-                  </span>
-                  . Renaming changes only the local name; the branch on{" "}
-                  <span className="font-mono wrap-break-word">
-                    {shownUpstream.remote}
-                  </span>{" "}
-                  keeps its name.
+                  {t("dialogs.rename.upstreamDescription", {
+                    target: shownTarget,
+                    upstream: `${shownUpstream.remote}/${shownUpstream.branch}`,
+                    remote: shownUpstream.remote,
+                  })}
                 </>
               )}
             </DialogDescription>
@@ -262,15 +245,18 @@ export function RenameBranchDialog({
             validators={{
               onChange: ({ value }) =>
                 required(value) ??
-                (sanitizeRefName(value) === target ? "Unchanged" : undefined),
+                (sanitizeRefName(value) === target
+                  ? t("dialogs.rename.unchanged")
+                  : undefined),
             }}
           >
             {(field) => (
               <field.TextField
-                label="New name"
+                label={t("dialogs.rename.newName")}
                 warning={(value) =>
-                  sessionNameWarning(sanitizeRefName(value)) ??
-                  refNameWarning(value)
+                  (isSessionBranchName(sanitizeRefName(value))
+                    ? t("dialogs.rename.sessionNameWarning")
+                    : null) ?? refNameWarning(value)
                 }
               />
             )}
@@ -288,7 +274,7 @@ export function RenameBranchDialog({
             committedStatus={shownCommittedStatus}
             // Renaming never picks a base — the fallback always applies here.
             basedElsewhere={null}
-            heldReason={isSubmitting ? RENAME_PENDING_GENERATE_REASON : null}
+            heldReason={isSubmitting ? t("dialogs.rename.waitForRename") : null}
             onSetupAi={() => {
               closeDialog();
               onOpenSettings("ai");
@@ -296,11 +282,11 @@ export function RenameBranchDialog({
           />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={closeDialog}>
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <renameForm.AppForm>
               <renameForm.SubmitButton disabled={branchNameGen.generating}>
-                Rename
+                {t("dialogs.rename.submit")}
               </renameForm.SubmitButton>
             </renameForm.AppForm>
           </DialogFooter>

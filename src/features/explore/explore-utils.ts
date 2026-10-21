@@ -1,11 +1,5 @@
 import type { ForgeRepo, ForgeSearchRepo } from "@/lib/git/types";
 
-/** Compact star/number formatting (1.2k) — module-level so it's built once. */
-export const compactNumber = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
 /** A flat, virtualizer-friendly view of owner-grouped repos: a header row per
  *  owner followed by that owner's repos. */
 export type ExploreRow =
@@ -86,9 +80,13 @@ export function groupReposByOwner(
  */
 export function starParts(
   stars: number | null,
+  locale?: string,
 ): { text: string; label: string } | null {
   if (stars === null) return null;
-  const text = compactNumber.format(stars);
+  const text = new Intl.NumberFormat(locale, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(stars);
   return { text, label: `${text} ${stars === 1 ? "star" : "stars"}` };
 }
 

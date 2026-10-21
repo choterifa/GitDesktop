@@ -20,6 +20,7 @@ import type {
 } from "@/lib/git/types";
 import { useRovingRows } from "@/lib/list-keyboard-nav";
 import { cn } from "@/lib/utils";
+import { projectsText, useProjectsText } from "./use-projects-text";
 
 /**
  * The per-kind project-field controls, and the draft rules behind them — the ONE
@@ -59,12 +60,12 @@ export function fieldLockedReason(
   const issueHeld = issueFieldHeldReason(def, host);
   switch (true) {
     case issueHeld !== undefined:
-      return issueHeld;
+      return projectsText(issueHeld);
     // A single-line input strips CR/LF as the value is assigned to it, so the first
     // keystroke would draft the flattened string and the close would commit it — a
     // multi-line control belongs to a board surface if ever.
     case seeded?.kind === "text" && MULTILINE.test(seeded.text):
-      return MULTILINE_TEXT_REASON;
+      return projectsText(MULTILINE_TEXT_REASON);
     default:
       return undefined;
   }
@@ -277,6 +278,7 @@ export function ScalarInput({
   /** Every edit, as the control's raw text and whether the browser could parse it. */
   onEdit: (raw: string, badInput: boolean) => void;
 }) {
+  const tx = useProjectsText();
   const hostRef = useRef<HTMLSpanElement>(null);
   // Captured once: an uncontrolled input ignores later defaults anyway (fresh
   // values arrive by remount, per the contract above), and a changing prop only
@@ -334,7 +336,7 @@ export function ScalarInput({
         step={def.kind === "number" ? "any" : undefined}
         // A native date input renders its own segment mask and ignores this, so only
         // the two free-text kinds get the invitation.
-        placeholder={def.kind === "date" ? undefined : `Set ${def.name}…`}
+        placeholder={def.kind === "date" ? undefined : tx("Set {{name}}…", { name: def.name })}
         className="h-7"
         disabled={!!lockedReason}
         defaultValue={initial}
@@ -363,6 +365,7 @@ export function SingleSelectRows({
   ariaLabel?: string;
   onPick: (option: ProjectFieldOptionDef) => void;
 }) {
+  const tx = useProjectsText();
   return (
     // `gap-0` only: the rows carry their own padding, and the host popup or dialog
     // owns the scrolling — a cap here would nest a scrollbar inside that one.
@@ -392,7 +395,7 @@ export function SingleSelectRows({
       ))}
       {def.options.length === 0 && (
         <p className="px-1 py-1 text-xs text-muted-foreground">
-          This field has no options.
+          {tx("This field has no options.")}
         </p>
       )}
     </RadioGroup>
@@ -413,6 +416,7 @@ export function MultiSelectRows({
   lockedReason?: string;
   onChoose: (options: ProjectFieldOptionDef[]) => void;
 }) {
+  const tx = useProjectsText();
   // Locked rows are skipped by the arrows rather than made focus black holes: a
   // natively-disabled checkbox can't take focus.
   const navRows = lockedReason ? [] : def.options;
@@ -459,7 +463,7 @@ export function MultiSelectRows({
       ))}
       {def.options.length === 0 && (
         <p className="px-1 py-1 text-xs text-muted-foreground">
-          This field has no options.
+          {tx("This field has no options.")}
         </p>
       )}
     </div>
@@ -484,6 +488,7 @@ export function IterationRows({
   ariaLabel?: string;
   onPick: (iteration: ProjectIterationDef) => void;
 }) {
+  const tx = useProjectsText();
   const { iterations, completedIterations } = def;
   const all = [...iterations, ...completedIterations];
   // The reason is the row's own text: nothing here is focusable, so a tooltip or an
@@ -492,7 +497,7 @@ export function IterationRows({
   if (all.length === 0) {
     return (
       <p className="px-1 py-1 text-xs text-muted-foreground">
-        {NO_ITERATIONS_REASON}
+        {tx(NO_ITERATIONS_REASON)}
       </p>
     );
   }
@@ -517,7 +522,7 @@ export function IterationRows({
       ))}
       {completedIterations.length > 0 && (
         <p className="px-1 pt-1.5 pb-0.5 text-[11px] text-muted-foreground">
-          Completed
+          {tx("Completed")}
         </p>
       )}
       {completedIterations.map((iteration) => (

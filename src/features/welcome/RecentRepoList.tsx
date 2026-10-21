@@ -1,4 +1,5 @@
 import { FolderDashedIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import {
   RemoveRepoDialog,
@@ -14,6 +15,7 @@ import {
 } from "./recent-repo-list-sizes";
 
 export function RecentRepoList() {
+  const { t } = useTranslation("welcome");
   const settings = useSettings();
   const recents = settings.data?.recentRepos ?? [];
   const [aliasTarget, setAliasTarget] = useState<RecentRepo | null>(null);
@@ -22,7 +24,7 @@ export function RecentRepoList() {
   return (
     <div className={COLUMN_CLASS}>
       <div className="flex items-baseline justify-between gap-2 px-1">
-        <h2 className={HEADING_CLASS}>Repositories</h2>
+        <h2 className={HEADING_CLASS}>{t("recent.heading")}</h2>
         {recents.length > 0 && (
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {recents.length}
@@ -32,10 +34,9 @@ export function RecentRepoList() {
       {recents.length === 0 ? (
         <div className="flex flex-col items-center gap-2 border border-dashed px-6 py-10 text-center">
           <FolderDashedIcon className="size-6 text-muted-foreground" />
-          <p className="text-xs font-medium">No repositories yet</p>
+          <p className="text-xs font-medium">{t("recent.emptyTitle")}</p>
           <p className="max-w-[30ch] text-[11px] text-muted-foreground">
-            Open, clone, or create a repository and it&apos;ll show up here for
-            quick access.
+            {t("recent.emptyDescription")}
           </p>
         </div>
       ) : (

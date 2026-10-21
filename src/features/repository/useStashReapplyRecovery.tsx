@@ -19,7 +19,7 @@ import { useStashReapplyMarker } from "@/lib/stores/stash-reapply-marker";
 import { useUiStore } from "@/lib/stores/ui";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { errorToastAction, toastError, toastErrorWithNote } from "@/lib/toast";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 import {
   StashReapplyDialog,
   type StashReapplyTarget,
@@ -253,7 +253,7 @@ export function useStashReapplyRecovery(repoPath: string) {
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       clearOwnPrompt(req);
       return;
     }

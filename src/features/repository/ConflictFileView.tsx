@@ -1,6 +1,7 @@
 import { SparkleIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { InfoNote } from "@/components/info-note";
@@ -40,34 +41,13 @@ import {
 } from "@/lib/settings/queries";
 import { useConfirm } from "@/lib/stores/confirm";
 import { useConflictResolve } from "@/lib/stores/conflict-resolve";
-import { type AppError, isAppError } from "@/lib/tauri/invoke";
+import { isAppError } from "@/lib/tauri/invoke";
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { markerStagePrompt } from "./conflict-confirms";
 import { useRefuseIfMoved } from "./use-refuse-if-moved";
 
 const baseName = (path: string) => path.split("/").pop() || path;
-
-/** The `notConflicted` line, and the reason the header's whole-file actions
- *  hold under it. */
-const NOT_CONFLICTED_COPY = "This file is no longer conflicted.";
-
-/** Why the per-region accepts are off for a non-UTF-8 working file: they
- *  rebuild the file from its lossy decode. Names the byte-safe actions as the
- *  header buttons word them. */
-const CONFLICT_UNDECODABLE_NOTE =
-  "This file isn't UTF-8 text, so it resolves as a whole to keep its bytes exact. Use Accept all current, Accept all incoming, or Open in editor.";
-
-/** Why Resolve with AI holds over a non-UTF-8 working file: the proposal would
- *  be written back from its lossy decode. */
-const AI_UNDECODABLE_REASON =
-  "This file isn't UTF-8 text, so AI resolution would change its bytes.";
-
-/** The whole-file sides, worded as the header buttons word them. */
-const ACCEPT_ALL_COPY = {
-  ours: { side: "current", other: "incoming" },
-  theirs: { side: "incoming", other: "current" },
-} as const;
 
 /** What taking a whole side actually does, given which side (if either) has no
  *  version at this path; `unclassified` when no sides read has landed. */
@@ -76,69 +56,6 @@ type AcceptAllArm = "content" | "takesDeletion" | "keepsFile" | "unclassified";
 /** One body per outcome: a modify/delete conflict doesn't "replace" anything —
  *  the backend runs `git rm` for a removing side and re-checks the file out
  *  whole for a surviving one. */
-const ACCEPT_ALL_BODY: Record<
-  AcceptAllArm,
-  (name: string, side: string, other: string) => string
-> = {
-  content: (name, side, other) =>
-    `Replaces ${name} with the whole ${side} version, including any conflict regions you already resolved by hand. The ${other} changes to this file are discarded.`,
-  takesDeletion: (name, side, other) =>
-    `The ${side} side removed ${name}, so this deletes the file from your working tree and index. The ${other} side's changes to it are discarded.`,
-  keepsFile: (name, side, other) =>
-    `Keeps ${name} whole as the ${side} side left it, replacing what's in your working tree now. The ${other} side removed the file, and that removal is discarded.`,
-  unclassified: (name, side, other) =>
-    `Takes the ${side} side for ${name}: its version, or its removal if that side deleted the file. The ${other} side's changes and any conflict regions you already resolved by hand are discarded.`,
-};
-
-/** The notice per removing side. "Removed" rather than "deleted": a side that
- *  renamed the file away also has no version at this path. */
-const DELETION_COPY = {
-  ours: {
-    lead: "The current branch removed this file; the incoming change edited it (below).",
-    takesDeletion: "Accept all current",
-    keepsFile: "Accept all incoming",
-  },
-  theirs: {
-    lead: "The incoming change removed this file; the current branch edited it (below).",
-    takesDeletion: "Accept all incoming",
-    keepsFile: "Accept all current",
-  },
-} as const;
-
-/** The error pane's copy per failed-read kind: the backend refuses a binary or
- *  oversized file as invalidArgument; `io` covers a lock, a permission change,
- *  or a directory at the path (a conflicted submodule), none promised to pass.
- *  Other kinds take the fallback. */
-const READ_ERROR_COPY: Partial<Record<AppError["kind"], ReactNode>> = {
-  invalidArgument: (
-    <>
-      This looks like a binary or oversized conflict, so it can't be merged as
-      text. Take a side with{" "}
-      <span className="font-medium">Accept all current</span> /{" "}
-      <span className="font-medium">incoming</span>, or open it in your editor.
-    </>
-  ),
-  io: "Couldn't read this file. It may be locked, its permissions may have changed, or a folder (such as a conflicted submodule) may sit at this path. Open it in your editor to resolve the conflict, or try again if it becomes readable.",
-};
-const READ_ERROR_FALLBACK =
-  "Couldn't read this file, so it can't be shown here. Resolve the conflict in your editor.";
-
-/** The two working-file states with no text to show, each worded for what
- *  staging it actually records (content vs. a removal). */
-const EMPTIED_COPY: Record<
-  "emptiedOnDisk" | "emptiedGone",
-  { state: string; action: string }
-> = {
-  emptiedOnDisk: {
-    state: "You've emptied this file",
-    action: "stages it exactly as it is on disk.",
-  },
-  emptiedGone: {
-    state: "This file is gone from your working tree",
-    action: "stages the removal.",
-  },
-};
-
 /**
  * What a conflicted file shows when the parser found no regions to resolve: a
  * side with no version at this path, an empty file, content already resolved
@@ -160,6 +77,7 @@ function ConflictFallback({
   busy: boolean;
   onMarkResolved: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const markButton = MARK_RESOLVED_ARMS.has(arm) ? (
     <Button
       size="xs"
@@ -174,19 +92,38 @@ function ConflictFallback({
 
   if (arm === "notConflicted") {
     return (
-      <p className="p-4 text-xs text-muted-foreground">{NOT_CONFLICTED_COPY}</p>
+      <p className="p-4 text-xs text-muted-foreground">
+        {t("conflicts.file.notConflicted")}
+      </p>
     );
   }
 
   if (arm === "deletion" || arm === "deletionEdited") {
     // The arm doesn't carry WHICH side removed the file, and the notice names
     // it. Both deletion arms come from a non-null `deletedSide` (asserted).
-    const copy = DELETION_COPY[deletedSide(sides) as "ours" | "theirs"];
+    const deleted = deletedSide(sides);
+    const currentDeleted = deleted === "ours";
+    const takesDeletion = t(
+      currentDeleted
+        ? "conflicts.file.acceptCurrent"
+        : "conflicts.file.acceptIncoming",
+    );
+    const keepsFile = t(
+      currentDeleted
+        ? "conflicts.file.acceptIncoming"
+        : "conflicts.file.acceptCurrent",
+    );
     const lead = (
       <>
-        {copy.lead} <span className="font-medium">{copy.takesDeletion}</span>{" "}
-        takes the deletion,{" "}
-        <span className="font-medium">{copy.keepsFile}</span> keeps the file.
+        {t(
+          currentDeleted
+            ? "conflicts.file.currentRemoved"
+            : "conflicts.file.incomingRemoved",
+        )}{" "}
+        <span className="font-medium">{takesDeletion}</span>{" "}
+        {t("conflicts.file.takesDeletion")}{" "}
+        <span className="font-medium">{keepsFile}</span>{" "}
+        {t("conflicts.file.keepsFile")}.
       </>
     );
     return (
@@ -194,11 +131,12 @@ function ConflictFallback({
         {arm === "deletionEdited" ? (
           <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
             <p className="min-w-0 flex-1">
-              {lead} You've edited this file —{" "}
-              <span className="font-medium">Mark resolved</span> keeps it
-              exactly as shown.
-              {markersRemain &&
-                " It still has conflict markers, so you'll be asked before they're staged."}
+              {lead} {t("conflicts.file.editedPrefix")}{" "}
+              <span className="font-medium">
+                {t("conflicts.file.markResolved")}
+              </span>{" "}
+              {t("conflicts.file.keepsAsShown")}
+              {markersRemain && ` ${t("conflicts.file.markersRemainConfirm")}`}
             </p>
             {markButton}
           </div>
@@ -216,9 +154,20 @@ function ConflictFallback({
     return (
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
         <p className="min-w-0 flex-1">
-          {EMPTIED_COPY[arm].state} —{" "}
-          <span className="font-medium">Mark resolved</span>{" "}
-          {EMPTIED_COPY[arm].action}
+          {t(
+            arm === "emptiedOnDisk"
+              ? "conflicts.file.emptied"
+              : "conflicts.file.goneFromTree",
+          )}{" "}
+          —{" "}
+          <span className="font-medium">
+            {t("conflicts.file.markResolved")}
+          </span>{" "}
+          {t(
+            arm === "emptiedOnDisk"
+              ? "conflicts.file.stageOnDisk"
+              : "conflicts.file.stageRemoval",
+          )}
         </p>
         {markButton}
       </div>
@@ -229,10 +178,10 @@ function ConflictFallback({
     // Nothing to merge as text, and nothing on disk worth staging as-is.
     return (
       <p className="p-4 text-xs text-muted-foreground">
-        This file was deleted on both sides — there's nothing to merge. Take a
-        side with <span className="font-medium">Accept all current</span> /{" "}
-        <span className="font-medium">incoming</span>, or open it in your
-        editor.
+        {t("conflicts.file.bothDeleted", {
+          current: t("conflicts.file.acceptCurrent"),
+          incoming: t("conflicts.file.acceptIncoming"),
+        })}
       </p>
     );
   }
@@ -242,9 +191,9 @@ function ConflictFallback({
       <>
         <div className="flex items-center gap-2 border-b bg-success/10 px-3 py-1.5 text-[11px] text-success">
           <p className="min-w-0 flex-1">
-            No conflict markers remain — this file looks resolved. Review it,
-            then <span className="font-medium">Mark resolved</span> to stage it
-            exactly as it is on disk.
+            {t("conflicts.file.externallyResolved", {
+              action: t("conflicts.file.markResolved"),
+            })}
           </p>
           {markButton}
         </div>
@@ -262,17 +211,15 @@ function ConflictFallback({
         <p className="min-w-0 flex-1">
           {markersRemain ? (
             <>
-              Couldn't cleanly parse the conflict markers in this file. Take a
-              side with the header actions, or fix it in your editor and then{" "}
-              <span className="font-medium">Mark resolved</span>. While markers
-              remain, you'll be asked before they're staged.
+              {t("conflicts.file.malformedMarkers", {
+                action: t("conflicts.file.markResolved"),
+              })}
             </>
           ) : (
             <>
-              Couldn't tell how this conflict should resolve. Review the file,
-              then <span className="font-medium">Mark resolved</span> to stage
-              it exactly as it is on disk, or take a side with the header
-              actions.
+              {t("conflicts.file.unknownConflict", {
+                action: t("conflicts.file.markResolved"),
+              })}
             </>
           )}
         </p>
@@ -299,6 +246,10 @@ export function ConflictFileView({
   repoPath: string;
   path: string;
 }) {
+  const { t } = useTranslation("repositoryOperations");
+  const notConflictedCopy = t("conflicts.file.notConflicted");
+  const undecodableNote = t("conflicts.file.undecodableNote");
+  const aiUndecodableReason = t("conflicts.file.aiUndecodableReason");
   const file = useConflictFile(repoPath, path);
   const resolve = useResolveConflict(repoPath);
   const checkoutSide = useCheckoutConflictSide(repoPath);
@@ -408,7 +359,7 @@ export function ConflictFileView({
   async function acceptRegion(index: number, choice: ConflictChoice) {
     if (inFlightRef.current || !segments) return;
     if (workingUndecodableRef.current) {
-      toast.info(CONFLICT_UNDECODABLE_NOTE);
+      toast.info(undecodableNote);
       return;
     }
     const content = resolveBlock(segments, index, choice);
@@ -417,7 +368,8 @@ export function ConflictFileView({
     inFlightRef.current = true;
     try {
       await resolve.mutateAsync({ path, content, stage });
-      if (stage) toast.success(`Resolved ${baseName(path)}`);
+      if (stage)
+        toast.success(t("conflicts.file.resolved", { name: baseName(path) }));
     } catch (e) {
       toastError(e);
       await refreshAfterError();
@@ -435,7 +387,18 @@ export function ConflictFileView({
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const copy = ACCEPT_ALL_COPY[side];
+      const copy = {
+        side: t(
+          side === "ours"
+            ? "conflicts.file.current"
+            : "conflicts.file.incoming",
+        ),
+        other: t(
+          side === "ours"
+            ? "conflicts.file.incoming"
+            : "conflicts.file.current",
+        ),
+      };
       const name = baseName(path);
       const deleted = file.data ? deletedSide(file.data) : null;
       const arm: AcceptAllArm = (() => {
@@ -453,15 +416,26 @@ export function ConflictFileView({
       const acceptIn = repoPath;
       const ok = await useConfirm.getState().ask({
         title: `Accept all ${copy.side} in ${name}?`,
-        body: ACCEPT_ALL_BODY[arm](name, copy.side, copy.other),
-        confirmLabel: `Accept all ${copy.side}`,
+        body: t(`conflicts.file.acceptAllBody.${arm}`, {
+          name,
+          side: copy.side,
+          other: copy.other,
+        }),
+        confirmLabel: t("conflicts.file.acceptAll", { side: copy.side }),
         confirmVariant: "destructive",
       });
       if (!ok || refuseIfMoved(acceptIn, "nothing was resolved")) return;
       try {
         await checkoutSide.mutateAsync({ path, side });
         toast.success(
-          `Resolved ${baseName(path)} — took ${side === "ours" ? "current" : "incoming"}`,
+          t("conflicts.file.resolvedBySide", {
+            name: baseName(path),
+            side: t(
+              side === "ours"
+                ? "conflicts.file.current"
+                : "conflicts.file.incoming",
+            ),
+          }),
         );
       } catch (e) {
         toastError(e);
@@ -495,9 +469,9 @@ export function ConflictFileView({
   const aiHeldReason = (() => {
     switch (true) {
       case notConflicted:
-        return NOT_CONFLICTED_COPY;
+        return notConflictedCopy;
       case workingUndecodable:
-        return AI_UNDECODABLE_REASON;
+        return aiUndecodableReason;
       default:
         return null;
     }
@@ -518,7 +492,7 @@ export function ConflictFileView({
       try {
         fresh = await conflictSides(repoPath, path, []);
       } catch {
-        toast.info("Couldn't re-read the file — nothing was marked resolved.");
+        toast.info(t("conflicts.file.rereadFailed"));
         await refreshAfterError();
         return;
       } finally {
@@ -541,7 +515,7 @@ export function ConflictFileView({
       }
       try {
         await markResolve.mutateAsync(path);
-        toast.success(`Resolved ${baseName(path)}`);
+        toast.success(t("conflicts.file.resolved", { name: baseName(path) }));
       } catch (e) {
         // A stale click: the path can be resolved elsewhere (an AI walk, another
         // window) between render and click, leaving NO index entry, and `git
@@ -591,7 +565,7 @@ export function ConflictFileView({
         />
         <span className="flex shrink-0 items-center gap-1.5">
           <Button size="xs" variant="ghost" onClick={openInEditor}>
-            Open in editor
+            {t("conflicts.file.openInEditor")}
           </Button>
           {/* Held on a path git calls merged: Accept all re-checks the file out
               from the index, over any edits made after an outside `git add`. */}
@@ -599,19 +573,19 @@ export function ConflictFileView({
             size="xs"
             variant="outline"
             disabled={busy || notConflicted}
-            reason={notConflicted ? NOT_CONFLICTED_COPY : null}
+            reason={notConflicted ? notConflictedCopy : null}
             onClick={() => acceptAll("ours")}
           >
-            Accept all current
+            {t("conflicts.file.acceptAllCurrent")}
           </DisabledReasonButton>
           <DisabledReasonButton
             size="xs"
             variant="outline"
             disabled={busy || notConflicted}
-            reason={notConflicted ? NOT_CONFLICTED_COPY : null}
+            reason={notConflicted ? notConflictedCopy : null}
             onClick={() => acceptAll("theirs")}
           >
-            Accept all incoming
+            {t("conflicts.file.acceptAllIncoming")}
           </DisabledReasonButton>
           {offersAi && (
             // This view's OWN repoPath scopes the walk — the main repo on the
@@ -623,7 +597,7 @@ export function ConflictFileView({
               onClick={() => startResolveAi(path, repoPath)}
             >
               <SparkleIcon data-icon="inline-start" />
-              Resolve with AI
+              {t("conflicts.file.resolveWithAi")}
             </DisabledReasonButton>
           )}
         </span>
@@ -631,7 +605,7 @@ export function ConflictFileView({
 
       {/* Only over the region view: the fallback arms already resolve whole. */}
       {!file.isError && segments !== null && workingUndecodable && (
-        <InfoNote className="shrink-0">{CONFLICT_UNDECODABLE_NOTE}</InfoNote>
+        <InfoNote className="shrink-0">{undecodableNote}</InfoNote>
       )}
 
       {/* Body */}
@@ -639,12 +613,15 @@ export function ConflictFileView({
         {file.isPending ? (
           <p className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
             <Spinner className="size-3" />
-            Reading the conflict…
+            {t("conflicts.file.reading")}
           </p>
         ) : file.isError ? (
           <p className="p-4 text-xs text-muted-foreground">
-            {(isAppError(file.error) && READ_ERROR_COPY[file.error.kind]) ||
-              READ_ERROR_FALLBACK}
+            {isAppError(file.error) && file.error.kind === "invalidArgument"
+              ? t("conflicts.file.readErrorBinary")
+              : isAppError(file.error) && file.error.kind === "io"
+                ? t("conflicts.file.readErrorIo")
+                : t("conflicts.file.readErrorFallback")}
           </p>
         ) : segments === null ? (
           <ConflictFallback
@@ -677,7 +654,7 @@ export function ConflictFileView({
               >
                 <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 text-[11px]">
                   <span className="font-medium text-muted-foreground">
-                    Conflict
+                    {t("conflicts.file.conflict")}
                   </span>
                   <span className="flex-1" />
                   {!workingUndecodable && (
@@ -688,7 +665,7 @@ export function ConflictFileView({
                         disabled={busy}
                         onClick={() => acceptRegion(index, "current")}
                       >
-                        Accept current
+                        {t("conflicts.file.acceptCurrent")}
                       </Button>
                       <Button
                         size="xs"
@@ -696,7 +673,7 @@ export function ConflictFileView({
                         disabled={busy}
                         onClick={() => acceptRegion(index, "incoming")}
                       >
-                        Accept incoming
+                        {t("conflicts.file.acceptIncoming")}
                       </Button>
                       <Button
                         size="xs"
@@ -704,14 +681,14 @@ export function ConflictFileView({
                         disabled={busy}
                         onClick={() => acceptRegion(index, "both")}
                       >
-                        Both
+                        {t("conflicts.file.both")}
                       </Button>
                     </>
                   )}
                 </div>
                 <div className="bg-success/5">
                   <div className="px-3 py-0.5 text-[10px] font-medium text-success">
-                    Current (ours)
+                    {t("conflicts.file.currentOurs")}
                     {seg.currentLabel ? ` · ${seg.currentLabel}` : ""}
                   </div>
                   <HighlightedCode
@@ -722,7 +699,7 @@ export function ConflictFileView({
                 </div>
                 <div className="bg-info/5">
                   <div className="px-3 py-0.5 text-[10px] font-medium text-info">
-                    Incoming (theirs)
+                    {t("conflicts.file.incomingTheirs")}
                     {seg.incomingLabel ? ` · ${seg.incomingLabel}` : ""}
                   </div>
                   <HighlightedCode

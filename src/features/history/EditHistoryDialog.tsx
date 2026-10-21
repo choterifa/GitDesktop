@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
@@ -33,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { clipTitle, clipTitleFromText } from "@/lib/clip-title";
 import {
   useRebaseEdit,
@@ -53,13 +54,7 @@ import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn } from "@/lib/utils";
-import {
-  compilePlan,
-  type EditRow,
-  FOLD_HELD_LABEL,
-  moveAnnouncement,
-  type RowAction,
-} from "./edit-history-plan";
+import { compilePlan, type EditRow, type RowAction } from "./edit-history-plan";
 import {
   leftRebaseInProgress,
   useGenerateSquashMessage,
@@ -67,36 +62,41 @@ import {
 
 /** Action labels + one-line descriptions for the per-row picker. Squash and
  *  fixup carry no static hint: theirs names the commit they combine into. */
-const ACTIONS: { value: RowAction; label: string; hint?: string }[] = [
-  { value: "pick", label: "Pick", hint: "Keep this commit as-is" },
-  {
-    value: "reword",
-    label: "Reword",
-    hint: "Keep the changes, edit the message",
-  },
-  { value: "squash", label: "Squash" },
-  { value: "fixup", label: "Fixup" },
-  {
-    value: "edit",
-    label: "Edit",
-    hint: "Stop to amend this commit's changes",
-  },
-  { value: "drop", label: "Drop", hint: "Remove this commit entirely" },
+const ACTIONS: { value: RowAction }[] = [
+  { value: "pick" },
+  { value: "reword" },
+  { value: "squash" },
+  { value: "fixup" },
+  { value: "edit" },
+  { value: "drop" },
 ];
-const ACTION_LABEL = new Map(ACTIONS.map((a) => [a.value, a.label]));
+const ACTION_LABEL_KEY: Record<RowAction, string> = {
+  pick: "editHistory.actions.pick",
+  reword: "editHistory.actions.reword",
+  squash: "editHistory.actions.squash",
+  fixup: "editHistory.actions.fixup",
+  edit: "editHistory.actions.edit",
+  drop: "editHistory.actions.drop",
+};
+const ACTION_HINT_KEY: Partial<Record<RowAction, string>> = {
+  pick: "editHistory.actionHints.pick",
+  reword: "editHistory.actionHints.reword",
+  edit: "editHistory.actionHints.edit",
+  drop: "editHistory.actionHints.drop",
+};
 
 type FoldAction = "squash" | "fixup";
 const isFold = (a: RowAction): a is FoldAction =>
   a === "squash" || a === "fixup";
 /** The second line of a fold's menu hint, after the quoted target. */
 const FOLD_HINT_TAIL: Record<FoldAction, string> = {
-  squash: "joining the messages",
-  fixup: "keeping that commit's message",
+  squash: "editHistory.foldHintTail.squash",
+  fixup: "editHistory.foldHintTail.fixup",
 };
-const FOLD_HELD_HINT = "No older kept commit in this list to combine into";
-const BUSY_REASON = "The rewrite is still running.";
-const AT_NEWEST = "Already the newest commit";
-const AT_OLDEST = "Already the oldest commit";
+const FOLD_HELD_HINT = "editHistory.foldHeldHint";
+const BUSY_REASON = "editHistory.busyReason";
+const AT_NEWEST = "editHistory.atNewest";
+const AT_OLDEST = "editHistory.atOldest";
 
 /** The dialog's move chords, as canonical bindings (`eventToBinding`'s own
  *  spelling). Feature-local rather than registry bindings: they act on the
@@ -136,19 +136,23 @@ function findRow(list: HTMLElement | null, hash: string): HTMLElement | null {
  *  can't), else the action's static hint. */
 function ActionHint({
   action,
-  hint,
   target,
 }: {
   action: RowAction;
-  hint?: string;
   target: string | null;
 }) {
+  const { t } = useTranslation("history");
+  const hintKey = ACTION_HINT_KEY[action];
   if (!isFold(action))
-    return <span className="text-[11px] text-muted-foreground">{hint}</span>;
+    return (
+      <span className="text-[11px] text-muted-foreground">
+        {hintKey ? t(hintKey) : null}
+      </span>
+    );
   // Foreground, so it reads muted under the held item's disabled opacity.
   if (target === null)
     return (
-      <span className="text-[11px] text-foreground">{FOLD_HELD_HINT}</span>
+      <span className="text-[11px] text-foreground">{t(FOLD_HELD_HINT)}</span>
     );
   // The subject truncates to what the first line leaves after its quotes, so
   // it always starts right after the opening one. The text still reads as one
@@ -156,13 +160,15 @@ function ActionHint({
   return (
     <span className="flex max-w-full flex-col text-[11px] text-muted-foreground">
       <span className="flex min-w-0 max-w-full">
-        <span className="shrink-0 whitespace-pre">Combine into "</span>
+        <span className="shrink-0 whitespace-pre">
+          {t("editHistory.combineInto")}
+        </span>
         <span className="min-w-0 truncate" onMouseEnter={clipTitle(target)}>
           {target}
         </span>
         <span className="shrink-0">",</span>
       </span>
-      <span> {FOLD_HINT_TAIL[action]}</span>
+      <span> {t(FOLD_HINT_TAIL[action])}</span>
     </span>
   );
 }
@@ -192,6 +198,7 @@ export function EditHistoryDialog({
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation("history");
   const rewrite = useRewriteCommits(repoPath);
   const rebaseEdit = useRebaseEdit(repoPath);
   const busy = rewrite.isPending || rebaseEdit.isPending;
@@ -281,6 +288,33 @@ export function EditHistoryDialog({
   const announce = (text: string) =>
     setAnnouncement((prev) => ({ text, seq: prev.seq + 1 }));
 
+  function translatedPlanError(error: string | null): string | null {
+    if (!error) return null;
+    const fold = error.match(
+      /^"(.+)" can't be (squashed|fixed up) — no older commit in this list is kept to combine it into\.$/,
+    );
+    if (fold) {
+      return t("editHistory.errors.foldWithoutTarget", {
+        subject: fold[1],
+        action: t(
+          fold[2] === "squashed"
+            ? "editHistory.actions.squash"
+            : "editHistory.actions.fixup",
+        ),
+      });
+    }
+    if (error === "Keep at least one commit — you can't drop them all.") {
+      return t("editHistory.errors.keepOne");
+    }
+    const reword = error.match(/^Rewording "(.+)" needs a commit message\.$/);
+    if (reword) {
+      return t("editHistory.errors.rewordNeedsMessage", {
+        subject: reword[1],
+      });
+    }
+    return t("editHistory.errors.generic");
+  }
+
   // A move re-orders keyed nodes, which can drop focus off the moved row (and a
   // button click parks it on a button), so every move lands focus back on it.
   useLayoutEffect(() => {
@@ -314,8 +348,8 @@ export function EditHistoryDialog({
     setActions((a) => ({ ...a, [hash]: action }));
   }
 
-  // Moves the row at `index` to `to` and announces it (`moveAnnouncement` says
-  // what that covers). The next plan is compiled here: the memoized one is a
+  // Moves the row at `index` to `to` and announces the outcome. The next plan is
+  // compiled here: the memoized one is a
   // render behind inside the handler.
   function moveTo(index: number, to: number) {
     if (to === index || to < 0 || to >= order.length) return;
@@ -329,17 +363,28 @@ export function EditHistoryDialog({
     setOrder(nextOrder);
     setMoveFocus((prev) => ({ hash, nonce: (prev?.nonce ?? 0) + 1 }));
 
-    announce(
-      moveAnnouncement({
-        prev: plan,
-        next: nextPlan,
-        action: moved.action,
-        hash,
-        from: index,
-        to,
-        total: order.length,
-      }),
-    );
+    let announcementText = t("editHistory.movedTo", {
+      position: to + 1,
+      total: order.length,
+    });
+    const retargeted =
+      nextPlan.views[to].foldTargetHash !== plan.views[index].foldTargetHash;
+    const spoke = isFold(moved.action) && retargeted;
+    if (spoke) {
+      const target = nextPlan.views[to].foldTarget;
+      announcementText +=
+        target === null
+          ? `, ${t(FOLD_HELD_HINT)}`
+          : `, ${t("editHistory.into", { target })}`;
+    }
+    if (
+      nextPlan.error !== null &&
+      nextPlan.error !== plan.error &&
+      !(spoke && nextPlan.errorHash === hash)
+    ) {
+      announcementText += `. ${translatedPlanError(nextPlan.error)}`;
+    }
+    announce(announcementText);
   }
 
   function move(index: number, delta: -1 | 1) {
@@ -367,7 +412,7 @@ export function EditHistoryDialog({
     // Alt swallow and the menu open refuse with the reason.
     if (busy && (direction !== undefined || swallowed || menuKey)) {
       e.preventDefault();
-      if (!e.repeat) announce(BUSY_REASON);
+      if (!e.repeat) announce(t(BUSY_REASON));
       return;
     }
     // No repeat gate: holding the chord repeats the move.
@@ -380,13 +425,13 @@ export function EditHistoryDialog({
         case "top":
           if (index === 0) {
             // Once per press: a held chord at the end would spam the region.
-            if (!e.repeat) announce(AT_NEWEST);
+            if (!e.repeat) announce(t(AT_NEWEST));
           } else moveTo(index, direction === "up" ? index - 1 : 0);
           return;
         case "down":
         case "bottom":
           if (index === last) {
-            if (!e.repeat) announce(AT_OLDEST);
+            if (!e.repeat) announce(t(AT_OLDEST));
           } else moveTo(index, direction === "down" ? index + 1 : last);
           return;
       }
@@ -453,7 +498,7 @@ export function EditHistoryDialog({
   async function apply() {
     if (plan.error || !plan.changed) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     if (plan.hasEdit) {
@@ -465,7 +510,7 @@ export function EditHistoryDialog({
           steps: plan.steps,
           dropped: plan.dropped,
         });
-        toast.success("Rebase started — paused to edit a commit");
+        toast.success(t("editHistory.rebasePaused"));
         onOpenChange(false);
         setRepoTab("changes");
         onDone();
@@ -483,8 +528,8 @@ export function EditHistoryDialog({
       });
       toast.success(
         plan.resultCount === 1
-          ? "History rewritten into one commit"
-          : `History rewritten — ${plan.resultCount} commits`,
+          ? t("editHistory.rewrittenOne")
+          : t("editHistory.rewrittenMany", { count: plan.resultCount }),
       );
       onOpenChange(false);
       onDone();
@@ -515,19 +560,19 @@ export function EditHistoryDialog({
         }
       >
         <DialogHeader>
-          <DialogTitle>Edit history</DialogTitle>
+          <DialogTitle>{t("editHistory.title")}</DialogTitle>
           <DialogDescription>
-            Reshape your unpushed commits — reword, squash, fixup, drop, or
-            reorder. Newest on top; {formatBinding("alt+up")} and{" "}
-            {formatBinding("alt+down")} move the focused commit. This rewrites
-            local history; a conflict rolls it back.
+            {t("editHistory.description", {
+              up: formatBinding("alt+up"),
+              down: formatBinding("alt+down"),
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <div
           ref={listRef}
           role="list"
-          aria-label="Commits, newest first"
+          aria-label={t("editHistory.commitsList")}
           className="min-h-0 flex-1 space-y-px overflow-y-auto border"
           onKeyDown={onListKeyDown}
           onFocusCapture={onListFocusCapture}
@@ -542,9 +587,9 @@ export function EditHistoryDialog({
             const foldState = (() => {
               switch (true) {
                 case folding:
-                  return `, into "${target}"`;
+                  return `, ${t("editHistory.into", { target })}`;
                 case held:
-                  return `, ${FOLD_HELD_LABEL}`;
+                  return `, ${t(FOLD_HELD_HINT)}`;
                 default:
                   return "";
               }
@@ -552,9 +597,9 @@ export function EditHistoryDialog({
             const upReason = (() => {
               switch (true) {
                 case busy:
-                  return BUSY_REASON;
+                  return t(BUSY_REASON);
                 case index === 0:
-                  return AT_NEWEST;
+                  return t(AT_NEWEST);
                 default:
                   return null;
               }
@@ -562,9 +607,9 @@ export function EditHistoryDialog({
             const downReason = (() => {
               switch (true) {
                 case busy:
-                  return BUSY_REASON;
+                  return t(BUSY_REASON);
                 case index === order.length - 1:
-                  return AT_OLDEST;
+                  return t(AT_OLDEST);
                 default:
                   return null;
               }
@@ -574,7 +619,12 @@ export function EditHistoryDialog({
                 key={row.hash}
                 role="listitem"
                 {...nav.rowProps(row)}
-                aria-label={`${ACTION_LABEL.get(row.action)} ${row.hash.slice(0, 7)} ${row.subject}${foldState}`}
+                aria-label={t("editHistory.rowLabel", {
+                  action: t(ACTION_LABEL_KEY[row.action]),
+                  hash: row.hash.slice(0, 7),
+                  subject: row.subject,
+                  foldState,
+                })}
                 aria-keyshortcuts={MOVE_KEYSHORTCUTS}
                 className="border-b outline-none last:border-b-0 focus-visible:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset data-[dropped=true]:bg-muted/30"
                 data-dropped={dropped}
@@ -599,12 +649,14 @@ export function EditHistoryDialog({
                           size="xs"
                           tabIndex={-1}
                           disabled={busy}
-                          reason={BUSY_REASON}
+                          reason={t(BUSY_REASON)}
                           data-action-trigger=""
                           className="w-20 justify-between"
-                          aria-label={`Action for ${row.subject}`}
+                          aria-label={t("editHistory.actionFor", {
+                            subject: row.subject,
+                          })}
                         >
-                          {ACTION_LABEL.get(row.action)}
+                          {t(ACTION_LABEL_KEY[row.action])}
                           <CaretDownIcon />
                         </DisabledReasonButton>
                       }
@@ -629,7 +681,11 @@ export function EditHistoryDialog({
                             // spaces inside the quotes.
                             aria-label={
                               isFold(a.value) && target !== null
-                                ? `${a.label} Combine into "${target}", ${FOLD_HINT_TAIL[a.value]}`
+                                ? t("editHistory.foldMenuAria", {
+                                    action: t(ACTION_LABEL_KEY[a.value]),
+                                    target,
+                                    tail: t(FOLD_HINT_TAIL[a.value]),
+                                  })
                                 : undefined
                             }
                             onClick={() => setAction(row.hash, a.value)}
@@ -651,13 +707,9 @@ export function EditHistoryDialog({
                             )}
                           >
                             <span className="text-xs font-medium">
-                              {a.label}
+                              {t(ACTION_LABEL_KEY[a.value])}
                             </span>
-                            <ActionHint
-                              action={a.value}
-                              hint={a.hint}
-                              target={target}
-                            />
+                            <ActionHint action={a.value} target={target} />
                           </DropdownMenuItem>
                         );
                       })}
@@ -688,7 +740,7 @@ export function EditHistoryDialog({
                       className="max-w-[40%] truncate text-[11px] text-muted-foreground"
                       onMouseEnter={clipTitle(target)}
                     >
-                      into <span className="text-foreground">"{target}"</span>
+                      {t("editHistory.into", { target })}{" "}
                     </span>
                   )}
                   {held && (
@@ -696,25 +748,29 @@ export function EditHistoryDialog({
                       className="max-w-[40%] truncate text-[11px] text-warning"
                       onMouseEnter={clipTitleFromText}
                     >
-                      {FOLD_HELD_LABEL}
+                      {t(FOLD_HELD_HINT)}
                     </span>
                   )}
                   {row.action === "edit" && (
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      pauses to amend
+                      {t("editHistory.pausesToAmend")}
                     </span>
                   )}
                   {dropped && (
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      removed
+                      {t("editHistory.removed")}
                     </span>
                   )}
                   <DisabledReasonButton
                     variant="ghost"
                     size="icon-xs"
                     tabIndex={-1}
-                    aria-label={`Move ${row.subject} up`}
-                    title={`Move up (${formatBinding("alt+up")})`}
+                    aria-label={t("editHistory.moveUpAria", {
+                      subject: row.subject,
+                    })}
+                    title={t("editHistory.moveUpTitle", {
+                      shortcut: formatBinding("alt+up"),
+                    })}
                     disabled={upReason !== null}
                     reason={upReason}
                     onClick={() => move(index, -1)}
@@ -725,8 +781,12 @@ export function EditHistoryDialog({
                     variant="ghost"
                     size="icon-xs"
                     tabIndex={-1}
-                    aria-label={`Move ${row.subject} down`}
-                    title={`Move down (${formatBinding("alt+down")})`}
+                    aria-label={t("editHistory.moveDownAria", {
+                      subject: row.subject,
+                    })}
+                    title={t("editHistory.moveDownTitle", {
+                      shortcut: formatBinding("alt+down"),
+                    })}
                     disabled={downReason !== null}
                     reason={downReason}
                     onClick={() => move(index, 1)}
@@ -741,13 +801,17 @@ export function EditHistoryDialog({
                     data-row-message=""
                   >
                     <Textarea
-                      aria-label={`Message for ${row.subject}`}
+                      aria-label={t("editHistory.messageFor", {
+                        subject: row.subject,
+                      })}
                       rows={row.action === "squash" ? 4 : 3}
                       // Disabled until the full bodies load, so editing can't
                       // capture a subject-only message and drop the body.
                       disabled={busy || !messages.isSuccess}
                       placeholder={
-                        messages.isLoading ? "Loading message…" : undefined
+                        messages.isLoading
+                          ? t("editHistory.loadingMessage")
+                          : undefined
                       }
                       className="max-h-40 min-h-16 resize-y font-mono text-xs"
                       value={messages.isSuccess ? row.message : ""}
@@ -768,7 +832,7 @@ export function EditHistoryDialog({
                           onClick={ai.cancel}
                         >
                           <XIcon data-icon="inline-start" />
-                          Cancel
+                          {t("editHistory.cancel")}
                         </Button>
                       ) : (
                         <DisabledReasonButton
@@ -776,15 +840,15 @@ export function EditHistoryDialog({
                           variant="ghost"
                           size="xs"
                           disabled={ai.generating || !messages.isSuccess}
-                          title="Generate this commit's message with AI"
+                          title={t("editHistory.generateTitle")}
                           // `ai.generating` here means ANOTHER row is
                           // generating — this row's own run renders Cancel.
                           reason={
                             ai.generating
-                              ? "Another commit message is generating"
+                              ? t("editHistory.anotherMessageGenerating")
                               : messages.isError
-                                ? "Couldn't load commit messages"
-                                : "Loading commit messages…"
+                                ? t("editHistory.loadMessagesError")
+                                : t("editHistory.loadingMessages")
                           }
                           onClick={() => {
                             setGenHash(row.hash);
@@ -792,7 +856,7 @@ export function EditHistoryDialog({
                           }}
                         >
                           <SparkleIcon data-icon="inline-start" />
-                          Generate
+                          {t("editHistory.generate")}
                         </DisabledReasonButton>
                       ))}
                   </div>
@@ -813,28 +877,25 @@ export function EditHistoryDialog({
           <div className="mr-auto text-xs text-muted-foreground">
             {messages.isError ? (
               <span className="text-warning">
-                Couldn't load commit messages.{" "}
+                {t("editHistory.loadMessagesError")}{" "}
                 <button
                   type="button"
                   className="cursor-pointer underline underline-offset-2"
                   onClick={() => messages.refetch()}
                 >
-                  Retry
+                  {t("editHistory.retry")}
                 </button>
               </span>
             ) : plan.error ? (
-              <span className="text-warning">{plan.error}</span>
+              <span className="text-warning">
+                {translatedPlanError(plan.error)}
+              </span>
             ) : (
               <>
-                Result:{" "}
-                <span className="tabular-nums text-foreground">
-                  {plan.resultCount}
-                </span>{" "}
-                {plan.resultCount === 1 ? "commit" : "commits"}
+                {t("editHistory.result", { count: plan.resultCount })}
                 {plan.hasEdit && (
                   <span className="block text-[11px]">
-                    Pauses at each Edit so you can amend it, then Continue from
-                    the banner.
+                    {t("editHistory.editPauseHint")}
                   </span>
                 )}
               </>
@@ -843,10 +904,10 @@ export function EditHistoryDialog({
           <DisabledReasonButton
             variant="outline"
             disabled={busy}
-            reason={BUSY_REASON}
+            reason={t(BUSY_REASON)}
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("editHistory.cancel")}
           </DisabledReasonButton>
           <Button
             disabled={
@@ -858,7 +919,9 @@ export function EditHistoryDialog({
             onClick={apply}
           >
             {busy && <Spinner data-icon="inline-start" />}
-            {plan.hasEdit ? "Start rebase" : "Rewrite history"}
+            {t(
+              plan.hasEdit ? "editHistory.startRebase" : "editHistory.rewrite",
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

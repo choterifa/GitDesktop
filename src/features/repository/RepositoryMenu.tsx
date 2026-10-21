@@ -26,6 +26,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { lazy, Suspense, useEffect, useEffectEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
@@ -148,6 +149,7 @@ const SETTINGS_ACCESS_CHECKING_ITEM_REASON = "checking access";
 const SETTINGS_ACCESS_FAILED_ITEM_REASON = "couldn't check access";
 
 export function RepositoryMenu({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("repositoryOperations");
   const gh = useForgeStatus(repoPath);
   const settings = useSettings();
   // Automations are paused while AI features are hidden, so every way into the
@@ -361,15 +363,15 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
   async function confirmRemoveUpstream() {
     const removeIn = repoPath;
     const ok = await useConfirm.getState().ask({
-      title: "Remove the upstream remote?",
-      body: "Reversible — re-add the remote to restore it. Upstream pull requests and selections for this repository will clear.",
-      confirmLabel: "Remove",
+      title: t("dialogs.menu.removeUpstreamTitle"),
+      body: t("dialogs.menu.removeUpstreamBody"),
+      confirmLabel: t("dialogs.menu.remove"),
       confirmVariant: "destructive",
     });
     if (!ok) return;
     // The removal builds from the live repo's options, so a switch under the
     // prompt refuses rather than removing another repo's upstream.
-    if (refuseIfSwitched(removeIn, "nothing was removed")) return;
+    if (refuseIfSwitched(removeIn, t("dialogs.menu.nothingRemoved"))) return;
     await removeUpstream.remove();
   }
 
@@ -479,9 +481,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
       const url = await fork.mutateAsync(forkIntent === "contribute");
       setForkOpen(false);
       toast.success(
-        url
-          ? "Forked — your fork is now origin"
-          : "Fork already existed — remotes updated",
+        url ? t("dialogs.menu.forked") : t("dialogs.menu.forkAlreadyExists"),
         { description: url || undefined },
       );
     } catch (e) {
@@ -495,7 +495,11 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
     try {
       await setStar.mutateAsync(!starred);
       toast.success(
-        starred ? "Star removed" : `Starred ${gh.data?.repo ?? "repository"}`,
+        starred
+          ? t("dialogs.menu.starRemoved")
+          : t("dialogs.menu.starred", {
+              repo: gh.data?.repo ?? t("dialogs.menu.repository"),
+            }),
       );
     } catch (e) {
       onError(e);
@@ -571,17 +575,17 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
   );
   useHotkeyAction("repo-alias", () => setAliasTarget(repoEntry));
   useHotkeyAction("copy-repo-path", () =>
-    copyText(repoPath, "Repository path copied"),
+    copyText(repoPath, t("dialogs.menu.repoPathCopied")),
   );
   useHotkeyAction("copy-branch-name", () =>
     branchName
-      ? copyText(branchName, "Branch name copied")
-      : toast.error("Detached HEAD — no branch to copy"),
+      ? copyText(branchName, t("dialogs.menu.branchNameCopied"))
+      : toast.error(t("dialogs.menu.noBranchToCopy")),
   );
   useHotkeyAction("copy-head-sha", () =>
     headOid
-      ? copyText(headOid, "HEAD SHA copied")
-      : toast.error("No commits yet — nothing to copy"),
+      ? copyText(headOid, t("dialogs.menu.headCopied"))
+      : toast.error(t("dialogs.menu.noHeadToCopy")),
   );
   useHotkeyAction("remove-repository", () => setRemoveTarget(repoEntry));
 
@@ -606,7 +610,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Repository actions"
+            aria-label={t("dialogs.menu.actions")}
           />
         }
       >
@@ -618,7 +622,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
         {canViewOnHost && (
           <DropdownMenuItem onClick={() => openWeb()}>
             <ArrowSquareOutIcon />
-            View on {viewLabel}
+            {t("dialogs.menu.viewOn", { host: viewLabel })}
           </DropdownMenuItem>
         )}
         {canGh && (
@@ -626,7 +630,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
             {canStar && (
               <DropdownMenuItem disabled={setStar.isPending} onClick={doStar}>
                 <StarIcon weight={starred ? "fill" : "regular"} />
-                {starred ? "Unstar repository" : "Star repository"}
+                {starred ? t("dialogs.menu.unstar") : t("dialogs.menu.star")}
               </DropdownMenuItem>
             )}
             {canCreateHostIssue && (
@@ -636,7 +640,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
                 }
               >
                 <WarningCircleIcon />
-                Create issue on {remoteLabel}
+                {t("dialogs.menu.createIssueOn", { host: remoteLabel })}
               </DropdownMenuItem>
             )}
             {forkWhileOpen &&
@@ -646,12 +650,12 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
                 // hiding the affordance.
                 <DropdownMenuItem onClick={forkAction}>
                   <GitForkIcon />
-                  Fork on {remoteLabel}…
+                  {t("dialogs.menu.forkOn", { host: remoteLabel })}
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem onClick={() => setForkOpen(true)}>
                   <GitForkIcon />
-                  Fork repository…
+                  {t("dialogs.menu.forkRepositoryItem")}
                 </DropdownMenuItem>
               ))}
           </>
@@ -670,41 +674,41 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
           }
         >
           <TerminalIcon />
-          Open in terminal
+          {t("dialogs.menu.openTerminal")}
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => openWithDefault(repoPath).catch(onError)}
         >
           <FolderOpenIcon />
-          Show in Explorer
+          {t("dialogs.menu.showExplorer")}
         </DropdownMenuItem>
         {editor && (
           <DropdownMenuItem
             onClick={() => openWithProgram(editor, repoPath).catch(onError)}
           >
             <PencilSimpleIcon />
-            Open in {editorName}
+            {t("dialogs.menu.openEditor", { editor: editorName })}
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => setRepoTab("insights")}>
           <ChartBarIcon />
-          Insights…
+          {t("dialogs.menu.insights")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => openFiles("tracked")}>
           <FilesIcon />
-          Manage files…
+          {t("dialogs.menu.manageFiles")}
         </DropdownMenuItem>
         {aiEnabled && (
           <DropdownMenuItem onClick={() => setAutomationsOpen(true)}>
             <LightningIcon />
-            Automations…
+            {t("dialogs.menu.automations")}
           </DropdownMenuItem>
         )}
         {aiEnabled && (
           <DropdownMenuItem onClick={() => openAutomationHistory(repoPath)}>
             <ClockCounterClockwiseIcon />
-            Automation history…
+            {t("dialogs.menu.automationHistory")}
           </DropdownMenuItem>
         )}
         {/* Deliberately OUTSIDE the aiEnabled gate above: notifications are not
@@ -712,85 +716,94 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
             surfaces are hidden. */}
         <DropdownMenuItem onClick={() => openRepoNotifications(repoPath)}>
           <BellIcon />
-          Notifications…
+          {t("dialogs.menu.notifications")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setJiraOpen(true)}>
           <KanbanIcon />
-          {jiraLink.data ? "Change Jira project…" : "Link Jira project…"}
+          {jiraLink.data
+            ? t("dialogs.menu.changeJira")
+            : t("dialogs.menu.linkJira")}
         </DropdownMenuItem>
         {canOpenRepoSettings ? (
           <DropdownMenuItem onClick={openRepoSettings}>
             <GearSixIcon />
-            Repository settings…
+            {t("dialogs.menu.repositorySettings")}
           </DropdownMenuItem>
         ) : (
           repoSettingsHeldReason !== undefined && (
             <DropdownMenuItem disabled>
               <GearSixIcon />
-              Repository settings… ({repoSettingsHeldReason})
+              {t("dialogs.menu.repositorySettingsHeld", {
+                reason: repoSettingsHeldReason,
+              })}
             </DropdownMenuItem>
           )
         )}
         <DropdownMenuItem onClick={() => setBranchRulesOpen(true)}>
           <ShieldCheckIcon />
-          Branch rules…
+          {t("dialogs.menu.branchRules")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setHooksOpen(true)}>
           <CodeIcon />
-          Git hooks…
+          {t("dialogs.menu.gitHooks")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setSubmodulesMode("list")}>
           <CubeIcon />
-          Submodules…
+          {t("dialogs.menu.submodules")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setWorktreesOpen(true)}>
           <TreeStructureIcon />
-          Worktrees…
+          {t("dialogs.menu.worktrees")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setRemoteUrlOpen(true)}>
           <LinkIcon />
-          Change remote URL…
+          {t("dialogs.menu.changeRemoteUrl")}
         </DropdownMenuItem>
         {hasUpstream && (
           <DropdownMenuItem onClick={() => void confirmRemoveUpstream()}>
             <LinkBreakIcon />
-            Remove upstream remote…
+            {t("dialogs.menu.removeUpstream")}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => setAliasTarget(repoEntry)}>
           <TagSimpleIcon />
-          {repoEntry.alias ? "Change alias…" : "Create alias…"}
+          {repoEntry.alias
+            ? t("dialogs.menu.changeAlias")
+            : t("dialogs.menu.createAlias")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => copyText(repoPath, "Repository path copied")}
+          onClick={() => copyText(repoPath, t("dialogs.menu.repoPathCopied"))}
         >
           <CopyIcon />
-          Copy repository path
+          {t("dialogs.menu.copyRepoPath")}
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!branchName}
-          title={branchName ? undefined : "Detached HEAD — no branch to copy"}
+          title={branchName ? undefined : t("dialogs.menu.noBranchToCopy")}
           onClick={() =>
-            branchName && copyText(branchName, "Branch name copied")
+            branchName &&
+            copyText(branchName, t("dialogs.menu.branchNameCopied"))
           }
         >
           <CopyIcon />
-          Copy branch name
+          {t("dialogs.menu.copyBranchName")}
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!headOid}
-          title={headOid ? undefined : "No commits yet — nothing to copy"}
-          onClick={() => headOid && copyText(headOid, "HEAD SHA copied")}
+          title={headOid ? undefined : t("dialogs.menu.noHeadToCopy")}
+          onClick={() =>
+            headOid && copyText(headOid, t("dialogs.menu.headCopied"))
+          }
         >
           <CopyIcon />
-          Copy HEAD SHA
+          {t("dialogs.menu.copyHeadSha")}
         </DropdownMenuItem>
         <DropdownMenuItem
           variant="destructive"
           onClick={() => setRemoveTarget(repoEntry)}
         >
           <TrashIcon />
-          Remove…
+          {t("dialogs.menu.remove")}
         </DropdownMenuItem>
       </DropdownMenuContent>
       <RepoAutomationsDialog
@@ -894,17 +907,21 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
       <Dialog open={forkOpen} onOpenChange={setForkOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Fork this repository?</DialogTitle>
+            <DialogTitle>{t("dialogs.menu.forkTitle")}</DialogTitle>
             <DialogDescription>
-              Creates a fork of {gh.data?.repo ?? "this repository"} under your
-              GitHub account and rewires the remotes: your fork becomes{" "}
-              <span className="font-mono">origin</span> and the original
-              repository becomes <span className="font-mono">upstream</span>.
-              Pushes go to your fork either way.
+              {t("dialogs.menu.forkDescription", {
+                repo: gh.data?.repo ?? t("dialogs.menu.repository"),
+              })}{" "}
+              <span className="font-mono">origin</span>{" "}
+              {t("dialogs.menu.forkDescriptionMiddle")}{" "}
+              <span className="font-mono">upstream</span>.{" "}
+              {t("dialogs.menu.forkDescriptionEnd")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <p className="text-xs font-medium">I'll be using this fork…</p>
+            <p className="text-xs font-medium">
+              {t("dialogs.menu.forkIntentTitle")}
+            </p>
             <RadioGroup
               value={forkIntent}
               onValueChange={(v) => setForkIntent(v as "contribute" | "own")}
@@ -913,21 +930,24 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
                 <Radio value="contribute" className="mt-0.5" />
                 <span>
                   <span className="font-medium">
-                    To contribute to the parent repository
+                    {t("dialogs.menu.contribute")}
                   </span>
                   <span className="mt-0.5 block text-muted-foreground">
-                    Pull requests, issues, and "View on GitHub" keep targeting{" "}
-                    {gh.data?.repo ?? "the original repository"}.
+                    {t("dialogs.menu.contributeDescription", {
+                      repo:
+                        gh.data?.repo ?? t("dialogs.menu.originalRepository"),
+                    })}
                   </span>
                 </span>
               </label>
               <label className="flex cursor-pointer items-start gap-2 text-xs">
                 <Radio value="own" className="mt-0.5" />
                 <span>
-                  <span className="font-medium">For my own purposes</span>
+                  <span className="font-medium">
+                    {t("dialogs.menu.forMyself")}
+                  </span>
                   <span className="mt-0.5 block text-muted-foreground">
-                    Pull requests, issues, and "View on GitHub" target your fork
-                    instead.
+                    {t("dialogs.menu.ownDescription")}
                   </span>
                 </span>
               </label>
@@ -939,7 +959,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
               onClick={() => setForkOpen(false)}
               disabled={fork.isPending}
             >
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <DisabledReasonButton
               disabled={forkHeldReason !== undefined}
@@ -949,7 +969,7 @@ export function RepositoryMenu({ repoPath }: { repoPath: string }) {
               {fork.isPending && !fork.isPaused && (
                 <Spinner data-icon="inline-start" />
               )}
-              Fork repository
+              {t("dialogs.menu.forkRepositoryItem")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>

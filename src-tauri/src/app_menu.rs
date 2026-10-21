@@ -1,6 +1,7 @@
 //! The macOS application menu. Windows and Linux ship none on purpose — the
 //! in-window repo dropdown is the idiom there — so everything but the
-//! `set_recent_repos_menu` IPC contract is macOS-only.
+//! `set_recent_repos_menu` IPC contract and language enum are shared with the
+//! tray; the full application menu remains macOS-only.
 //! Our items carry no keyboard shortcuts: the app's hotkeys are rebindable in
 //! settings, while a menu shortcut is static and intercepts the chord before
 //! the webview, so it would both lie about and steal a rebound binding.
@@ -25,7 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, State, Wry};
 
 /// One row of File → Open Recent. Plain shape, single-word fields: the frontend
 /// sends `{ label, path }` verbatim.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct RecentMenuEntry {
     pub label: String,
     pub path: String,
@@ -39,6 +40,117 @@ const ID_SETTINGS: &str = "gd-menu-settings";
 /// table and can't read a stale row after a concurrent submenu rebuild.
 const ID_RECENT_PREFIX: &str = "gd-menu-recent:";
 const ID_RECENT_EMPTY: &str = "gd-menu-recent-empty";
+
+/// The two UI locales supported by the app. Kept here so macOS menu and the
+/// cross-platform tray share one parsing/defaulting rule without depending on
+/// the frontend's catalog implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeLanguage {
+    Spanish,
+    English,
+}
+
+impl NativeLanguage {
+    pub(crate) fn parse(code: &str) -> Option<Self> {
+        match code {
+            "es-MX" => Some(Self::Spanish),
+            "en" => Some(Self::English),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_code(code: &str) -> Self {
+        Self::parse(code).unwrap_or(Self::Spanish)
+    }
+
+    pub(crate) fn tray_open(self, app_name: &str) -> String {
+        match self {
+            Self::Spanish => format!("Abrir {app_name}"),
+            Self::English => format!("Open {app_name}"),
+        }
+    }
+
+    pub(crate) fn tray_quit(self) -> &'static str {
+        match self {
+            Self::Spanish => "Salir",
+            Self::English => "Quit",
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn labels(self) -> MenuLabels {
+        match self {
+            Self::Spanish => MenuLabels {
+                about: "Acerca de GitDesktop",
+                services: "Servicios",
+                hide: "Ocultar GitDesktop",
+                hide_others: "Ocultar otras",
+                show_all: "Mostrar todo",
+                quit: "Salir de GitDesktop",
+                file: "Archivo",
+                new_repository: "Nuevo repositorio…",
+                open_repository: "Abrir repositorio…",
+                clone_repository: "Clonar repositorio…",
+                open_recent: "Repositorios recientes",
+                no_recent: "No hay repositorios recientes",
+                close_window: "Cerrar ventana",
+                edit: "Editar",
+                view: "Ver",
+                fullscreen: "Pantalla completa",
+                window: "Ventana",
+                minimize: "Minimizar",
+                maximize: "Maximizar",
+                help: "Ayuda",
+            },
+            Self::English => MenuLabels {
+                about: "About GitDesktop",
+                services: "Services",
+                hide: "Hide GitDesktop",
+                hide_others: "Hide Others",
+                show_all: "Show All",
+                quit: "Quit GitDesktop",
+                file: "File",
+                new_repository: "New Repository…",
+                open_repository: "Open Repository…",
+                clone_repository: "Clone Repository…",
+                open_recent: "Open Recent",
+                no_recent: "No Recent Repositories",
+                close_window: "Close Window",
+                edit: "Edit",
+                view: "View",
+                fullscreen: "Enter Full Screen",
+                window: "Window",
+                minimize: "Minimize",
+                maximize: "Zoom",
+                help: "Help",
+            },
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct MenuLabels {
+    about: &'static str,
+    services: &'static str,
+    hide: &'static str,
+    hide_others: &'static str,
+    show_all: &'static str,
+    quit: &'static str,
+    file: &'static str,
+    new_repository: &'static str,
+    open_repository: &'static str,
+    clone_repository: &'static str,
+    open_recent: &'static str,
+    no_recent: &'static str,
+    close_window: &'static str,
+    edit: &'static str,
+    view: &'static str,
+    fullscreen: &'static str,
+    window: &'static str,
+    minimize: &'static str,
+    maximize: &'static str,
+    help: &'static str,
+}
 
 /// Where a menu-bar click routes.
 #[derive(Debug, PartialEq, Eq)]
@@ -77,15 +189,31 @@ fn classify_menu_id(id: &str) -> MenuTarget<'_> {
 /// operation hops to the main thread internally, so a command may mutate this
 /// handle directly.
 #[cfg(target_os = "macos")]
-pub struct AppMenuState(Mutex<Submenu<Wry>>);
+pub struct AppMenuState {
+    inner: Mutex<AppMenuInner>,
+}
+
+#[cfg(target_os = "macos")]
+struct AppMenuInner {
+    recent: Submenu<Wry>,
+    entries: Vec<RecentMenuEntry>,
+    language: NativeLanguage,
+}
 
 /// Installs the application menu and routes its clicks into the frontend.
 #[cfg(target_os = "macos")]
 pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
-    let recent = Submenu::with_items(app, "Open Recent", true, &[&empty_recent_item(app)?])?;
-    let menu = build_menu(app, &recent)?;
+    let language = crate::app_store::read_ui_language();
+    let recent = build_recent_submenu(app, language, &[])?;
+    let menu = build_menu(app, &recent, language)?;
     app.set_menu(menu)?;
-    app.manage(AppMenuState(Mutex::new(recent)));
+    app.manage(AppMenuState {
+        inner: Mutex::new(AppMenuInner {
+            recent,
+            entries: Vec::new(),
+            language,
+        }),
+    });
     app.on_menu_event(handle_menu_event);
     Ok(())
 }
@@ -95,7 +223,12 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 /// Constructing it outright (rather than mutating the default) keeps the layout
 /// explicit; re-check it against `tauri::menu::Menu::default` on a Tauri major.
 #[cfg(target_os = "macos")]
-fn build_menu(app: &AppHandle, recent: &Submenu<Wry>) -> tauri::Result<Menu<Wry>> {
+fn build_menu(
+    app: &AppHandle,
+    recent: &Submenu<Wry>,
+    language: NativeLanguage,
+) -> tauri::Result<Menu<Wry>> {
+    let labels = language.labels();
     let pkg_info = app.package_info();
     let config = app.config();
     let about_metadata = AboutMetadata {
@@ -111,31 +244,41 @@ fn build_menu(app: &AppHandle, recent: &Submenu<Wry>) -> tauri::Result<Menu<Wry>
         pkg_info.name.clone(),
         true,
         &[
-            &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+            &PredefinedMenuItem::about(app, Some(labels.about), Some(about_metadata))?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                ID_SETTINGS,
+                if language == NativeLanguage::Spanish {
+                    "Ajustes…"
+                } else {
+                    "Settings…"
+                },
+                true,
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::services(app, Some(labels.services))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
-            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::hide(app, Some(labels.hide))?,
+            &PredefinedMenuItem::hide_others(app, Some(labels.hide_others))?,
+            &PredefinedMenuItem::show_all(app, Some(labels.show_all))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
+            &PredefinedMenuItem::quit(app, Some(labels.quit))?,
         ],
     )?;
 
     let file_submenu = Submenu::with_items(
         app,
-        "File",
+        labels.file,
         true,
         &[
-            &MenuItem::with_id(app, ID_NEW_REPO, "New Repository…", true, None::<&str>)?,
-            &MenuItem::with_id(app, ID_OPEN_REPO, "Open Repository…", true, None::<&str>)?,
-            &MenuItem::with_id(app, ID_CLONE_REPO, "Clone Repository…", true, None::<&str>)?,
+            &MenuItem::with_id(app, ID_NEW_REPO, labels.new_repository, true, None::<&str>)?,
+            &MenuItem::with_id(app, ID_OPEN_REPO, labels.open_repository, true, None::<&str>)?,
+            &MenuItem::with_id(app, ID_CLONE_REPO, labels.clone_repository, true, None::<&str>)?,
             recent,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::close_window(app, None)?,
+            &PredefinedMenuItem::close_window(app, Some(labels.close_window))?,
         ],
     )?;
 
@@ -144,7 +287,7 @@ fn build_menu(app: &AppHandle, recent: &Submenu<Wry>) -> tauri::Result<Menu<Wry>
     // typing in every field in the app.
     let edit_submenu = Submenu::with_items(
         app,
-        "Edit",
+        labels.edit,
         true,
         &[
             &PredefinedMenuItem::undo(app, None)?,
@@ -159,26 +302,27 @@ fn build_menu(app: &AppHandle, recent: &Submenu<Wry>) -> tauri::Result<Menu<Wry>
 
     let view_submenu = Submenu::with_items(
         app,
-        "View",
+        labels.view,
         true,
-        &[&PredefinedMenuItem::fullscreen(app, None)?],
+        &[&PredefinedMenuItem::fullscreen(app, Some(labels.fullscreen))?],
     )?;
 
     let window_submenu = Submenu::with_id_and_items(
         app,
         WINDOW_SUBMENU_ID,
-        "Window",
+        labels.window,
         true,
         &[
-            &PredefinedMenuItem::minimize(app, None)?,
-            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::minimize(app, Some(labels.minimize))?,
+            &PredefinedMenuItem::maximize(app, Some(labels.maximize))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::close_window(app, None)?,
+            &PredefinedMenuItem::close_window(app, Some(labels.close_window))?,
         ],
     )?;
 
     // Empty, as in the default menu: macOS puts its own Search item here.
-    let help_submenu = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?;
+    let help_submenu =
+        Submenu::with_id_and_items(app, HELP_SUBMENU_ID, labels.help, true, &[])?;
 
     Menu::with_items(
         app,
@@ -196,14 +340,54 @@ fn build_menu(app: &AppHandle, recent: &Submenu<Wry>) -> tauri::Result<Menu<Wry>
 /// The macOS convention for an empty recents list: one disabled row, never an
 /// empty submenu.
 #[cfg(target_os = "macos")]
-fn empty_recent_item(app: &AppHandle) -> tauri::Result<MenuItem<Wry>> {
+fn empty_recent_item(
+    app: &AppHandle,
+    language: NativeLanguage,
+) -> tauri::Result<MenuItem<Wry>> {
     MenuItem::with_id(
         app,
         ID_RECENT_EMPTY,
-        "No Recent Repositories",
+        language.labels().no_recent,
         false,
         None::<&str>,
     )
+}
+
+#[cfg(target_os = "macos")]
+fn recent_items(
+    app: &AppHandle,
+    language: NativeLanguage,
+    entries: &[RecentMenuEntry],
+) -> tauri::Result<Vec<MenuItem<Wry>>> {
+    if entries.is_empty() {
+        return Ok(vec![empty_recent_item(app, language)?]);
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            MenuItem::with_id(
+                app,
+                format!("{ID_RECENT_PREFIX}{}", entry.path),
+                &entry.label,
+                true,
+                None::<&str>,
+            )
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn build_recent_submenu(
+    app: &AppHandle,
+    language: NativeLanguage,
+    entries: &[RecentMenuEntry],
+) -> tauri::Result<Submenu<Wry>> {
+    let submenu = Submenu::new(app, language.labels().open_recent, true)?;
+    let items = recent_items(app, language, entries)?;
+    for item in &items {
+        submenu.append(item)?;
+    }
+    Ok(submenu)
 }
 
 /// Turns a menubar click into the same frontend action the command palette and
@@ -235,32 +419,35 @@ pub fn set_recent_repos_menu(
     // Build every row BEFORE draining: a failure part-way through construction
     // must not leave the live submenu empty, which is the state the disabled
     // placeholder row exists to prevent.
-    let items = if entries.is_empty() {
-        vec![empty_recent_item(&app).map_err(menu_err)?]
-    } else {
-        entries
-            .into_iter()
-            .map(|entry| {
-                MenuItem::with_id(
-                    &app,
-                    format!("{ID_RECENT_PREFIX}{}", entry.path),
-                    &entry.label,
-                    true,
-                    None::<&str>,
-                )
-                .map_err(menu_err)
-            })
-            .collect::<AppResult<Vec<_>>>()?
-    };
+    let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+    let items = recent_items(&app, inner.language, &entries).map_err(menu_err)?;
     // A poisoned lock only means a previous rebuild panicked mid-way; the
     // submenu handle itself stays valid, so recover rather than propagate.
-    let recent = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let recent = &inner.recent;
     // In place: this handle is the one installed in the live menu, so the rows
     // are drained and re-appended rather than the submenu being replaced.
     while recent.remove_at(0).map_err(menu_err)?.is_some() {}
     for item in &items {
         recent.append(item).map_err(menu_err)?;
     }
+    inner.entries = entries;
+    Ok(())
+}
+
+/// Rebuilds the macOS menu and recent submenu in the selected language.
+#[cfg(target_os = "macos")]
+pub(crate) fn set_native_language(app: &AppHandle, language: NativeLanguage) -> AppResult<()> {
+    fn menu_err(e: tauri::Error) -> AppError {
+        AppError::Command(e.to_string())
+    }
+
+    let state = app.state::<AppMenuState>();
+    let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+    let recent = build_recent_submenu(app, language, &inner.entries).map_err(menu_err)?;
+    let menu = build_menu(app, &recent, language).map_err(menu_err)?;
+    app.set_menu(menu).map_err(menu_err)?;
+    inner.recent = recent;
+    inner.language = language;
     Ok(())
 }
 

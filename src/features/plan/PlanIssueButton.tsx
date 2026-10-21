@@ -4,6 +4,7 @@ import { clearAgentSelection } from "@/features/sessions/agentSelect";
 import { useAiEnabled } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { usePlanStore } from "./store";
+import { usePlanText } from "./use-plan-text";
 
 /**
  * "Plan" action for an issue detail view: opens the read-only plan composer in
@@ -21,6 +22,7 @@ export function PlanIssueButton({
    *  loading): the button stays in place, disabled, with this as its reason. */
   disabledReason?: string;
 }) {
+  const tx = usePlanText();
   const aiEnabled = useAiEnabled();
   const setPendingPlanSeed = usePlanStore((s) => s.setPendingPlanSeed);
   const setRepoTab = useUiStore((s) => s.setRepoTab);
@@ -32,7 +34,7 @@ export function PlanIssueButton({
       size="xs"
       disabled={!!disabledReason}
       reason={disabledReason}
-      title="Plan an implementation for this issue with a read-only agent"
+      title={tx("Plan an implementation for this issue with a read-only agent")}
       onClick={() => {
         // The seed is keyed to the repo it was raised in, so read the live one
         // rather than take it as a prop (this button renders deep inside issue
@@ -46,7 +48,7 @@ export function PlanIssueButton({
       }}
     >
       <SparkleIcon data-icon="inline-start" />
-      Plan
+      {tx("Plan this issue")}
     </DisabledReasonButton>
   );
 }

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Spinner } from "@/components/ui/spinner";
 import {
   useWorktreeRemovals,
@@ -12,20 +13,20 @@ const PHASE_COPY: Record<
   { before: string; after: string }
 > = {
   none: {
-    before: "Removing worktree ",
-    after: "… This can take a few minutes.",
+    before: "worktreeRemoval.noneBefore",
+    after: "worktreeRemoval.noneAfter",
   },
   removing: {
-    before: "Promoting ",
-    after: " — removing its worktree… This can take a few minutes.",
+    before: "worktreeRemoval.promotingBefore",
+    after: "worktreeRemoval.removingAfter",
   },
   stashing: {
-    before: "Promoting ",
-    after: " — stashing your main workspace changes…",
+    before: "worktreeRemoval.promotingBefore",
+    after: "worktreeRemoval.stashingAfter",
   },
   "checking-out": {
-    before: "Promoting ",
-    after: " — checking out the branch…",
+    before: "worktreeRemoval.promotingBefore",
+    after: "worktreeRemoval.checkingOutAfter",
   },
 };
 
@@ -40,6 +41,7 @@ const PHASE_COPY: Record<
  * stash and checkout that follow don't read as a stall.
  */
 export function WorktreeRemovalBanner({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("repositoryOperations");
   const removals = useWorktreeRemovals(repoPath);
 
   return (
@@ -59,9 +61,9 @@ export function WorktreeRemovalBanner({ repoPath }: { repoPath: string }) {
           >
             <Spinner aria-hidden className="size-3.5 shrink-0" />
             <span className="min-w-0 truncate" title={r.path}>
-              {copy.before}
+              {t(copy.before)}
               <span className="font-mono">{r.name}</span>
-              {copy.after}
+              {t(copy.after)}
             </span>
           </div>
         );

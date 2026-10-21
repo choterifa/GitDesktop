@@ -1,0 +1,89 @@
+{
+  "actions": {
+    "openRepository": "Open repository",
+    "cloneRepository": "Clone repository",
+    "createRepository": "Create repository",
+    "myWork": "My work",
+    "exploreRepositories": "Explore repositories",
+    "userGuide": "User guide",
+    "userGuideShortcut": "User guide (F1)",
+    "settings": "Settings",
+    "settingsUpdateAvailable": "Settings — update available"
+  },
+  "guideNudge": {
+    "message": "New to GitDesktop? The built-in guide walks through the whole workflow.",
+    "dismiss": "Dismiss",
+    "open": "Open guide"
+  },
+  "hero": {
+    "titleLineOne": "The whole loop,",
+    "titleLineTwo": "one window.",
+    "description": "Open a repository to start reviewing, committing, and shipping.",
+    "descriptionWithAi": "Open a repository to start reviewing, committing, and shipping — with AI in the loop when you want it.",
+    "dragHint": "…or drag a repo folder anywhere onto the window."
+  },
+  "recent": {
+    "heading": "Repositories",
+    "emptyTitle": "No repositories yet",
+    "emptyDescription": "Open, clone, or create a repository and it’ll show up here for quick access."
+  },
+  "gitMissing": {
+    "title": "Git not found",
+    "description": "GitDesktop needs the git command-line tool on your PATH. Install it, then retry.",
+    "retry": "Retry",
+    "download": "Download Git"
+  },
+  "create": {
+    "created": "Created {{name}}",
+    "folderPickerTitle": "Create repository in folder",
+    "title": "Create a new repository",
+    "description": "Initializes a git repository on the \"{{branch}}\" branch (change in Settings).",
+    "name": "Name",
+    "namePlaceholder": "repository name",
+    "descriptionLabel": "Description",
+    "localPath": "Local path",
+    "pathPlaceholder": "Type, paste, or choose a folder…",
+    "choose": "Choose…",
+    "initializeReadme": "Initialize this repository with a README",
+    "gitignore": "Git ignore",
+    "license": "License",
+    "none": "None",
+    "cancel": "Cancel",
+    "submit": "Create repository"
+  },
+  "clone": {
+    "localPath": "Local path",
+    "title": "Clone a repository",
+    "description": "Pick one of your GitHub, GitLab, or Bitbucket repositories, or paste a URL. Clones over HTTPS or SSH using your system git credentials.",
+    "filterRepositories": "Filter your repositories",
+    "refresh": "Refresh",
+    "repositoryUrlLabel": "Repository URL or owner/name",
+    "destinationPlaceholder": "Choose a folder to clone into…",
+    "choose": "Choose…",
+    "clonesInto": "Clones into",
+    "submodulesLabel": "Clone submodules",
+    "submodulesDescription": "Initializes every submodule, including nested ones, after cloning.",
+    "cancel": "Cancel",
+    "submit": "Clone",
+    "noRepositoriesMatch": "No repositories match.",
+    "archived": "Archived",
+    "fork": "Fork",
+    "privateFork": "Private fork",
+    "privateRepository": "Private repository",
+    "bitbucket": {
+      "title": "Connect your Bitbucket account",
+      "description": "Add an Atlassian API token in Settings → Accounts to browse your Bitbucket repositories, or clone from a URL instead.",
+      "openSettings": "Open Settings → Accounts",
+      "cloneUrl": "Clone from a URL"
+    },
+    "errors": {
+      "choosePath": "Choose a local path to clone into",
+      "enterUrl": "Enter a repository URL to clone",
+      "selectRepository": "Select a repository to clone",
+      "cliMissing": "{{cli}} not found",
+      "loadRepositories": "Couldn’t load your repositories",
+      "installCli": "Install the {{cli}} and run {{authCmd}} to browse your repositories, or clone from a URL instead."
+    },
+    "repositoryListLabel": "Your repositories"
+  }
+}

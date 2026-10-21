@@ -40,7 +40,6 @@ import {
   type ListNoticeCause,
   listNotice,
   OFFLINE_ROWS_NOTICE,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
 } from "@/features/conversations/remote-section-state";
@@ -121,6 +120,14 @@ import {
   ValidityChip,
   validityLevel,
 } from "./severity";
+import { useSecurityFindingsText } from "./use-security-findings-text";
+
+const FILTER_PLACEHOLDERS: Record<ForgeProvider, string> = {
+  github: "Filter by package, rule, secret type, summary, GHSA, or CVE",
+  gitlab:
+    "Filter by rule, secret type, check, file, severity, description, or identifier",
+  bitbucket: "Filter by annotation, report, or file",
+};
 
 /** Ceiling for a category's row limit. MUST stay in lockstep with `clamp_limit`
  *  in ALL THREE of src-tauri/src/github/security_findings.rs,
@@ -133,13 +140,6 @@ const FINDINGS_LIMIT_CAP = 500;
 /** Each provider's filter cue names the fields its own rows actually carry — the
  *  three read entirely different sources. The github entry doubles as the
  *  fallback while the provider is still undefined. */
-const FILTER_PLACEHOLDERS: Record<ForgeProvider, string> = {
-  github: "Filter by package, rule, secret type, summary, GHSA, or CVE",
-  gitlab:
-    "Filter by rule, secret type, check, file, severity, description, or identifier",
-  bitbucket: "Filter by annotation, report, or file",
-};
-
 interface AlertRow {
   /** Unique per rendered row: the alert number, or an index fallback for a
    *  tolerated alert whose number came through as 0 (duplicate React keys and
@@ -218,6 +218,7 @@ function buildAlertGroups(alerts: DependabotAlertOut[]): AlertGroup[] {
 
 function buildCodeScanningGroups(
   alerts: CodeScanningAlertOut[],
+  unidentifiedRule: string,
 ): CodeScanningGroup[] {
   // Sort first, group after: the groups AND the rows inside each group both run
   // worst-first, and the server's date order stays the tiebreak within a rung.
@@ -237,7 +238,7 @@ function buildCodeScanningGroups(
         key: alert.ruleId,
         // `||`, not `??`: the tolerant Raw parse degrades a missing field to an
         // empty string, so an empty name must fall through the same as a null.
-        label: alert.ruleName || alert.ruleId || "Unidentified rule",
+        label: alert.ruleName || alert.ruleId || unidentifiedRule,
         rows: [row],
       });
     }
@@ -259,10 +260,13 @@ const bySecretUrgency = (
  *  the Raw parse can leave behind. Shared by the group header and the row title
  *  so the two can never disagree — and grouping on it keeps two differently-typed
  *  secrets apart when both lost their display name. */
-const secretTypeLabel = (a: SecretScanningAlertOut) =>
-  a.secretTypeDisplayName || a.secretType || "Unknown secret type";
+const secretTypeLabel = (a: SecretScanningAlertOut, unknownType: string) =>
+  a.secretTypeDisplayName || a.secretType || unknownType;
 
-function buildSecretGroups(alerts: SecretScanningAlertOut[]): SecretGroup[] {
+function buildSecretGroups(
+  alerts: SecretScanningAlertOut[],
+  unknownType: string,
+): SecretGroup[] {
   const sorted = alerts.toSorted(bySecretUrgency);
   const groups = new Map<string, SecretGroup>();
   sorted.forEach((alert, i) => {
@@ -270,7 +274,7 @@ function buildSecretGroups(alerts: SecretScanningAlertOut[]): SecretGroup[] {
       id: alert.number === 0 ? `secret-i${i}` : `secret-${alert.number}`,
       alert,
     };
-    const label = secretTypeLabel(alert);
+    const label = secretTypeLabel(alert, unknownType);
     const bucket = groups.get(label);
     if (bucket) bucket.rows.push(row);
     else groups.set(label, { key: label, label, rows: [row] });
@@ -335,13 +339,14 @@ function buildGlSecureGroups(
 
 function buildGlQualityGroups(
   findings: GlCodeQualityFindingOut[],
+  fallbackLabel: string,
 ): GlQualityGroup[] {
   const sorted = findings.toSorted(
     (a, b) => cqRank(a.severity) - cqRank(b.severity),
   );
   const groups = new Map<string, GlQualityGroup>();
   for (const finding of sorted) {
-    const label = finding.checkName || "Unidentified check";
+    const label = finding.checkName || fallbackLabel;
     const row: GlQualityRow = {
       id: `gl-cq-${codeQualityFindingId(finding)}`,
       finding,
@@ -435,9 +440,10 @@ const matchesGlQuality = (f: GlCodeQualityFindingOut, q: string) =>
   f.severity.toLowerCase().includes(q);
 
 function SectionHeader({ title }: { title: string }) {
+  const tx = useSecurityFindingsText();
   return (
     <h3 className="border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-      {title}
+      {tx(title)}
     </h3>
   );
 }
@@ -445,11 +451,14 @@ function SectionHeader({ title }: { title: string }) {
 /** `path:line`, right-aligned in the row, middle-truncated so the filename —
  *  the part that identifies the finding — survives. */
 function PathLabel({ path, line }: { path: string; line: number | null }) {
+  const tx = useSecurityFindingsText();
   // A tolerated alert can arrive with no path at all; a line number hung off the
   // placeholder would read as a location, so it's dropped with the path.
   if (!path) {
     return (
-      <span className="ml-auto min-w-0 truncate font-mono">No file path</span>
+      <span className="ml-auto min-w-0 truncate font-mono">
+        {tx("No file path")}
+      </span>
     );
   }
   return <PathText path={path} line={line} className="ml-auto font-mono" />;
@@ -458,7 +467,8 @@ function PathLabel({ path, line }: { path: string; line: number | null }) {
 // `name` per call site: several sections load independently and can all be
 // pending at once, so one shared noun would announce the same region repeatedly.
 function RowSkeletons({ name }: { name: string }) {
-  return <ListRowSkeletons rows={2} lines={2} indent={false} name={name} />;
+  const tx = useSecurityFindingsText();
+  return <ListRowSkeletons rows={2} lines={2} indent={false} name={tx(name)} />;
 }
 
 /** A full-width, in-flow explanation of why a category has no usable data, with
@@ -495,14 +505,15 @@ function ReasonCard({
  *  read by itself, so the slot says that instead. The card sits over a loaded
  *  verdict, so the line is the one for retained content. */
 function CardRetry({ onRetry }: { onRetry?: () => void }) {
+  const tx = useSecurityFindingsText();
   if (!onRetry)
     return (
-      <p className="text-xs text-muted-foreground">{OFFLINE_ROWS_NOTICE}</p>
+      <p className="text-xs text-muted-foreground">{tx(OFFLINE_ROWS_NOTICE)}</p>
     );
   return (
     <Button variant="outline" size="sm" onClick={onRetry}>
       <ArrowClockwiseIcon data-icon="inline-start" />
-      Retry
+      {tx("Retry")}
     </Button>
   );
 }
@@ -535,10 +546,13 @@ function UnavailableCard({
   onRetry?: () => void;
   onEnable?: () => void;
 }) {
+  const tx = useSecurityFindingsText();
+  const localizedCategory = tx(category);
+  const localizedCategoryTitle = tx(Category);
   const enableAction = onEnable ? (
     <Button variant="outline" size="sm" onClick={onEnable}>
       <GearSixIcon data-icon="inline-start" />
-      Open security settings
+      {tx("Open security settings")}
     </Button>
   ) : undefined;
   const retryAction = <CardRetry onRetry={onRetry} />;
@@ -551,7 +565,11 @@ function UnavailableCard({
       <ReasonCard
         icon={ShieldSlashIcon}
         message={
-          notEnabledMessage ?? `${Category} aren't enabled for this repository.`
+          notEnabledMessage
+            ? tx(notEnabledMessage)
+            : tx("{{category}} aren't enabled for this repository.", {
+                category: localizedCategoryTitle,
+              })
         }
         detail={notEnabledMessage ? null : detail}
         action={enableAction}
@@ -567,8 +585,12 @@ function UnavailableCard({
       <ReasonCard
         icon={InfoIcon}
         message={
-          noResultsYetMessage ??
-          `No ${category} have been reported for this repository yet — the feature may not be set up, or its first run may still be going.`
+          noResultsYetMessage
+            ? tx(noResultsYetMessage)
+            : tx(
+                "No {{category}} have been reported for this repository yet — the feature may not be set up, or its first run may still be going.",
+                { category: localizedCategory },
+              )
         }
         detail={noResultsYetMessage ? null : detail}
         action={
@@ -584,7 +606,10 @@ function UnavailableCard({
     return (
       <ReasonCard
         icon={LockKeyIcon}
-        message={`Your GitHub sign-in can't read ${category} on this repository.`}
+        message={tx(
+          "Your GitHub sign-in can't read {{category}} on this repository.",
+          { category: localizedCategory },
+        )}
         detail={detail}
       />
     );
@@ -593,7 +618,9 @@ function UnavailableCard({
     return (
       <ReasonCard
         icon={QuestionIcon}
-        message={`Couldn't check ${category}.`}
+        message={tx("Couldn't check {{category}}.", {
+          category: localizedCategory,
+        })}
         detail={detail}
         action={retryAction}
       />
@@ -615,14 +642,17 @@ function LoadFailed({
   onRetry: () => void;
   retryRef: Ref<HTMLButtonElement>;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <div className="flex flex-col items-start gap-2 border-b px-3 py-3">
       <p className="text-xs text-muted-foreground">
-        Couldn't load {category}. Retry to try again.
+        {tx("Couldn't load {{category}}. Retry to try again.", {
+          category: tx(category),
+        })}
       </p>
       <Button ref={retryRef} variant="outline" size="sm" onClick={onRetry}>
         <ArrowClockwiseIcon data-icon="inline-start" />
-        Retry
+        {tx("Retry")}
       </Button>
     </div>
   );
@@ -631,9 +661,12 @@ function LoadFailed({
 /** A read parked offline with nothing loaded: react-query waits there with no
  *  timeout, so skeletons would spin until the connection returns. */
 function LoadOffline({ category }: { category: string }) {
+  const tx = useSecurityFindingsText();
   return (
     <p className="border-b px-3 py-3 text-xs text-muted-foreground">
-      {offlinePendingMessage(category)}
+      {tx("You're offline — {{subject}} will load once you're back online.", {
+        subject: tx(category),
+      })}
     </p>
   );
 }
@@ -734,6 +767,7 @@ function FindingsNotice({
   onRetry: () => void;
   loadMore: { loadMoreFailed: boolean; retryLoadMore: () => void };
 }) {
+  const tx = useSecurityFindingsText();
   // Both arms read the query itself, never the pane alone: a failure being
   // refetched claims neither, whatever the pane derived.
   const failed = refreshFailed({ isError, isPaused, isFetching });
@@ -753,12 +787,31 @@ function FindingsNotice({
     "load-more": loadMore.retryLoadMore,
     offline: undefined,
   };
+  const nounText = tx(noun);
+  const message = notice
+    ? notice.cause === "refresh"
+      ? hasRows
+        ? tx("Couldn't refresh {{noun}} — showing the last loaded results.", {
+            noun: nounText,
+          })
+        : tx("Couldn't refresh {{noun}}.", { noun: nounText })
+      : notice.cause === "load-more"
+        ? tx("Couldn't load more {{noun}} — showing the ones already loaded.", {
+            noun: nounText,
+          })
+        : tx(OFFLINE_ROWS_NOTICE)
+    : undefined;
+  const retryLabel = notice
+    ? notice.cause === "load-more"
+      ? tx("Retry loading more {{noun}}", { noun: nounText })
+      : tx("Retry loading {{noun}}", { noun: nounText })
+    : undefined;
   return (
     <DegradedListNotice
-      noun={noun}
+      noun={nounText}
       degraded={notice !== null}
-      message={notice?.message}
-      retryLabel={notice?.retryLabel}
+      message={message}
+      retryLabel={retryLabel}
       onRetry={notice ? retryFor[notice.cause] : undefined}
       className="border-b py-1.5"
     />
@@ -830,6 +883,7 @@ function GlPartialDetail({ detail }: { detail: string | null }) {
  * floating) so it can never cover a row.
  */
 function PipelineProvenance({ data }: { data: GlFindingsOut }) {
+  const tx = useSecurityFindingsText();
   const pipeline = data.pipeline;
   if (!pipeline) return null;
   // The finish time is what dates the findings; a still-listed pipeline that
@@ -844,12 +898,20 @@ function PipelineProvenance({ data }: { data: GlFindingsOut }) {
       {data.usedFallback ? (
         <p className="w-full">
           {isUnnamedRef(data.requestedRef)
-            ? `No named branch checked out — showing ${data.fallbackRef || "the default branch"}.`
-            : `No pipelines on ${data.requestedRef} yet — showing ${data.fallbackRef || "the default branch"}.`}
+            ? tx("No named branch checked out — showing {{ref}}.", {
+                ref: data.fallbackRef || tx("the default branch"),
+              })
+            : tx(
+                "No pipelines on {{requestedRef}} yet — showing {{fallbackRef}}.",
+                {
+                  requestedRef: data.requestedRef,
+                  fallbackRef: data.fallbackRef || tx("the default branch"),
+                },
+              )}
         </p>
       ) : null}
       <p className="min-w-0 flex-1 truncate">
-        From pipeline #{pipeline.iid}
+        {tx("From pipeline #{{iid}}", { iid: pipeline.iid })}
         {degraded && pipeline.status ? (
           // Icon + the status word: the state is never carried by tone alone.
           <span className="ml-1 inline-flex items-center gap-1 text-warning">
@@ -873,7 +935,7 @@ function PipelineProvenance({ data }: { data: GlFindingsOut }) {
           onClick={() => openUrl(pipeline.webUrl)}
         >
           <ArrowSquareOutIcon data-icon="inline-start" />
-          View pipeline
+          {tx("View pipeline")}
         </Button>
       ) : null}
     </div>
@@ -896,6 +958,7 @@ function GlNoPipelineCard({
   /** Omitted while the read is parked offline. */
   onRetry?: () => void;
 }) {
+  const tx = useSecurityFindingsText();
   const retryAction = <CardRetry onRetry={onRetry} />;
   const setupUrl = glScanningSetupUrl(data);
 
@@ -907,7 +970,16 @@ function GlNoPipelineCard({
     return (
       <ReasonCard
         icon={ShieldSlashIcon}
-        message={`${refs ? `No pipelines found on ${refs}.` : "No pipelines found."} Add SAST, secret detection, or code quality jobs to see findings here.`}
+        message={
+          refs
+            ? tx(
+                "No pipelines found on {{refs}}. Add SAST, secret detection, or code quality jobs to see findings here.",
+                { refs },
+              )
+            : tx(
+                "No pipelines found. Add SAST, secret detection, or code quality jobs to see findings here.",
+              )
+        }
         action={
           <div className="flex flex-wrap items-center gap-2">
             {setupUrl ? (
@@ -917,7 +989,7 @@ function GlNoPipelineCard({
                 onClick={() => openUrl(setupUrl)}
               >
                 <GearSixIcon data-icon="inline-start" />
-                Open scanning setup on GitLab
+                {tx("Open scanning setup on GitLab")}
               </Button>
             ) : null}
             {retryAction}
@@ -940,8 +1012,13 @@ function GlNoPipelineCard({
         // promises no finish — only that a completed one would be read.
         message={
           listed
-            ? `No pipeline on ${listed} has finished yet — findings will appear once one completes.`
-            : "No pipeline has finished yet — findings will appear once one completes."
+            ? tx(
+                "No pipeline on {{ref}} has finished yet — findings will appear once one completes.",
+                { ref: listed },
+              )
+            : tx(
+                "No pipeline has finished yet — findings will appear once one completes.",
+              )
         }
         action={retryAction}
       />
@@ -954,7 +1031,9 @@ function GlNoPipelineCard({
       return (
         <ReasonCard
           icon={LockKeyIcon}
-          message="Your GitLab sign-in can't read this project's pipelines."
+          message={tx(
+            "Your GitLab sign-in can't read this project's pipelines.",
+          )}
           detail={data.sast.detail}
         />
       );
@@ -962,7 +1041,7 @@ function GlNoPipelineCard({
     return (
       <ReasonCard
         icon={QuestionIcon}
-        message="Couldn't check findings for this repository."
+        message={tx("Couldn't check findings for this repository.")}
         detail={data.sast.detail}
         action={retryAction}
       />
@@ -1000,6 +1079,7 @@ function GlUnavailableCard({
   onRetry?: () => void;
   onSetup?: () => void;
 }) {
+  const tx = useSecurityFindingsText();
   const retryAction = <CardRetry onRetry={onRetry} />;
 
   if (availability === "notConfigured") {
@@ -1009,15 +1089,19 @@ function GlUnavailableCard({
         // Hedged deliberately: an analyzer job that ran and FAILED publishes no
         // artifacts either, and the wire can't tell that from never-configured.
         message={
-          notConfiguredMessage ??
-          `This pipeline didn't publish a ${category} report — most likely scanning isn't set up yet.`
+          notConfiguredMessage
+            ? tx(notConfiguredMessage)
+            : tx(
+                "This pipeline didn't publish a {{category}} report — most likely scanning isn't set up yet.",
+                { category: tx(category) },
+              )
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
             {onSetup ? (
               <Button variant="outline" size="sm" onClick={onSetup}>
                 <GearSixIcon data-icon="inline-start" />
-                Open scanning setup on GitLab
+                {tx("Open scanning setup on GitLab")}
               </Button>
             ) : null}
             {retryAction}
@@ -1032,7 +1116,10 @@ function GlUnavailableCard({
         icon={WarningCircleIcon}
         // "the job that produces it" reads correctly whether this card speaks for
         // one category or, hoisted, for all three (up to three jobs).
-        message={`This pipeline produced a ${category} report GitDesktop can't download. Add the gl-*-report.json file to artifacts:paths in the job that produces it.`}
+        message={tx(
+          "This pipeline produced a {{category}} report GitDesktop can't download. Add the gl-*-report.json file to artifacts:paths in the job that produces it.",
+          { category: tx(category) },
+        )}
         detail={detail}
         action={retryAction}
       />
@@ -1042,7 +1129,9 @@ function GlUnavailableCard({
     return (
       <ReasonCard
         icon={ClockIcon}
-        message="The reports from this pipeline have expired. Findings will return on the next pipeline run."
+        message={tx(
+          "The reports from this pipeline have expired. Findings will return on the next pipeline run.",
+        )}
         detail={detail}
         action={retryAction}
       />
@@ -1052,7 +1141,9 @@ function GlUnavailableCard({
     return (
       <ReasonCard
         icon={InfoIcon}
-        message={`${Category} is still running in this pipeline.`}
+        message={tx("{{category}} is still running in this pipeline.", {
+          category: tx(Category),
+        })}
         action={retryAction}
       />
     );
@@ -1061,7 +1152,9 @@ function GlUnavailableCard({
     return (
       <ReasonCard
         icon={LockKeyIcon}
-        message="Your GitLab sign-in can't read this project's job artifacts."
+        message={tx(
+          "Your GitLab sign-in can't read this project's job artifacts.",
+        )}
         detail={detail}
       />
     );
@@ -1070,7 +1163,7 @@ function GlUnavailableCard({
     return (
       <ReasonCard
         icon={QuestionIcon}
-        message={`Couldn't check ${category}.`}
+        message={tx("Couldn't check {{category}}.", { category: tx(category) })}
         detail={detail}
         action={retryAction}
       />
@@ -1096,6 +1189,7 @@ function GlSectionEmpty({
   cleanTitle: string;
   detail: string | null;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <Empty className="py-8">
       <EmptyHeader>
@@ -1104,8 +1198,11 @@ function GlSectionEmpty({
         </EmptyMedia>
         <EmptyTitle>
           {detail
-            ? `No ${category} findings in the reports that could be read.`
-            : cleanTitle}
+            ? tx(
+                "No {{category}} findings in the reports that could be read.",
+                { category: tx(category) },
+              )
+            : tx(cleanTitle)}
         </EmptyTitle>
       </EmptyHeader>
     </Empty>
@@ -1263,11 +1360,15 @@ function FindingsTruncationTail({
   /** The owning query's `isFetching`, so only its own button spins. */
   loading: boolean;
 }) {
+  const tx = useSecurityFindingsText();
   if (!truncated) return null;
   if (limits[limitKey] >= FINDINGS_LIMIT_CAP) {
     return (
       <p className="border-t px-3 py-3 text-xs text-muted-foreground">
-        Showing the first {loaded.toLocaleString()} {noun}.
+        {tx("Showing the first {{count}} {{noun}}.", {
+          count: loaded.toLocaleString(),
+          noun: tx(noun),
+        })}
       </p>
     );
   }
@@ -1334,6 +1435,7 @@ function GlFindingsSection({
   onSetup?: () => void;
   children: ReactNode;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <>
       <SectionHeader title={title} />
@@ -1353,7 +1455,7 @@ function GlFindingsSection({
             children
           ) : loaded > 0 ? (
             <p className="px-3 py-4 text-xs text-muted-foreground">
-              No {noun} match the filter.
+              {tx("No {{noun}} match the filter.", { noun: tx(noun) })}
             </p>
           ) : (
             <GlSectionEmpty
@@ -1469,6 +1571,7 @@ function BbResultChip({
   result: string | null;
   className?: string;
 }) {
+  const tx = useSecurityFindingsText();
   const level = bbResultLevel(result);
   const Icon = BB_RESULT_ICON[level];
   return (
@@ -1477,7 +1580,7 @@ function BbResultChip({
       className={cn("gap-1", BB_RESULT_TONE[level], className)}
     >
       <Icon weight={level === "failed" ? "fill" : "regular"} />
-      {bbResultLabel(result)}
+      {tx(bbResultLabel(result))}
     </Badge>
   );
 }
@@ -1486,57 +1589,66 @@ function BbResultChip({
  *  The values are third-party JSON, so each type guards what it needs and an
  *  unexpected shape degrades instead of throwing — one malformed item must not
  *  blank the strip. Never rendered as a link: only the gated `link` fields are. */
-function bbDataText(item: BbReportDataOut): string | null {
+function bbDataText(
+  item: BbReportDataOut,
+  tx: (source: string) => string,
+): string | null {
   const value = item.value;
   const asNumber =
     typeof value === "number" && Number.isFinite(value) ? value : null;
   switch (item.type?.toUpperCase()) {
     case "NUMBER":
       return asNumber === null
-        ? bbPlainValue(value)
+        ? bbPlainValue(value, tx)
         : asNumber.toLocaleString();
     case "DURATION":
       // Atlassian documents a DURATION value as a count of milliseconds.
-      return asNumber === null ? bbPlainValue(value) : formatDuration(asNumber);
+      return asNumber === null
+        ? bbPlainValue(value, tx)
+        : formatDuration(asNumber);
     case "BOOLEAN":
       return typeof value === "boolean"
         ? value
           ? "✓"
           : "✗"
-        : bbPlainValue(value);
+        : bbPlainValue(value, tx);
     case "PERCENTAGE":
       return asNumber === null
-        ? bbPlainValue(value)
+        ? bbPlainValue(value, tx)
         : `${asNumber.toLocaleString()}%`;
     case "DATE":
       // Atlassian documents a DATE value as epoch milliseconds; `validEpochMs`
       // is what keeps an out-of-range number out of `new Date`.
       return asNumber !== null && validEpochMs(asNumber)
         ? new Date(asNumber).toLocaleDateString()
-        : bbPlainValue(value);
+        : bbPlainValue(value, tx);
     default:
-      return bbPlainValue(value);
+      return bbPlainValue(value, tx);
   }
 }
 
 /** A value with no type to format it by. Objects and arrays return null rather
  *  than "[object Object]": a shape we can't read is dropped, never faked. */
-function bbPlainValue(value: unknown): string | null {
+function bbPlainValue(
+  value: unknown,
+  tx: (source: string) => string,
+): string | null {
   if (typeof value === "string") return value || null;
   if (typeof value === "number")
     return Number.isFinite(value) ? String(value) : null;
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? tx("Yes") : tx("No");
   return null;
 }
 
 /** A report's metrics, under its header. Each item is title + formatted value;
  *  the ones that carry no readable value drop out rather than showing a blank. */
 function BbDataStrip({ data }: { data: BbReportDataOut[] }) {
+  const tx = useSecurityFindingsText();
   const items = data
     .map((item, i) => ({
       key: `${item.title ?? ""}-${i}`,
       title: item.title,
-      text: bbDataText(item),
+      text: bbDataText(item, tx),
     }))
     .filter((item) => item.text !== null);
   if (items.length === 0) return null;
@@ -1571,6 +1683,7 @@ function BbCommitProvenance({
    *  the fallback ref was read, but none of its reports are on screen. */
   reportsShown?: boolean;
 }) {
+  const tx = useSecurityFindingsText();
   const sha = data.commitSha;
   if (!sha) return null;
   const commitUrl = data.commitWebUrl;
@@ -1580,22 +1693,35 @@ function BbCommitProvenance({
     data.usedFallback || isUnnamedRef(data.requestedRef)
       ? data.fallbackRef
       : data.requestedRef;
-  const name = data.fallbackRef || "the default branch";
-  const tail = reportsShown ? `showing ${name}.` : `${name} was read instead.`;
+  const name = data.fallbackRef || tx("the default branch");
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
       {data.usedFallback ? (
         <p className="w-full">
           {isUnnamedRef(data.requestedRef)
-            ? `No named branch checked out — ${tail}`
+            ? reportsShown
+              ? tx("No named branch checked out — showing {{ref}}.", {
+                  ref: name,
+                })
+              : tx("No named branch checked out — {{ref}} was read instead.", {
+                  ref: name,
+                })
             : // Covers BOTH fallback causes (branch unresolved remotely, or its
               // tip has no reports) — the wire doesn't say which, so the copy
               // must not claim the commit was missing.
-              `No reports on ${data.requestedRef} — ${tail}`}
+              reportsShown
+              ? tx("No reports on {{requestedRef}} — showing {{ref}}.", {
+                  requestedRef: data.requestedRef,
+                  ref: name,
+                })
+              : tx(
+                  "No reports on {{requestedRef}} — {{ref}} was read instead.",
+                  { requestedRef: data.requestedRef, ref: name },
+                )}
         </p>
       ) : null}
       <p className="min-w-0 flex-1 truncate">
-        Commit{" "}
+        {tx("Commit")}{" "}
         {commitUrl ? (
           <button
             type="button"
@@ -1648,6 +1774,7 @@ function BbUnavailableCard({
   /** Omitted while the read is parked offline. */
   onRetry?: () => void;
 }) {
+  const tx = useSecurityFindingsText();
   const retryAction = <CardRetry onRetry={onRetry} />;
 
   if (state === "noReports") {
@@ -1664,7 +1791,9 @@ function BbUnavailableCard({
         <BbCommitProvenance data={data} reportsShown={false} />
         <ReasonCard
           icon={ShieldSlashIcon}
-          message="No Code Insights reports on this commit — most likely no scanner or pipe is set up yet."
+          message={tx(
+            "No Code Insights reports on this commit — most likely no scanner or pipe is set up yet.",
+          )}
           detail={data.detail}
           action={retryAction}
         />
@@ -1678,8 +1807,8 @@ function BbUnavailableCard({
         icon={WarningCircleIcon}
         message={
           refs
-            ? `Couldn't find a commit on ${refs}.`
-            : "Couldn't find a commit to read reports from."
+            ? tx("Couldn't find a commit on {{refs}}.", { refs })
+            : tx("Couldn't find a commit to read reports from.")
         }
         detail={data.detail}
         action={retryAction}
@@ -1690,7 +1819,9 @@ function BbUnavailableCard({
     return (
       <ReasonCard
         icon={LockKeyIcon}
-        message="Your Bitbucket sign-in can't read this repository's reports."
+        message={tx(
+          "Your Bitbucket sign-in can't read this repository's reports.",
+        )}
         detail={data.detail}
       />
     );
@@ -1699,7 +1830,7 @@ function BbUnavailableCard({
     return (
       <ReasonCard
         icon={QuestionIcon}
-        message="Couldn't check findings for this repository."
+        message={tx("Couldn't check findings for this repository.")}
         detail={data.detail}
         action={retryAction}
       />
@@ -1722,6 +1853,7 @@ function BbAnnotationRows({
   selectedRowId: string | null;
   onSelect: (finding: SelectedFinding) => void;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <>
       {section.rows.map(({ id, annotation: a }) => {
@@ -1733,7 +1865,7 @@ function BbAnnotationRows({
             type="button"
             key={id}
             data-row={id}
-            aria-label={label ? undefined : "Annotation with no summary"}
+            aria-label={label ? undefined : tx("Annotation with no summary")}
             className={cn(
               "block w-full border-b px-3 py-2 text-left",
               selectedRowId === id
@@ -1754,7 +1886,7 @@ function BbAnnotationRows({
               {a.severity ? <SeverityChip severity={a.severity} /> : null}
               {a.annotationType ? (
                 <span className="shrink-0">
-                  {bbAnnotationTypeLabel(a.annotationType)}
+                  {tx(bbAnnotationTypeLabel(a.annotationType))}
                 </span>
               ) : null}
               {a.path ? <PathLabel path={a.path} line={a.line} /> : null}
@@ -1789,12 +1921,15 @@ function BbReportSectionView({
   selectedRowId: string | null;
   onSelect: (finding: SelectedFinding) => void;
 }) {
+  const tx = useSecurityFindingsText();
   const { report, label, rows } = section;
   const loaded = report.annotations.length;
   const reportLink = report.link;
   const typeLabel = report.reportType
-    ? bbReportTypeLabel(report.reportType)
+    ? tx(bbReportTypeLabel(report.reportType))
     : null;
+  const reportLinkLabel = linkOutLabel(reportLink);
+  const linkHost = /^(View|Open) on (.+)$/.exec(reportLinkLabel);
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
@@ -1804,7 +1939,9 @@ function BbReportSectionView({
           className="min-w-0 flex-1 truncate text-xs font-semibold"
           title={label}
         >
-          {label}
+          {!report.title && !report.reporter && !report.externalId
+            ? tx("Report")
+            : label}
         </h3>
         <BbResultChip className="shrink-0" result={report.result} />
         {/* What the report covers — a COVERAGE section reads as one rather than
@@ -1842,7 +1979,9 @@ function BbReportSectionView({
             onClick={() => openUrl(reportLink)}
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
-            {linkOutLabel(reportLink)}
+            {linkHost
+              ? tx(`${linkHost[1]} on {{host}}`, { host: linkHost[2] })
+              : tx(reportLinkLabel)}
           </Button>
         ) : null}
       </div>
@@ -1866,11 +2005,11 @@ function BbReportSectionView({
         />
       ) : loaded > 0 ? (
         <p className="px-3 py-4 text-xs text-muted-foreground">
-          No annotations match the filter.
+          {tx("No annotations match the filter.")}
         </p>
       ) : report.annotationsUnreadable ? null : (
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          No annotations.
+          {tx("No annotations.")}
         </p>
       )}
       {/* A failed annotation walk must never read as a clean report, so it says
@@ -1878,8 +2017,8 @@ function BbReportSectionView({
       {report.annotationsUnreadable ? (
         <p className="px-3 py-2 text-[11px] text-muted-foreground">
           {loaded > 0
-            ? "Some of this report's annotations couldn't be read."
-            : "This report's annotations couldn't be read."}
+            ? tx("Some of this report's annotations couldn't be read.")
+            : tx("This report's annotations couldn't be read.")}
         </p>
       ) : null}
       {/* Outside the empty branch, gated on truncation alone: filtering to zero
@@ -1904,6 +2043,7 @@ export function FindingsPanel({
   repoPath: string;
   active: boolean;
 }) {
+  const tx = useSecurityFindingsText();
   const forge = useForgeStatus(repoPath);
   // Three different findings models behind one capability: GitHub's four
   // repository-wide alert stores, GitLab's per-pipeline report artifacts, and
@@ -2011,9 +2151,12 @@ export function FindingsPanel({
   );
   const codeScanningGroups = buildCodeScanningGroups(
     allCodeScanning.filter((a) => matchesCodeScanning(a, query)),
+    tx("Unidentified rule"),
   );
+  const unknownSecretType = tx("Unknown secret type");
   const secretGroups = buildSecretGroups(
     allSecrets.filter((a) => matchesSecret(a, query)),
+    unknownSecretType,
   );
   const advisoryRows = allAdvisories
     .filter((a) => matchesAdvisory(a, query))
@@ -2032,15 +2175,16 @@ export function FindingsPanel({
   const glSastGroups = buildGlSecureGroups(
     allGlSast.filter((f) => matchesGlSecure(f, query)),
     "gl-sast",
-    "Unidentified rule",
+    tx("Unidentified rule"),
   );
   const glSecretGroups = buildGlSecureGroups(
     allGlSecrets.filter((f) => matchesGlSecure(f, query)),
     "gl-secret",
-    "Unknown secret type",
+    tx("Unknown secret type"),
   );
   const glQualityGroups = buildGlQualityGroups(
     allGlQuality.filter((f) => matchesGlQuality(f, query)),
+    tx("Unidentified check"),
   );
 
   const bbOut = bb.data;
@@ -2194,30 +2338,36 @@ export function FindingsPanel({
   const refreshReason = (() => {
     switch (true) {
       case enabled:
-        return "Refresh findings";
+        return tx("Refresh findings");
       case probe !== null:
         return forgeProbeReason(probe, "load security findings");
       case !supported && ready:
-        return "Security findings aren't available on this repository's host.";
+        return tx(
+          "Security findings aren't available on this repository's host.",
+        );
       // Names the host the remote actually points at; a repo with no recognized
       // remote gets the neutral wording rather than a guess (`providerLabel`
       // alone would name GitHub for an unknown provider).
       case Boolean(provider):
-        return `Connect this repo to ${providerLabel(provider)} to load findings`;
+        return tx("Connect this repo to {{provider}} to load findings", {
+          provider: providerLabel(provider),
+        });
       default:
-        return "Connect this repo to a supported host to load findings";
+        return tx("Connect this repo to a supported host to load findings");
     }
   })();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 border-b p-2">
-        <p className="text-xs text-muted-foreground">Security findings</p>
+        <p className="text-xs text-muted-foreground">
+          {tx("Security findings")}
+        </p>
         <div className="ml-auto flex items-center gap-1">
           <DisabledReasonButton
             variant="outline"
             size="icon-sm"
-            aria-label="Refresh findings"
+            aria-label={tx("Refresh findings")}
             disabled={!enabled || refreshing}
             // `refreshReason` doubles as the enabled-state hint ("Refresh findings").
             reason={enabled ? null : refreshReason}
@@ -2239,8 +2389,8 @@ export function FindingsPanel({
           onChange={(e) => setFilterText(e.target.value)}
           placeholder={
             provider
-              ? FILTER_PLACEHOLDERS[provider]
-              : FILTER_PLACEHOLDERS.github
+              ? tx(FILTER_PLACEHOLDERS[provider])
+              : tx(FILTER_PLACEHOLDERS.github)
           }
           className="h-7"
           autoComplete="off"
@@ -2265,7 +2415,9 @@ export function FindingsPanel({
           />
         ) : !supported ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            Security findings aren't available on this repository's host.
+            {tx(
+              "Security findings aren't available on this repository's host.",
+            )}
           </p>
         ) : provider === "bitbucket" ? (
           <div onKeyDown={onListKeyDown}>
@@ -2499,7 +2651,7 @@ export function FindingsPanel({
                     {alertGroups.length === 0 ? (
                       allAlerts.length > 0 ? (
                         <p className="px-3 py-4 text-xs text-muted-foreground">
-                          No alerts match the filter.
+                          {tx("No alerts match the filter.")}
                         </p>
                       ) : (
                         <Empty className="py-8">
@@ -2507,7 +2659,9 @@ export function FindingsPanel({
                             <EmptyMedia variant="icon">
                               <ShieldCheckIcon />
                             </EmptyMedia>
-                            <EmptyTitle>No open Dependabot alerts</EmptyTitle>
+                            <EmptyTitle>
+                              {tx("No open Dependabot alerts")}
+                            </EmptyTitle>
                           </EmptyHeader>
                         </Empty>
                       )
@@ -2517,9 +2671,9 @@ export function FindingsPanel({
                           <div className="flex items-baseline gap-2 px-3 py-1 text-[11px] text-muted-foreground">
                             <span
                               className="truncate font-mono text-foreground"
-                              title={group.packageName || "Unknown package"}
+                              title={group.packageName || tx("Unknown package")}
                             >
-                              {group.packageName || "Unknown package"}
+                              {group.packageName || tx("Unknown package")}
                             </span>
                             <span className="shrink-0">{group.ecosystem}</span>
                             <span className="ml-auto shrink-0 tabular-nums">
@@ -2548,7 +2702,9 @@ export function FindingsPanel({
                                 <SeverityChip severity={a.severity} />
                                 <span className="ml-auto min-w-0 truncate">
                                   {a.firstPatchedVersion
-                                    ? `fix: ${a.firstPatchedVersion}`
+                                    ? tx("fix: {{version}}", {
+                                        version: a.firstPatchedVersion,
+                                      })
                                     : "no patch yet"}
                                 </span>
                                 <span className="shrink-0">
@@ -2619,7 +2775,7 @@ export function FindingsPanel({
                     {codeScanningGroups.length === 0 ? (
                       allCodeScanning.length > 0 ? (
                         <p className="px-3 py-4 text-xs text-muted-foreground">
-                          No code scanning alerts match the filter.
+                          {tx("No code scanning alerts match the filter.")}
                         </p>
                       ) : (
                         <Empty className="py-8">
@@ -2628,7 +2784,7 @@ export function FindingsPanel({
                               <ShieldCheckIcon />
                             </EmptyMedia>
                             <EmptyTitle>
-                              No open code scanning alerts
+                              {tx("No open code scanning alerts")}
                             </EmptyTitle>
                           </EmptyHeader>
                         </Empty>
@@ -2754,7 +2910,7 @@ export function FindingsPanel({
                     {secretGroups.length === 0 ? (
                       allSecrets.length > 0 ? (
                         <p className="px-3 py-4 text-xs text-muted-foreground">
-                          No secret scanning alerts match the filter.
+                          {tx("No secret scanning alerts match the filter.")}
                         </p>
                       ) : (
                         <Empty className="py-8">
@@ -2763,7 +2919,7 @@ export function FindingsPanel({
                               <ShieldCheckIcon />
                             </EmptyMedia>
                             <EmptyTitle>
-                              No open secret scanning alerts
+                              {tx("No open secret scanning alerts")}
                             </EmptyTitle>
                           </EmptyHeader>
                         </Empty>
@@ -2809,7 +2965,7 @@ export function FindingsPanel({
                                     variant="outline"
                                     className="text-destructive"
                                   >
-                                    Publicly leaked
+                                    {tx("Publicly leaked")}
                                   </Badge>
                                 ) : null}
                                 {/* Rows in a group share a type and often a date, so
@@ -2834,9 +2990,9 @@ export function FindingsPanel({
                               {/* Full-width type line, matching the alert rows. */}
                               <p
                                 className="mt-1 truncate text-xs font-medium"
-                                title={secretTypeLabel(a)}
+                                title={secretTypeLabel(a, unknownSecretType)}
                               >
-                                {secretTypeLabel(a)}
+                                {secretTypeLabel(a, unknownSecretType)}
                               </p>
                             </button>
                           ))}
@@ -2888,7 +3044,7 @@ export function FindingsPanel({
                     {advisoryRows.length === 0 ? (
                       allAdvisories.length > 0 ? (
                         <p className="px-3 py-4 text-xs text-muted-foreground">
-                          No advisories match the filter.
+                          {tx("No advisories match the filter.")}
                         </p>
                       ) : (
                         <Empty className="py-8">
@@ -2896,7 +3052,9 @@ export function FindingsPanel({
                             <EmptyMedia variant="icon">
                               <ShieldCheckIcon />
                             </EmptyMedia>
-                            <EmptyTitle>No security advisories</EmptyTitle>
+                            <EmptyTitle>
+                              {tx("No security advisories")}
+                            </EmptyTitle>
                           </EmptyHeader>
                         </Empty>
                       )

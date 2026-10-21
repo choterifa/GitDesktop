@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useSaveSettings, useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { useEffectiveSyntax } from "@/lib/syntax/queries";
@@ -23,6 +24,7 @@ export function DiffLanguagePicker({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("diff");
   const settings = useSettings();
   const saveSettings = useSaveSettings();
   const repoPath = useUiStore((s) => s.repoPath);
@@ -58,7 +60,7 @@ export function DiffLanguagePicker({
       value={current}
       onValueChange={setLang}
       customLanguages={effective.customLanguages}
-      autoLabel="Auto-detect"
+      autoLabel={t("language.autoDetect")}
       onClear={clearLang}
       triggerClassName="text-muted-foreground"
       open={open}

@@ -1,0 +1,28 @@
+{
+  "title": "Pendientes en el código",
+  "rescan": "Volver a buscar pendientes",
+  "filterPlaceholder": "Filtrar por texto o ruta",
+  "selectMarker": "Selecciona arriba una etiqueta para buscar.",
+  "scanFailed": "No se pudieron buscar pendientes.",
+  "retry": "Reintentar",
+  "empty": {
+    "title": "No se encontraron comentarios pendientes",
+    "description": "En el árbol de trabajo no hay coincidencias para {{markers}}.",
+    "filtered": "No hay coincidencias con este filtro."
+  },
+  "truncated": "Se muestran las primeras {{count}} coincidencias. Desactiva etiquetas para reducir la búsqueda o filtra el texto abajo.",
+  "detail": {
+    "fallbackTitle": "{{marker}} en {{file}}:{{line}}",
+    "generatedFrom": "De {{path}}:",
+    "pathCopied": "Se copió la ruta",
+    "copyFailed": "No se pudo copiar al portapapeles",
+    "noDescription": "sin descripción",
+    "addedBy": "Agregado por {{author}}",
+    "notTracked": "Aún no tiene seguimiento ni historial.",
+    "openInEditor": "Abrir en el editor",
+    "promoteToIssue": "Convertir en incidencia",
+    "copyPathLine": "Copiar ruta y línea",
+    "staleLine": "Esta línea ya no está en el archivo; quizá la búsqueda esté desactualizada.",
+    "noPreview": "No hay una vista previa del archivo."
+  }
+}

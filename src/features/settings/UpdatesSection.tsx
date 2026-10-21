@@ -9,10 +9,12 @@ import { useUpdateCheck } from "@/features/updates/useUpdateCheck";
 import { withForm } from "@/lib/form";
 import { toastError } from "@/lib/toast";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 export const UpdatesSection = withForm({
   ...settingsFormOpts,
   render: function UpdatesSectionRender({ form }) {
+    const tx = useSettingsText();
     const [version, setVersion] = useState("");
     const [checking, setChecking] = useState(false);
     const [installing, setInstalling] = useState(false);
@@ -36,8 +38,11 @@ export const UpdatesSection = withForm({
         if (res.data === null) {
           toast.success(
             version
-              ? `You're on the latest version (v${version}).`
-              : "You're on the latest version.",
+              ? tx("You're on the latest version (v{version}).").replace(
+                  "{version}",
+                  version,
+                )
+              : tx("You're on the latest version."),
           );
         }
         // res.data non-null → the persistent banner renders above this button and
@@ -61,10 +66,11 @@ export const UpdatesSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">Updates</h2>
+          <h2 className="text-sm font-medium">{tx("Updates")}</h2>
           <p className="text-xs text-muted-foreground">
-            GitDesktop updates itself from GitHub Releases — signed and
-            verified, installed only with your consent. Current version:{" "}
+            {tx(
+              "GitDesktop updates itself from GitHub Releases — signed and verified, installed only with your consent. Current version:",
+            )}{" "}
             <span className="font-mono">v{version || "…"}</span>.
           </p>
         </div>
@@ -77,13 +83,13 @@ export const UpdatesSection = withForm({
             <span className="flex items-center gap-2">
               <DownloadSimpleIcon className="size-4 shrink-0 text-primary" />
               <span className="text-xs">
-                Update available:{" "}
-                <span className="font-mono">v{update.version}</span> — ready to
-                install.
+                {tx("Update available:")}{" "}
+                <span className="font-mono">v{update.version}</span>{" "}
+                {tx("— ready to install.")}
               </span>
             </span>
             <Button size="xs" disabled={installing} onClick={install}>
-              Install &amp; restart
+              {tx("Install & restart")}
             </Button>
           </div>
         )}
@@ -91,7 +97,7 @@ export const UpdatesSection = withForm({
         <form.AppField name="autoCheckUpdates">
           {(field) => (
             <field.CheckboxField
-              label="Check for updates automatically"
+              label={tx("Check for updates automatically")}
               className="flex cursor-pointer items-center gap-2 text-xs"
             />
           )}
@@ -104,7 +110,7 @@ export const UpdatesSection = withForm({
           disabled={checking}
         >
           {checking && <Spinner data-icon="inline-start" />}
-          Check for updates now
+          {tx("Check for updates now")}
         </Button>
       </section>
     );

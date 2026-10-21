@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,7 @@ export function RemoteUrlDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const currentUrl = useRemoteUrl(repoPath, "origin", open);
   const setUrl = useSetRemoteUrl(repoPath);
 
@@ -31,7 +33,7 @@ export function RemoteUrlDialog({
     onSubmit: async ({ value }) => {
       try {
         await setUrl.mutateAsync({ name: "origin", url: value.url.trim() });
-        toast.success("Remote URL updated");
+        toast.success(t("remoteUrl.updated"));
         onOpenChange(false);
       } catch (e) {
         toastError(e);
@@ -60,10 +62,11 @@ export function RemoteUrlDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Change remote URL</DialogTitle>
+            <DialogTitle>{t("remoteUrl.title")}</DialogTitle>
             <DialogDescription>
-              Where <span className="font-mono">origin</span> points. Fetch,
-              pull, push, and the GitHub integration all follow this URL.
+              {t("remoteUrl.descriptionStart")}{" "}
+              <span className="font-mono">origin</span>{" "}
+              {t("remoteUrl.descriptionEnd")}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
@@ -72,7 +75,7 @@ export function RemoteUrlDialog({
           >
             {(field) => (
               <field.TextField
-                label="URL"
+                label={t("remoteUrl.urlLabel")}
                 placeholder="https://github.com/owner/repo.git"
               />
             )}
@@ -83,10 +86,10 @@ export function RemoteUrlDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("remoteUrl.cancel")}
             </Button>
             <form.AppForm>
-              <form.SubmitButton>Save</form.SubmitButton>
+              <form.SubmitButton>{t("remoteUrl.save")}</form.SubmitButton>
             </form.AppForm>
           </DialogFooter>
         </form>

@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 /**
  * Minimal semver-aware tag ordering, just enough to pick the "previous tag" for
  * generated release notes the way GitHub does.
@@ -138,36 +140,69 @@ const FORBIDDEN_TAG_CHARS = "~^:?*[\\";
  * create sends, reporting the first rule violated. The backend's
  * `validate_tag_name` stays the authority; this only lets the field say so early.
  */
-export function validateTagName(name: string): string | null {
+export function validateTagName(
+  name: string,
+  t?: TFunction<"tags">,
+): string | null {
   const n = name.trim();
-  if (!n) return "Enter a tag name";
-  if (WHITESPACE_RE.test(n)) return "Tag names can't contain spaces";
-  if (n.startsWith("-")) return `Tag names can't start with "-"`;
+  if (!n) return t ? t("validation.empty") : "Enter a tag name";
+  if (WHITESPACE_RE.test(n))
+    return t ? t("validation.spaces") : "Tag names can't contain spaces";
+  if (n.startsWith("-"))
+    return t ? t("validation.startsDash") : `Tag names can't start with "-"`;
   // A trailing "." is a whole-name rule; a leading "." and a trailing ".lock"
   // apply to every "/"-separated part. The one-level rule is skipped: a tag
   // always sits under refs/tags/.
-  if (n.endsWith(".")) return `Tag names can't end with "."`;
-  if (n.startsWith("/")) return `Tag names can't start with "/"`;
-  if (n.endsWith("/")) return `Tag names can't end with "/"`;
-  if (n.includes("//")) return `Tag names can't contain "//"`;
+  if (n.endsWith("."))
+    return t ? t("validation.endsDot") : `Tag names can't end with "."`;
+  if (n.startsWith("/"))
+    return t ? t("validation.startsSlash") : `Tag names can't start with "/"`;
+  if (n.endsWith("/"))
+    return t ? t("validation.endsSlash") : `Tag names can't end with "/"`;
+  if (n.includes("//"))
+    return t ? t("validation.doubleSlash") : `Tag names can't contain "//"`;
   const parts = n.split("/");
   for (const part of parts) {
-    const subject =
-      parts.length === 1 ? "Tag names" : `The tag name part "${part}"`;
-    if (part.startsWith(".")) return `${subject} can't start with "."`;
-    if (part.endsWith(".lock")) return `${subject} can't end with ".lock"`;
+    if (part.startsWith("."))
+      return t
+        ? t(
+            parts.length === 1
+              ? "validation.startsDot"
+              : "validation.partStartsDot",
+            {
+              part,
+            },
+          )
+        : `${parts.length === 1 ? "Tag names" : `The tag name part "${part}"`} can't start with "."`;
+    if (part.endsWith(".lock"))
+      return t
+        ? t(
+            parts.length === 1
+              ? "validation.endsLock"
+              : "validation.partEndsLock",
+            {
+              part,
+            },
+          )
+        : `${parts.length === 1 ? "Tag names" : `The tag name part "${part}"`} can't end with ".lock"`;
   }
-  if (n.includes("..")) return `Tag names can't contain ".."`;
+  if (n.includes(".."))
+    return t ? t("validation.doubleDot") : `Tag names can't contain ".."`;
   // A lone "@" is deliberately VALID: git's anti-"@" rule matches the entire
   // refname, never refs/tags/<name> — mirrors validate_tag_name (ops.rs), probe-verified.
-  if (n.includes("@{")) return `Tag names can't contain "@{"`;
+  if (n.includes("@{"))
+    return t ? t("validation.atBrace") : `Tag names can't contain "@{"`;
   for (const ch of n) {
     const code = ch.charCodeAt(0);
     if (code < 0x20 || code === 0x7f) {
-      return "Tag names can't contain control characters";
+      return t
+        ? t("validation.controlCharacters")
+        : "Tag names can't contain control characters";
     }
     if (FORBIDDEN_TAG_CHARS.includes(ch)) {
-      return `Tag names can't contain "${ch}"`;
+      return t
+        ? t("validation.forbiddenCharacter", { character: ch })
+        : `Tag names can't contain "${ch}"`;
     }
   }
   return null;

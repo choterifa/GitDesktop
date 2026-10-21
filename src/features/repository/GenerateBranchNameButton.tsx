@@ -1,4 +1,5 @@
 import { SparkleIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -152,24 +153,27 @@ export function GenerateBranchNameButton({
   /** Close the host dialog and open AI settings. */
   onSetupAi: () => void;
 }) {
+  const { t } = useTranslation("repository");
   if (!aiEnabled) return null;
   const useWorkingTree = usesWorkingTree(nameTarget);
   const fromWorkingTree = useWorkingTree && hasChanges;
   const reason = !headExists
-    ? "Make your first commit before branching from changes"
+    ? t("branchNameGenerator.firstCommitRequired")
     : fromWorkingTree
-      ? "Suggest a name from your in-progress changes"
+      ? t("branchNameGenerator.fromWorkingTree")
       : committedFallback
-        ? "Suggest a name from this branch's committed changes"
+        ? t("branchNameGenerator.fromCommittedChanges")
         : committedStatus === "pending"
-          ? "Checking this branch's committed work…"
+          ? t("branchNameGenerator.checkingCommittedWork")
           : committedStatus === "error"
-            ? "Couldn't check this branch's committed work"
+            ? t("branchNameGenerator.committedWorkFailed")
             : basedElsewhere
-              ? `Branching from ${basedElsewhere} — a name can only come from your in-progress changes`
+              ? t("branchNameGenerator.basedElsewhere", {
+                  branch: basedElsewhere,
+                })
               : useWorkingTree
-                ? "No in-progress changes and no committed work vs the default branch — nothing to name a branch after"
-                : "This branch has no commits the default branch doesn't — nothing to name it after";
+                ? t("branchNameGenerator.nothingToNameWorkingTree")
+                : t("branchNameGenerator.nothingToNameBranch");
   return (
     <div className="flex justify-end">
       {!aiConfigured ? (
@@ -178,11 +182,11 @@ export function GenerateBranchNameButton({
           variant="ghost"
           size="xs"
           className="text-muted-foreground"
-          title="Connect an AI provider to generate branch names"
+          title={t("branchNameGenerator.connectProvider")}
           onClick={onSetupAi}
         >
           <SparkleIcon data-icon="inline-start" />
-          Set up AI to name branches
+          {t("branchNameGenerator.setUpAi")}
         </Button>
       ) : gen.generating ? (
         <Button
@@ -193,7 +197,7 @@ export function GenerateBranchNameButton({
           onClick={gen.cancel}
         >
           <Spinner data-icon="inline-start" />
-          Generating…
+          {t("branchNameGenerator.generating")}
         </Button>
       ) : (
         <DisabledReasonButton
@@ -212,7 +216,7 @@ export function GenerateBranchNameButton({
           onClick={action.run}
         >
           <SparkleIcon data-icon="inline-start" />
-          Generate from changes
+          {t("branchNameGenerator.generateFromChanges")}
         </DisabledReasonButton>
       )}
     </div>

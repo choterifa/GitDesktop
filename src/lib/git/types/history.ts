@@ -11,6 +11,19 @@ export interface CommitSummary {
   isMerge: boolean;
 }
 
+export interface HistoryGraphRef {
+  name: string;
+  kind: "head" | "local" | "remote" | "tag" | "other";
+}
+
+export interface HistoryGraphCommit {
+  hash: string;
+  parents: string[];
+  subject: string;
+  date: string;
+  refs: HistoryGraphRef[];
+}
+
 export interface CommitDetails {
   hash: string;
   subject: string;

@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { RunDuration } from "@/components/elapsed-time";
@@ -30,8 +31,6 @@ import {
   useRetryFocusRescue,
 } from "@/features/conversations/ConversationListPanel";
 import {
-  detailNoticeMessage,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
   sectionReadNotice,
@@ -47,7 +46,6 @@ import {
   useForgeStatus,
   usePendingRunWrites,
   useRepoWriteAccess,
-  writeAccessReason,
 } from "@/lib/git/queries";
 import { type ForgeProvider, providerLabel } from "@/lib/git/types";
 import type { RunJob } from "@/lib/github/actions";
@@ -62,12 +60,8 @@ import {
   useRunFailedLogs,
 } from "@/lib/github/actions";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
-import {
-  ACT_PENDING_REASON,
-  pendingWriteReason,
-  refuseWhileOffline,
-  useOfflineHold,
-} from "@/lib/offline-writes";
+import { i18n } from "@/lib/i18n";
+import { refuseWhileOffline, useOfflineHold } from "@/lib/offline-writes";
 import { useAiEnabled } from "@/lib/settings/queries";
 import { useConfirm } from "@/lib/stores/confirm";
 import { formatDurationBetween, parseableDate } from "@/lib/time";
@@ -89,9 +83,9 @@ import {
   isPipelineProvider,
   type JobRerunOffer,
   jobRerunOffer,
-  RERUN_TITLES,
   rerunOffers,
   rerunSuccessMessage,
+  rerunTitle,
   rerunWindowReason,
   StatusIcon,
   statusLabel,
@@ -126,26 +120,38 @@ function LogsNotice({
     "data" | "error" | "isError" | "isPaused" | "isFetching" | "refetch"
   >;
 }) {
+  const { t } = useTranslation("actions");
   // gh's own reason (no access, logs expired) is what tells a permanent failure
   // from one a Retry can fix.
   const reason = logs.error ? presentError(logs.error).summary : "";
   const notice = sectionReadNotice({
-    noun: "logs",
+    noun: t("nouns.logs"),
     loadFailed: reason
-      ? `Couldn't load logs: ${reason}`
-      : "Couldn't load logs.",
+      ? t("logs.couldNotLoadWithReason", { reason })
+      : t("logs.couldNotLoad"),
     // A log is one block, so "rows" is whether it has any text to show.
     rowCount: logs.data === undefined ? undefined : logs.data === "" ? 0 : 1,
     isError: logs.isError,
     isPaused: logs.isPaused,
     isFetching: logs.isFetching,
   });
+  const message = notice
+    ? notice.retry
+      ? reason
+        ? t("logs.couldNotLoadWithReason", { reason })
+        : t("logs.couldNotLoad")
+      : logs.isPaused
+        ? logs.data === undefined
+          ? t("logs.offlinePending")
+          : t("logs.offlineRows")
+        : notice.message
+    : undefined;
   return (
     <DegradedListNotice
-      noun="logs"
+      noun={t("nouns.logs")}
       degraded={notice !== null}
-      message={notice?.message}
-      retryLabel={notice?.retryLabel}
+      message={message}
+      retryLabel={notice?.retry ? t("states.retry") : notice?.retryLabel}
       onRetry={notice?.retry ? () => void logs.refetch() : undefined}
       className="px-0 pb-1"
     />
@@ -196,6 +202,7 @@ function JobRow({
    *  stays visible but disabled, with this text as its hint. */
   rerunDisabledReason?: string;
 }) {
+  const { t } = useTranslation("actions");
   // Failed and in-progress jobs are the interesting ones — open them by default.
   const [open, setOpen] = useState(
     isRunActive(job.status) || isFailureConclusion(job.conclusion),
@@ -258,7 +265,7 @@ function JobRow({
             className="text-muted-foreground"
             disabled={playing || !!playDisabledReason}
             reason={playDisabledReason}
-            aria-label={`Run job ${job.name}`}
+            aria-label={t("jobs.runJobNamed", { name: job.name })}
             onClick={(e) => onPlay(e.currentTarget)}
           >
             {playing ? (
@@ -266,7 +273,7 @@ function JobRow({
             ) : (
               <PlayIcon data-icon="inline-start" />
             )}
-            Run job
+            {t("jobs.runJob")}
           </DisabledReasonButton>
         )}
         {onRerun && rerunOffer && (
@@ -299,7 +306,7 @@ function JobRow({
             onClick={onDebug}
           >
             <SparkleIcon data-icon="inline-start" />
-            Debug with AI
+            {t("jobs.debugWithAi")}
           </Button>
         )}
       </div>
@@ -342,7 +349,7 @@ function JobRow({
                   <button
                     type="button"
                     onClick={() => openUrl(href)}
-                    title="Open this step's logs on GitHub"
+                    title={t("jobs.openStepLogsOnGithub")}
                     className="group flex w-full cursor-pointer items-center gap-2 py-1 pr-3 pl-10 text-left text-xs hover:bg-muted/40"
                   >
                     {inner}
@@ -360,8 +367,8 @@ function JobRow({
       {open && stepsExpected && job.steps.length === 0 && (
         <p className="py-1 pr-3 pl-10 text-[11px] text-muted-foreground">
           {isRunActive(job.status)
-            ? "Waiting for steps…"
-            : "No step details available."}
+            ? t("jobs.waitingForSteps")
+            : t("jobs.noStepDetails")}
         </p>
       )}
       {open && (
@@ -373,7 +380,7 @@ function JobRow({
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Spinner className="size-3" />
-                Logs appear here when this job finishes.
+                {t("jobs.logsAppearWhenFinished")}
               </span>
               {job.url && (
                 <button
@@ -382,7 +389,7 @@ function JobRow({
                   className="inline-flex cursor-pointer items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
                 >
                   <ArrowSquareOutIcon className="size-3" />
-                  Watch live on {remoteLabel}
+                  {t("jobs.watchLiveOn", { provider: remoteLabel })}
                 </button>
               )}
             </p>
@@ -393,7 +400,7 @@ function JobRow({
                 onClick={() => setShowLogs((v) => !v)}
                 className="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >
-                {showLogs ? "Hide logs" : "Show logs"}
+                {showLogs ? t("logs.hide") : t("logs.show")}
               </button>
               {showLogs && (
                 <div className="mt-1.5">
@@ -402,16 +409,19 @@ function JobRow({
                     logs.isPending &&
                     !logs.isPaused && (
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <Spinner /> Loading logs…
+                        <Spinner /> {t("logs.loading")}
                       </div>
                     )
                   ) : pendingLog ? (
                     <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
                       <Spinner className="size-3" />
-                      Logs are being archived — this can take a moment.
+                      {t("logs.archiving")}
                     </p>
                   ) : (
-                    <LogBlock text={logs.data} />
+                    <LogBlock
+                      text={logs.data}
+                      emptyLabel={t("logs.noneAvailable")}
+                    />
                   )}
                 </div>
               )}
@@ -427,7 +437,10 @@ function JobRow({
  *  provider's own noun. Matches the frame's `ListRowSkeletons` status, which
  *  composes "Loading {name}…" from the same noun. */
 function runSwitchLoadingReason(noun: CiRunNoun): string {
-  return `Loading this ${noun}…`;
+  return i18n.t("panel.loadingThisNoun", {
+    ns: "actions",
+    noun: i18n.t(`nouns.${noun}`, { ns: "actions" }),
+  });
 }
 
 /** GitHub holds a first-time contributor's fork-PR run until a maintainer
@@ -495,6 +508,7 @@ function RunHeader({
    *  React Compiler refuses a ref read off an object during render. */
   viewOnRef: Ref<HTMLButtonElement>;
 }) {
+  const { t } = useTranslation("actions");
   return (
     <div className="border-b p-4">
       <div className="flex items-start gap-2">
@@ -558,11 +572,14 @@ function RunHeader({
           className="cursor-pointer"
           disabled={viewOn.disabled}
           reason={viewOn.reason}
-          title={`Open this ${noun} on ${viewOn.remoteLabel}`}
+          title={t("panel.openThisOn", {
+            noun: t(`nouns.${noun}`),
+            provider: viewOn.remoteLabel,
+          })}
           onClick={viewOn.onClick}
         >
           <ArrowSquareOutIcon data-icon="inline-start" />
-          View on {viewOn.remoteLabel}
+          {t("panel.viewOn", { provider: viewOn.remoteLabel })}
         </DisabledReasonButton>
       </div>
     </div>
@@ -582,12 +599,12 @@ function RunApprovalStrip({
   busy: boolean;
   onApprove?: () => void;
 }) {
+  const { t } = useTranslation("actions");
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b bg-warning/10 px-4 py-2 text-xs">
       <span className="flex min-w-0 items-center gap-1.5 text-warning">
         <WarningIcon weight="fill" className="size-3.5 shrink-0" />
-        GitHub is waiting for a maintainer to approve this workflow run before
-        it starts.
+        {t("approval.waiting")}
       </span>
       <DisabledReasonButton
         variant="outline"
@@ -601,7 +618,7 @@ function RunApprovalStrip({
         ) : (
           <PlayIcon data-icon="inline-start" />
         )}
-        Approve and run
+        {t("approval.approveAndRun")}
       </DisabledReasonButton>
     </div>
   );
@@ -648,7 +665,7 @@ function frameRunActions({
         size="sm"
         disabled
         reason={reason}
-        title={RERUN_TITLES[offer.kind]}
+        title={rerunTitle(offer.kind)}
       >
         <ArrowClockwiseIcon data-icon="inline-start" />
         {offer.label}
@@ -670,11 +687,14 @@ function RunLoadingFrame({
   noun: CiRunNoun;
   notice: ReactNode;
 }) {
+  const { t } = useTranslation("actions");
   const shown = useRunSlotShown();
   return (
     <ScrollArea className="min-h-0 flex-1 overflow-hidden">
       <div className="p-4">
-        <h3 className="mb-2 text-xs font-medium text-muted-foreground">Jobs</h3>
+        <h3 className="mb-2 text-xs font-medium text-muted-foreground">
+          {t("jobs.title")}
+        </h3>
         {notice ?? (
           <div className="border">
             {/* Remounted when the slot shows: a status inserted while the slot
@@ -683,7 +703,7 @@ function RunLoadingFrame({
               key={shown ? "shown" : "hidden"}
               rows={3}
               lines={1}
-              name={`this ${noun}`}
+              name={t("panel.thisNoun", { noun: t(`nouns.${noun}`) })}
             />
           </div>
         )}
@@ -703,6 +723,7 @@ export function RunDetailView({
    *  locally to avoid clashing with the run's own `active` (is-in-flight) flag. */
   active: boolean;
 }) {
+  const { t } = useTranslation("actions");
   const detail = useRunDetail(repoPath, runId, tabActive);
   const rerun = useRerunRun(repoPath);
   const cancel = useCancelRun(repoPath);
@@ -741,7 +762,12 @@ export function RunDetailView({
     undefined,
     tabActive && !!provider,
   );
-  const writeReason = writeAccessReason(writeAccess.data);
+  const writeReason =
+    writeAccess.data?.canPush === false
+      ? t("access.requiresWrite", {
+          repo: writeAccess.data.repo ?? t("access.thisRepository"),
+        })
+      : undefined;
   const writeBlocked = writeAccess.data?.canPush === false;
   const remoteLabel = providerLabel(provider);
   // GitLab pipelines and Bitbucket steps carry no per-job step list; only GitHub
@@ -859,12 +885,11 @@ export function RunDetailView({
       case writeReason !== undefined:
         return writeReason;
       case rerunFamily !== undefined:
-        return pendingWriteReason(
-          rerunFamily.paused,
-          "A re-run is already in flight…",
-        );
+        return rerunFamily.paused
+          ? t("states.offlineQueued")
+          : t("rerun.alreadyInFlight");
       case runLatched:
-        return "Re-run already started — waiting for the new attempt…";
+        return t("rerun.waitingForNewAttempt");
       default:
         return rerunAgedOut;
     }
@@ -883,7 +908,9 @@ export function RunDetailView({
     approvalPendingFor(provider, run.status, run.conclusion);
   // Approving starts the contributor's code, so it holds offline as its prompt
   // does; cancel and the re-runs may park, and say so on their controls.
-  const offlineHold = useOfflineHold();
+  const offlineHold = useOfflineHold()
+    ? t("states.offlineUnavailable")
+    : undefined;
   // From the cache like cancel's, so an approval started on the PR checks or by
   // an earlier mount of this view holds Approve here too.
   const approvePending = runState?.approve;
@@ -896,7 +923,9 @@ export function RunDetailView({
   const approveHeldReason =
     writeReason ??
     (approvePending
-      ? pendingWriteReason(approvePending.paused, ACT_PENDING_REASON)
+      ? approvePending.paused
+        ? t("states.offlineQueued")
+        : t("states.approving")
       : offlineHold);
 
   // Awaited, not per-call callbacks: this view is keyed per run and unmounts once
@@ -937,7 +966,7 @@ export function RunDetailView({
     const fromButton = document.activeElement === buttonEl;
     try {
       await playJob.mutateAsync(jobId);
-      toast.success("Starting job…");
+      toast.success(t("jobs.starting"));
       // A played job flips the run active the same way a re-run does, so it
       // races the same settle.
       scheduleRunRepair();
@@ -978,10 +1007,10 @@ export function RunDetailView({
 
   async function doApprove() {
     const ok = await useConfirm.getState().ask(APPROVE_RUN_CONFIRM);
-    if (!ok || refuseWhileOffline()) return;
+    if (!ok || refuseWhileOffline(t("states.offlineUnavailable"))) return;
     try {
       await approveRun.mutateAsync({ runId });
-      toast.success("Workflow run approved.");
+      toast.success(t("approval.approvedToast"));
     } catch (e) {
       toastError(e);
     }
@@ -1061,8 +1090,12 @@ export function RunDetailView({
 
   if (run === undefined) {
     const row = seed?.row;
-    const offlineMessage = offlinePendingMessage(`this ${runNoun}`);
-    const loadFailedMessage = `Couldn't load this ${runNoun}.`;
+    const offlineMessage = t("panel.offlineLoadingNoun", {
+      noun: t(`nouns.${runNoun}`),
+    });
+    const loadFailedMessage = t("panel.loadNounFailed", {
+      noun: t(`nouns.${runNoun}`),
+    });
     const retryButton = (
       <Button
         ref={retryRef}
@@ -1072,7 +1105,7 @@ export function RunDetailView({
         disabled={detail.isFetching}
         onClick={() => void detail.refetch()}
       >
-        {detail.isFetching ? "Retrying…" : "Retry"}
+        {detail.isFetching ? t("states.retrying") : t("states.retry")}
       </Button>
     );
 
@@ -1136,7 +1169,10 @@ export function RunDetailView({
         tabIndex={-1}
         className="flex h-full min-h-0 flex-col outline-none"
       >
-        <DegradedListNotice noun={`this ${runNoun}`} degraded={false} />
+        <DegradedListNotice
+          noun={t("panel.thisNoun", { noun: t(`nouns.${runNoun}`) })}
+          degraded={false}
+        />
         <RunHeader
           run={row}
           noun={runNoun}
@@ -1177,11 +1213,12 @@ export function RunDetailView({
       <DegradedListNotice
         noun={`this ${runNoun}`}
         degraded={pane === "content-degraded"}
-        message={detailNoticeMessage({
-          noun: runNoun,
-          isError: detailFailed,
-          stale: false,
-        })}
+        message={
+          detailFailed
+            ? t("panel.refreshFailedWithRows", { noun: t(`nouns.${runNoun}`) })
+            : t("panel.offlineRows")
+        }
+        retryLabel={detailFailed ? t("states.retry") : undefined}
         onRetry={detailFailed ? () => void detail.refetch() : undefined}
         className="shrink-0 border-b px-4 py-1.5"
       />
@@ -1198,10 +1235,9 @@ export function RunDetailView({
                   reason={
                     writeReason ??
                     (cancelPending
-                      ? pendingWriteReason(
-                          cancelPending.paused,
-                          ACT_PENDING_REASON,
-                        )
+                      ? cancelPending.paused
+                        ? t("states.offlineQueued")
+                        : t("states.cancelling")
                       : undefined)
                   }
                   onClick={doCancel}
@@ -1236,13 +1272,12 @@ export function RunDetailView({
                     reason={
                       thisRerunning
                         ? (writeReason ??
-                          pendingWriteReason(
-                            runRerun.paused,
-                            ACT_PENDING_REASON,
-                          ))
+                          (runRerun.paused
+                            ? t("states.offlineQueued")
+                            : t("states.rerunning")))
                         : rerunHeldReason
                     }
-                    title={RERUN_TITLES[offer.kind]}
+                    title={rerunTitle(offer.kind)}
                     onClick={() => doRerun(offer.kind === "failed")}
                   >
                     {thisRerunning && !runRerun.paused ? (
@@ -1258,7 +1293,9 @@ export function RunDetailView({
         viewOn={{
           remoteLabel,
           disabled: !run.url,
-          reason: `No URL for this ${runNoun}`,
+          reason: t("panel.noUrlForNoun", {
+            noun: t(`nouns.${runNoun}`),
+          }),
           onClick: () => run.url && openUrl(run.url),
         }}
         viewOnRef={viewOnRemoteRef}
@@ -1280,13 +1317,11 @@ export function RunDetailView({
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-4">
           <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-            Jobs ({run.jobs.length})
+            {t("jobs.count", { count: run.jobs.length })}
           </h3>
           {run.jobs.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              {active
-                ? "Jobs haven't started yet."
-                : "No jobs were reported for this run."}
+              {active ? t("jobs.notStartedYet") : t("jobs.noneReported")}
             </p>
           ) : (
             <div className="border">
@@ -1319,7 +1354,9 @@ export function RunDetailView({
                     playDisabledReason={
                       writeReason ??
                       (jobPlay
-                        ? pendingWriteReason(jobPlay.paused, ACT_PENDING_REASON)
+                        ? jobPlay.paused
+                          ? t("states.offlineQueued")
+                          : t("jobs.starting")
                         : undefined)
                     }
                     onRerun={
@@ -1342,10 +1379,9 @@ export function RunDetailView({
                     rerunDisabledReason={
                       jobRerun
                         ? (writeReason ??
-                          pendingWriteReason(
-                            jobRerun.paused,
-                            ACT_PENDING_REASON,
-                          ))
+                          (jobRerun.paused
+                            ? t("states.offlineQueued")
+                            : t("states.rerunning")))
                         : rerunHeldReason
                     }
                   />
@@ -1361,7 +1397,7 @@ export function RunDetailView({
                 size="sm"
                 onClick={() => setShowLogs((v) => !v)}
               >
-                {showLogs ? "Hide failed logs" : "Show failed logs"}
+                {showLogs ? t("logs.hideFailed") : t("logs.showFailed")}
               </Button>
               {showLogs && (
                 <div className="mt-2">
@@ -1370,13 +1406,13 @@ export function RunDetailView({
                     logs.isPending &&
                     !logs.isPaused && (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Spinner /> Loading logs…
+                        <Spinner /> {t("logs.loading")}
                       </div>
                     )
                   ) : (
                     <LogBlock
                       text={logs.data}
-                      emptyLabel="No failed logs available."
+                      emptyLabel={t("logs.noFailedAvailable")}
                       maxHeightClass="max-h-96"
                     />
                   )}

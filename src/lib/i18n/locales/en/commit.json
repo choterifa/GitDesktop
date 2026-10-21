@@ -1,0 +1,84 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "generate": "Generate",
+    "setup": "Set up AI",
+    "amendLastCommit": "Amend last commit",
+    "commit": "Commit{{branch}}",
+    "commitWithFiles": "Commit ({{count}}){{branch}}",
+    "toBranch": "to {{branch}}",
+    "openCommitDialog": "Open commit dialog",
+    "alsoInCommandPalette": "also in the command palette"
+  },
+  "dialog": {
+    "title": "Commit",
+    "description": "Compose the message with more room. Staging stays in the Changes panel."
+  },
+  "fields": {
+    "title": "Commit title",
+    "descriptionOptional": "Description (optional)"
+  },
+  "staged": {
+    "title_one": "Staged ({{count}} file)",
+    "title_other": "Staged ({{count}} files)",
+    "emptyAmend": "Nothing staged — this rewrites the last commit's message only.",
+    "empty": "Nothing staged — stage files in the Changes panel."
+  },
+  "blocked": {
+    "directCommit": "requires changes via a pull request — direct commits are blocked by a branch rule."
+  },
+  "amend": {
+    "stop": "Stop amending",
+    "separate": "to commit them separately instead.",
+    "hold": {
+      "none": "Your changes will amend the most recent commit ({{hash}}).",
+      "commit": "The latest commit is no longer {{hash}}, so your changes can't amend it.",
+      "branch": "The checked-out branch changed since you started amending {{hash}}, so your changes can't amend it."
+    }
+  },
+  "ai": {
+    "generate": "Generate",
+    "setup": "Set up AI",
+    "stageToGenerate": "Stage changes to generate a commit message",
+    "generateCommitMessage": "Generate commit message with AI",
+    "connectProvider": "Connect an AI provider to generate commit messages",
+    "nothingStaged": "Nothing is staged — stage some changes first.",
+    "emptyStaged": {
+      "patterns": "All staged changes match your AI ignore patterns — nothing to describe.",
+      "unreadable": "Nothing to describe — files whose names aren't readable text are always kept from AI.",
+      "both": "Nothing to describe — files whose names aren't readable text are always kept from AI, and the rest of the staged changes match your AI ignore patterns."
+    }
+  },
+  "coAuthors": {
+    "creditTitle": "Credit co-authors on this commit",
+    "label": "Co-authors",
+    "addTitle": "Add a co-author",
+    "searchPlaceholder": "Search, or Name <email>",
+    "suggestions": "Co-author suggestions",
+    "addNamed": "Add \"{{name}}\"",
+    "selfAlreadyCredited": "That's you — the commit author is already credited.",
+    "noMatches": "No matches — type Name <email@example.com>",
+    "allAdded": "Everyone from this repo's history is already added.",
+    "noAuthors": "No other authors found in this repo's history.",
+    "remove": "Remove co-author {{name}}"
+  },
+  "forcePush": {
+    "title": "Amending will require a force push",
+    "description": "This commit is already on {{upstream}}. Amending rewrites it, so your branch and the remote will diverge and you'll need to force push to update it. GitDesktop force pushes with --force-with-lease and, where your Git can check it, --force-if-includes (the pair won't overwrite others' work your branch doesn't include), but it still rewrites the branch's history.",
+    "remote": "the remote",
+    "dontShowAgain": "Don't show this again",
+    "beginAmend": "Begin amend"
+  },
+  "disabled": {
+    "checkingRules": "Checking branch protection rules…",
+    "pullRequestRequired": "This branch requires changes via a pull request",
+    "commitMoved": "The latest commit changed since you started amending",
+    "branchMoved": "The checked-out branch changed since you started amending",
+    "enterTitle": "Enter a commit title first",
+    "stageChanges": "Stage changes to commit"
+  },
+  "toast": {
+    "amended": "Amended {{hash}}",
+    "committed": "Committed {{hash}}"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "actions": {
+    "cancel": "Cancelar",
+    "generate": "Generar",
+    "setup": "Configurar IA",
+    "amendLastCommit": "Modificar el último commit",
+    "commit": "Crear commit{{branch}}",
+    "commitWithFiles": "Crear commit ({{count}}){{branch}}",
+    "toBranch": "en {{branch}}",
+    "openCommitDialog": "Abrir ventana de commit",
+    "alsoInCommandPalette": "también en la paleta de comandos"
+  },
+  "dialog": {
+    "title": "Crear commit",
+    "description": "Escribe el mensaje con más espacio. Los cambios staged se administran en el panel Cambios."
+  },
+  "fields": {
+    "title": "Título del commit",
+    "descriptionOptional": "Descripción (opcional)"
+  },
+  "staged": {
+    "title_one": "Preparado ({{count}} archivo)",
+    "title_other": "Preparados ({{count}} archivos)",
+    "emptyAmend": "No hay cambios preparados: solo se cambiará el mensaje del último commit.",
+    "empty": "No hay cambios preparados. Selecciona archivos en el panel Cambios."
+  },
+  "blocked": {
+    "directCommit": "requiere enviar los cambios mediante una solicitud de cambios; una regla de rama bloquea los commits directos."
+  },
+  "amend": {
+    "stop": "Dejar de modificar",
+    "separate": "para crear commits separados.",
+    "hold": {
+      "none": "Tus cambios modificarán el commit más reciente ({{hash}}).",
+      "commit": "El commit más reciente ya no es {{hash}}, así que no se puede modificar con tus cambios.",
+      "branch": "La rama activa cambió desde que empezaste a modificar {{hash}}, así que no se puede actualizar con tus cambios."
+    }
+  },
+  "ai": {
+    "generate": "Generar",
+    "setup": "Configurar IA",
+    "stageToGenerate": "Prepara cambios para generar un mensaje de commit",
+    "generateCommitMessage": "Generar mensaje de commit con IA",
+    "connectProvider": "Conecta un proveedor de IA para generar mensajes de commit",
+    "nothingStaged": "No hay cambios preparados. Selecciona algunos cambios primero.",
+    "emptyStaged": {
+      "patterns": "Todos los cambios preparados coinciden con tus patrones de exclusión de IA; no hay nada que describir.",
+      "unreadable": "No hay nada que describir: los archivos cuyo contenido no se puede leer como texto siempre se excluyen de la IA.",
+      "both": "No hay nada que describir: los archivos cuyo contenido no se puede leer como texto siempre se excluyen de la IA, y el resto coincide con tus patrones de exclusión."
+    }
+  },
+  "coAuthors": {
+    "creditTitle": "Acreditar coautores en este commit",
+    "label": "Coautores",
+    "addTitle": "Agregar coautor",
+    "searchPlaceholder": "Buscar o escribir Nombre <correo>",
+    "suggestions": "Sugerencias de coautores",
+    "addNamed": "Agregar a \"{{name}}\"",
+    "selfAlreadyCredited": "Eres tú; ya apareces como autor del commit.",
+    "noMatches": "No hay coincidencias. Escribe Nombre <correo@ejemplo.com>",
+    "allAdded": "Ya agregaste a todas las personas del historial de este repositorio.",
+    "noAuthors": "No se encontraron otros autores en el historial de este repositorio.",
+    "remove": "Quitar a {{name}} como coautor"
+  },
+  "forcePush": {
+    "title": "Modificar este commit requerirá un push forzado",
+    "description": "Este commit ya está en {{upstream}}. Al modificarlo, se reescribe y tu rama dejará de coincidir con el remoto; después tendrás que hacer un push forzado para actualizarlo. GitDesktop usa --force-with-lease y, cuando tu versión de Git lo permite, --force-if-includes. En conjunto evitan sobrescribir cambios ajenos que no estén incluidos en tu rama, pero el historial de la rama sí se reescribe.",
+    "remote": "el remoto",
+    "dontShowAgain": "No volver a mostrar",
+    "beginAmend": "Empezar a modificar"
+  },
+  "disabled": {
+    "checkingRules": "Comprobando las reglas de protección de la rama…",
+    "pullRequestRequired": "Esta rama requiere enviar los cambios mediante una solicitud de cambios",
+    "commitMoved": "El commit más reciente cambió desde que empezaste a modificarlo",
+    "branchMoved": "La rama activa cambió desde que empezaste a modificar el commit",
+    "enterTitle": "Primero escribe un título para el commit",
+    "stageChanges": "Prepara cambios para crear el commit"
+  },
+  "toast": {
+    "amended": "Se modificó {{hash}}",
+    "committed": "Se creó {{hash}}"
+  }
+}

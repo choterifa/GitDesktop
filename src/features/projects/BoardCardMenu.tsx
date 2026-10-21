@@ -15,6 +15,7 @@ import {
   TRUNCATED_ROW_REASON,
 } from "./board-model";
 import type { ReorderDirection, ReorderPlan } from "./board-positioning";
+import { projectsText, useProjectsText } from "./use-projects-text";
 
 /** What the board's one shared context menu acts on, recorded on right-click or
  *  long press. `null` means nothing actionable was under the pointer and the menu
@@ -120,7 +121,7 @@ function BoardBulkMenuItems({
     <>
       {isDraft && (
         <ContextMenuItem disabled>
-          {BULK_SINGLE_ONLY_REASON[noun]}
+          {projectsText(BULK_SINGLE_ONLY_REASON[noun])}
         </ContextMenuItem>
       )}
       {/* Above the two removals, where the single-card menu puts its own rewrites:
@@ -257,6 +258,7 @@ export function BoardCardMenuItems({
   canPeek: boolean;
   actions: BoardMenuActions;
 }) {
+  const tx = useProjectsText();
   if (target === null) return null;
   const kind = target.item.content.kind;
   const isDraft = kind === "draft";
@@ -326,7 +328,7 @@ export function BoardCardMenuItems({
               if (index !== -1) actions.move(index);
             }}
           >
-            <ContextMenuLabel>Move to</ContextMenuLabel>
+            <ContextMenuLabel>{tx("Move to")}</ContextMenuLabel>
             {columns.map((column) => (
               <ContextMenuRadioItem
                 key={column.id}
@@ -358,7 +360,7 @@ export function BoardCardMenuItems({
           // the same sentence repeated down it — a disabled menu item can't hold
           // a tooltip, so the reason has to BE the row.
           <ContextMenuGroup>
-            <ContextMenuLabel>Move to</ContextMenuLabel>
+            <ContextMenuLabel>{tx("Move to")}</ContextMenuLabel>
             <ContextMenuItem disabled>{heldReason}</ContextMenuItem>
           </ContextMenuGroup>
         ))}
@@ -367,13 +369,13 @@ export function BoardCardMenuItems({
           redacted ones included — a place on the board is a membership fact, like
           Archive and Remove, rather than a claim about what the card holds. */}
       <ContextMenuGroup>
-        <ContextMenuLabel>Position</ContextMenuLabel>
+        <ContextMenuLabel>{tx("Position")}</ContextMenuLabel>
         {bulk !== null ? (
           // A position is one card's slot in the project's order, so a selection
           // has nothing for these four to address. Held with the reason rather
           // than silently acting on the card under the pointer.
           <ContextMenuItem disabled>
-            {BULK_SINGLE_ONLY_REASON[noun]}
+            {tx(BULK_SINGLE_ONLY_REASON[noun])}
           </ContextMenuItem>
         ) : reorderHeldReason === undefined ? (
           // All four rows ALWAYS render in their fixed order; a held one disables
@@ -384,9 +386,11 @@ export function BoardCardMenuItems({
             const plan = reorderPlans[row.direction];
             const heldParenthetical =
               plan.kind === "noop"
-                ? row.noopReason
+                ? tx(row.noopReason)
                 : plan.kind === "held"
                   ? row.truncatedReason
+                    ? tx(row.truncatedReason)
+                    : undefined
                   : undefined;
             return (
               <ContextMenuItem
@@ -395,8 +399,8 @@ export function BoardCardMenuItems({
                 onClick={() => actions.reorder(row.direction)}
               >
                 {heldParenthetical === undefined
-                  ? row.label
-                  : `${row.label} (${heldParenthetical})`}
+                  ? tx(row.label)
+                  : `${tx(row.label)} (${heldParenthetical})`}
               </ContextMenuItem>
             );
           })
@@ -416,7 +420,7 @@ export function BoardCardMenuItems({
       {isPeekable && canPeek && (
         <>
           <ContextMenuItem onClick={actions.showDetails}>
-            Show details
+            {tx("Show details")}
           </ContextMenuItem>
           {/* Its own rule: reading a card's dates belongs nowhere near Archive and
               Remove, and one unbroken group would read as a single family. */}
@@ -440,10 +444,10 @@ export function BoardCardMenuItems({
             (editHeldReason === undefined ? (
               <>
                 <ContextMenuItem onClick={actions.editDraft}>
-                  Edit draft…
+                  {tx("Edit draft…")}
                 </ContextMenuItem>
                 <ContextMenuItem onClick={actions.convert}>
-                  Convert to issue…
+                  {tx("Convert to issue…")}
                 </ContextMenuItem>
               </>
             ) : (
@@ -456,15 +460,15 @@ export function BoardCardMenuItems({
               step that warns, and its reversal is what that warning promised. */}
           {isArchived ? (
             <ContextMenuItem onClick={actions.restore}>
-              Restore {noun}
+              {tx("Restore {{noun}}", { noun: tx(noun) })}
             </ContextMenuItem>
           ) : (
             <ContextMenuItem onClick={actions.archive}>
-              Archive {noun}…
+              {tx("Archive {{noun}}…", { noun: tx(noun) })}
             </ContextMenuItem>
           )}
           <ContextMenuItem variant="destructive" onClick={actions.remove}>
-            Remove from project…
+            {tx("Remove from project…")}
           </ContextMenuItem>
         </>
       )}

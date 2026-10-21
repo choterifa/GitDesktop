@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -49,16 +50,14 @@ import { CommentEditor } from "@/features/conversations/CommentEditor";
 import { DegradedListNotice } from "@/features/conversations/ConversationListPanel";
 import { ConversationScrollArea } from "@/features/conversations/ConversationScrollArea";
 import {
-  detailNoticeMessage,
   emptyPickerCopy,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
 } from "@/features/conversations/remote-section-state";
 import { useThreadJumpHotkeys } from "@/features/conversations/useThreadJumpHotkeys";
 import { DiffPlaceholder } from "@/features/diff/DiffPlaceholder";
 import { JiraIssueSidebar } from "@/features/issues/JiraIssueSidebar";
-import { ISSUE_SWITCH_LOADING_REASON } from "@/features/issues/RemoteIssueViewParts";
+import { ISSUE_SWITCH_LOADING_REASON_KEY } from "@/features/issues/RemoteIssueViewParts";
 import { type PendingRepoWrite, pendingWriteMatching } from "@/lib/git/queries";
 import type { ForgeUserRef } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
@@ -98,9 +97,6 @@ import {
   type JiraWorklog,
 } from "@/lib/jira/types";
 import {
-  ACT_PENDING_REASON,
-  COMMENT_POST_PENDING_REASON,
-  pendingWriteReason,
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
@@ -185,10 +181,11 @@ function StatusMenu({
   heldReason: string | undefined;
   transitionTo: ReturnType<typeof useJiraTransitionTo>;
 }) {
+  const { t } = useTranslation("issues");
   const [open, setOpen] = useState(false);
   const transitions = useJiraTransitions(repoPath, link, issueKey, open);
 
-  async function apply(t: {
+  async function apply(transition: {
     id: string;
     toStatusName: string;
     toStatusCategory: JiraStatusCategory;
@@ -200,21 +197,24 @@ function StatusMenu({
     try {
       result = await transitionTo.mutateAsync({
         issueKey,
-        transitionId: t.id,
-        toStatusName: t.toStatusName,
-        toStatusCategory: t.toStatusCategory,
+        transitionId: transition.id,
+        toStatusName: transition.toStatusName,
+        toStatusCategory: transition.toStatusCategory,
       });
     } catch (e) {
       toastError(e);
       return;
     }
-    toast.success(`${issueKey} · ${result.statusName}`);
+    toast.success(t("jiraView.transitioned", {
+      key: issueKey,
+      status: result.statusName,
+    }));
   }
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        aria-label={`Status: ${name}. Change status`}
+        aria-label={t("jiraView.statusChange", { status: name })}
         render={
           <DisabledReasonButton
             variant="ghost"
@@ -233,13 +233,19 @@ function StatusMenu({
         {transitions.data === undefined ? (
           transitions.isPaused ? (
             <DropdownMenuItem disabled>
-              {offlinePendingMessage("transitions")}
+              {t("shared.waitingForConnection", {
+                noun: t("jiraView.transitionsNoun"),
+              })}
             </DropdownMenuItem>
           ) : refreshFailed(transitions) ? null : (
-            <DropdownMenuItem disabled>Loading transitions…</DropdownMenuItem>
+            <DropdownMenuItem disabled>
+              {t("jiraView.loadingTransitions")}
+            </DropdownMenuItem>
           )
         ) : transitions.data.length === 0 ? (
-          <DropdownMenuItem disabled>No transitions available</DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            {t("jiraView.noTransitions")}
+          </DropdownMenuItem>
         ) : (
           transitions.data.map((t) => {
             const { Icon, tone } = statusPresentation(t.toStatusCategory);
@@ -269,7 +275,7 @@ function StatusMenu({
             closeOnClick={false}
             onClick={() => transitions.refetch()}
           >
-            Couldn't load transitions — retry
+            {t("jiraView.transitionsFailed")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -330,6 +336,7 @@ export function JiraAssigneePicker({
   issueKey: string;
   assignee: ForgeUserRef | null;
 }) {
+  const { t } = useTranslation("issues");
   const assign = useJiraAssign(repoPath, link);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -357,7 +364,11 @@ export function JiraAssigneePicker({
       toastError(e);
       return;
     }
-    toast.success(next ? `Assigned to ${next.label}` : "Unassigned");
+    toast.success(
+      next
+        ? t("jiraView.assignedTo", { name: next.label })
+        : t("jiraView.unassign"),
+    );
   }
 
   return (
@@ -365,7 +376,9 @@ export function JiraAssigneePicker({
       open={open}
       onOpenChange={setOpen}
       items={items}
-      itemToStringLabel={(u: ForgeUserRef) => u.label}
+      itemToStringLabel={(u: ForgeUserRef) =>
+        u.id === UNASSIGN.id ? t("jiraView.unassign") : u.label
+      }
       value={null}
       onValueChange={(u: ForgeUserRef | null) => {
         if (u) void apply(u.id === UNASSIGN.id ? null : u);
@@ -376,7 +389,7 @@ export function JiraAssigneePicker({
     >
       <ComboboxInput
         className="w-48"
-        placeholder={assignee ? assignee.label : "Assign…"}
+        placeholder={assignee ? assignee.label : t("jiraView.assign")}
         showTrigger
       />
       <ComboboxContent>
@@ -384,21 +397,25 @@ export function JiraAssigneePicker({
           {/* A new search keeps the previous key's results as placeholder, which
               is no answer for this one: it reads as still loading, or offline
               when parked. */}
-          {emptyPickerCopy(
-            {
-              data: users.isPlaceholderData ? undefined : users.data,
-              isPending: users.isPending || users.isPlaceholderData,
-              isError: users.isError,
-              isPaused: users.isPaused,
-              isFetching: users.isFetching,
-            },
-            {
-              noun: "users",
-              loading: "Searching…",
-              loadFailed: "Couldn't search users.",
-              empty: "No matching users.",
-            },
-          )}
+          {users.isPaused
+            ? t("shared.waitingForConnection", {
+                noun: t("jiraView.usersNoun"),
+              })
+            : emptyPickerCopy(
+                {
+                  data: users.isPlaceholderData ? undefined : users.data,
+                  isPending: users.isPending || users.isPlaceholderData,
+                  isError: users.isError,
+                  isPaused: false,
+                  isFetching: users.isFetching,
+                },
+                {
+                  noun: t("jiraView.usersNoun"),
+                  loading: t("jiraView.searching"),
+                  loadFailed: t("jiraView.searchUsersFailed"),
+                  empty: t("jiraView.noMatchingUsers"),
+                },
+              )}
         </ComboboxEmpty>
         <ComboboxList>
           {(item: ForgeUserRef) =>
@@ -408,7 +425,7 @@ export function JiraAssigneePicker({
                 value={item}
                 className="text-muted-foreground"
               >
-                Unassign
+                {t("jiraView.unassign")}
               </ComboboxItem>
             ) : (
               <ComboboxItem key={item.id} value={item}>
@@ -441,6 +458,7 @@ export function JiraPriorityMenu({
   issueKey: string;
   priorityName: string;
 }) {
+  const { t } = useTranslation("issues");
   const [open, setOpen] = useState(false);
   const priorities = useJiraPriorities(link, open);
   const setPriority = useJiraSetPriority(repoPath, link);
@@ -463,7 +481,10 @@ export function JiraPriorityMenu({
       toastError(e);
       return;
     }
-    toast.success(`${issueKey} · ${p.name}`);
+    toast.success(t("jiraView.priorityChanged", {
+      key: issueKey,
+      priority: p.name,
+    }));
   }
 
   return (
@@ -471,8 +492,8 @@ export function JiraPriorityMenu({
       <DropdownMenuTrigger
         aria-label={
           priorityName
-            ? `Priority: ${priorityName}. Change priority`
-            : "Set priority"
+            ? t("jiraView.priorityChange", { priority: priorityName })
+            : t("jiraView.setPriority")
         }
         render={
           <DisabledReasonButton
@@ -480,7 +501,9 @@ export function JiraPriorityMenu({
             disabled={settingPriority !== undefined}
             reason={
               settingPriority
-                ? pendingWriteReason(settingPriority.paused, ACT_PENDING_REASON)
+                ? settingPriority.paused
+                  ? t("shared.offlineQueued")
+                  : t("shared.applying")
                 : undefined
             }
             // Strips the button chrome to a bare inline label: no border box,
@@ -490,7 +513,7 @@ export function JiraPriorityMenu({
         }
       >
         <FlagIcon className="size-3 shrink-0 opacity-60" />
-        {priorityName || "Priority…"}
+        {priorityName || t("jiraView.priorityPlaceholder")}
         <CaretDownIcon className="size-3 shrink-0 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-44">
@@ -499,13 +522,19 @@ export function JiraPriorityMenu({
         {priorities.data === undefined ? (
           priorities.isPaused ? (
             <DropdownMenuItem disabled>
-              {offlinePendingMessage("priorities")}
+              {t("shared.waitingForConnection", {
+                noun: t("jiraView.prioritiesNoun"),
+              })}
             </DropdownMenuItem>
           ) : refreshFailed(priorities) ? null : (
-            <DropdownMenuItem disabled>Loading priorities…</DropdownMenuItem>
+            <DropdownMenuItem disabled>
+              {t("jiraView.loadingPriorities")}
+            </DropdownMenuItem>
           )
         ) : priorities.data.length === 0 ? (
-          <DropdownMenuItem disabled>No priorities available</DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            {t("jiraView.noPriorities")}
+          </DropdownMenuItem>
         ) : (
           priorities.data.map((p) => (
             <DropdownMenuCheckboxItem
@@ -534,7 +563,7 @@ export function JiraPriorityMenu({
             closeOnClick={false}
             onClick={() => priorities.refetch()}
           >
-            Couldn't load priorities — retry
+            {t("jiraView.prioritiesFailed")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -561,6 +590,7 @@ export function JiraLabelsPopover({
   issueKey: string;
   labels: string[];
 }) {
+  const { t } = useTranslation("issues");
   const [open, setOpen] = useState(false);
   const known = useJiraLabels(link, open);
   const setLabels = useJiraSetLabels(repoPath, link);
@@ -671,10 +701,16 @@ export function JiraLabelsPopover({
     <div className="flex flex-wrap items-center gap-1.5">
       <Popover.Root open={open} onOpenChange={handleOpenChange}>
         <Popover.Trigger
-          render={<Button variant="ghost" size="xs" aria-label="Edit labels" />}
+          render={
+            <Button
+              variant="ghost"
+              size="xs"
+              aria-label={t("jiraView.editLabels")}
+            />
+          }
         >
           <TagIcon data-icon="inline-start" />
-          Labels
+          {t("jiraView.labels")}
         </Popover.Trigger>
         <Popover.Portal container={portalContainer}>
           <Popover.Positioner
@@ -683,7 +719,9 @@ export function JiraLabelsPopover({
             className="isolate z-50"
           >
             <Popover.Popup className="w-64 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-              <p className="px-1 pb-1.5 text-xs font-medium">Labels</p>
+              <p className="px-1 pb-1.5 text-xs font-medium">
+                {t("jiraView.labels")}
+              </p>
               <Input
                 ref={inputRef}
                 autoFocus
@@ -702,14 +740,14 @@ export function JiraLabelsPopover({
                     focusRow(0);
                   }
                 }}
-                placeholder="Filter or add a label…"
-                aria-label="Filter or add a label"
+                placeholder={t("jiraView.filterAddLabel")}
+                aria-label={t("jiraView.filterAddLabelAria")}
                 aria-invalid={hasWhitespace}
                 className="h-7"
               />
               {hasWhitespace && (
                 <p className="px-1 pt-1 text-[11px] text-destructive">
-                  Labels can't contain spaces.
+                  {t("jiraView.noSpaces")}
                 </p>
               )}
               <div ref={listRef}>
@@ -728,7 +766,7 @@ export function JiraLabelsPopover({
                     className="mt-1 flex w-full cursor-pointer items-center gap-2 px-1 py-1.5 text-left text-xs outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
                   >
                     <TagIcon className="size-3 shrink-0" />
-                    Add “{trimmed}”
+                    {t("jiraView.addLabel", { label: trimmed })}
                   </button>
                 )}
                 <div className="mt-1 max-h-56 overflow-y-auto">
@@ -737,11 +775,13 @@ export function JiraLabelsPopover({
                     <p className="px-1 py-1 text-xs text-muted-foreground">
                       {known.data === undefined
                         ? known.isPaused
-                          ? offlinePendingMessage("labels")
-                          : "Loading labels…"
+                          ? t("shared.waitingForConnection", {
+                              noun: t("jiraView.labelsNoun"),
+                            })
+                          : t("jiraView.loadingLabels")
                         : trimmed
-                          ? "No matching labels."
-                          : "This site has no labels."}
+                          ? t("jiraView.noMatchingLabels")
+                          : t("jiraView.noLabels")}
                     </p>
                   )}
                   {options.map((name, i) => {
@@ -789,13 +829,13 @@ export function JiraLabelsPopover({
                       }}
                       className="flex w-full cursor-pointer items-center px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
                     >
-                      Couldn't load labels — retry
+                      {t("jiraView.labelsLoadFailed")}
                     </button>
                   )}
                 </div>
               </div>
               <p className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground">
-                Changes apply when this closes.
+                {t("jiraView.changesOnClose")}
               </p>
             </Popover.Popup>
           </Popover.Positioner>
@@ -854,6 +894,7 @@ function JiraCommentItem({
    *  menu is absent and the editor's save holds until they agree. */
   stale?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const edit = useJiraCommentEdit(repoPath, link);
   const del = useJiraCommentDelete(repoPath, link);
   // Keyed per comment, this row remounts idle on a return to its issue, so its
@@ -919,7 +960,7 @@ function JiraCommentItem({
       toastError(e);
       return;
     }
-    toast.success("Comment deleted");
+    toast.success(t("jiraView.commentDeleted"));
   }
 
   return (
@@ -929,13 +970,15 @@ function JiraCommentItem({
           <ForgeUserAvatar user={comment.author} ghHost={null} />
         )}
         <span className="font-medium">
-          {comment.author?.label ?? "unknown"}
+          {comment.author?.label ?? t("jiraView.unknownAuthor")}
         </span>
         <span className="text-muted-foreground">
           <RelativeTime date={comment.createdAt} />
         </span>
         {edited && (
-          <span className="text-muted-foreground italic">(edited)</span>
+          <span className="text-muted-foreground italic">
+            {t("jiraView.edited")}
+          </span>
         )}
         {showMenu && !editing && (
           <>
@@ -946,7 +989,7 @@ function JiraCommentItem({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Comment actions"
+                    aria-label={t("jiraView.commentActions")}
                     className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                   />
                 }
@@ -955,14 +998,16 @@ function JiraCommentItem({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-44">
                 {canEdit && (
-                  <DropdownMenuItem onClick={beginEdit}>Edit</DropdownMenuItem>
+                  <DropdownMenuItem onClick={beginEdit}>
+                    {t("jiraView.edit")}
+                  </DropdownMenuItem>
                 )}
                 {canDelete && (
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => setConfirmDelete(true)}
                   >
-                    Delete
+                    {t("jiraView.delete")}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -972,7 +1017,7 @@ function JiraCommentItem({
       </p>
       {editing ? (
         <CommentEditor
-          ariaLabel="Edit comment"
+          ariaLabel={t("jiraView.editComment")}
           value={draft}
           onChange={setDraft}
           onSubmit={() => void saveEdit()}
@@ -988,18 +1033,20 @@ function JiraCommentItem({
       ) : comment.bodyMd.trim() ? (
         <Markdown>{comment.bodyMd}</Markdown>
       ) : (
-        <p className="text-xs text-muted-foreground italic">(empty comment)</p>
+        <p className="text-xs text-muted-foreground italic">
+          {t("jiraView.emptyComment")}
+        </p>
       )}
       <ConfirmDialog
         open={confirmDelete}
         onCancel={() => setConfirmDelete(false)}
-        title="Delete comment?"
+        title={t("jiraView.deleteCommentTitle")}
         body={
           isOwn
-            ? "This permanently deletes your comment on this Jira issue. This cannot be undone."
-            : "This permanently deletes this comment on this Jira issue. This cannot be undone."
+            ? t("jiraView.deleteOwnCommentBody")
+            : t("jiraView.deleteCommentBody")
         }
-        confirmLabel="Delete comment"
+        confirmLabel={t("jiraView.deleteComment")}
         confirmVariant="destructive"
         pending={deleteHold !== undefined}
         paused={deleteHold?.paused ?? false}
@@ -1048,6 +1095,7 @@ function JiraWorklogItem({
    *  actions are absent and the editor's save holds until they agree. */
   stale?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const update = useJiraUpdateWorklog(repoPath, link);
   const del = useJiraDeleteWorklog(repoPath, link);
   // Keyed per worklog, this row remounts idle on a return to its issue, so its
@@ -1063,7 +1111,9 @@ function JiraWorklogItem({
   );
   const saving = saveHold !== undefined;
   const savingReason = saveHold
-    ? pendingWriteReason(saveHold.paused, ACT_PENDING_REASON)
+    ? saveHold.paused
+      ? t("shared.offlineQueued")
+      : t("jiraView.savingWorklog")
     : undefined;
   const deleteHold = jiraHold(
     jiraWrites,
@@ -1135,7 +1185,7 @@ function JiraWorklogItem({
       setConfirmDelete(false);
       return;
     }
-    toast.success("Worklog deleted");
+    toast.success(t("jiraView.worklogDeleted"));
     setConfirmDelete(false);
   }
 
@@ -1146,7 +1196,7 @@ function JiraWorklogItem({
           <ForgeUserAvatar user={worklog.author} ghHost={null} />
         )}
         <span className="font-medium">
-          {worklog.author?.label ?? "unknown"}
+          {worklog.author?.label ?? t("jiraView.unknownAuthor")}
         </span>
         <span className="tabular-nums text-muted-foreground">
           {worklog.timeSpent}
@@ -1162,10 +1212,10 @@ function JiraWorklogItem({
                 variant="ghost"
                 size="xs"
                 className="text-muted-foreground hover:text-foreground"
-                aria-label="Edit worklog"
+                aria-label={t("jiraView.editWorklog")}
                 onClick={beginEdit}
               >
-                Edit
+                {t("jiraView.edit")}
               </Button>
             )}
             {canDelete && (
@@ -1173,10 +1223,10 @@ function JiraWorklogItem({
                 variant="ghost"
                 size="xs"
                 className="text-muted-foreground hover:text-destructive"
-                aria-label="Delete worklog"
+                aria-label={t("jiraView.deleteWorklog")}
                 onClick={() => setConfirmDelete(true)}
               >
-                Delete
+                {t("jiraView.delete")}
               </Button>
             )}
           </>
@@ -1199,8 +1249,8 @@ function JiraWorklogItem({
                 void saveEdit();
               }
             }}
-            placeholder="Time spent (e.g. 3h 30m)"
-            aria-label="Edit time spent"
+            placeholder={t("jiraView.timeSpentPlaceholder")}
+            aria-label={t("jiraView.editTimeSpent")}
             aria-invalid={durationTrimmed.length > 0 && !durationValid}
             disabled={saving}
           />
@@ -1219,19 +1269,18 @@ function JiraWorklogItem({
                 void saveEdit();
               }
             }}
-            placeholder="Note (optional)"
-            aria-label="Edit worklog note"
+            placeholder={t("jiraView.optionalNote")}
+            aria-label={t("jiraView.editWorklogNote")}
             disabled={saving}
           />
           {durationTrimmed.length > 0 && !durationValid && (
             <p className="text-[11px] text-destructive">
-              Enter a Jira duration like 3h 30m or 1d.
+              {t("jiraView.durationHelp")}
             </p>
           )}
           {noteRemoved && (
             <p className="text-[11px] text-destructive">
-              A note can't be removed once set — replace it, or delete this
-              entry and log again.
+              {t("jiraView.noteCannotRemove")}
             </p>
           )}
           <div className="flex items-center gap-2">
@@ -1242,7 +1291,7 @@ function JiraWorklogItem({
               reason={savingReason}
               onClick={() => void saveEdit()}
             >
-              Save
+              {t("jiraView.save")}
             </DisabledReasonButton>
             <DisabledReasonButton
               size="xs"
@@ -1251,7 +1300,7 @@ function JiraWorklogItem({
               reason={savingReason}
               onClick={() => setEditing(false)}
             >
-              Cancel
+              {t("jiraView.cancel")}
             </DisabledReasonButton>
           </div>
         </div>
@@ -1261,13 +1310,13 @@ function JiraWorklogItem({
       <ConfirmDialog
         open={confirmDelete}
         onCancel={() => setConfirmDelete(false)}
-        title="Delete worklog?"
+        title={t("jiraView.deleteWorklogTitle")}
         body={
           isOwn
-            ? "This permanently deletes your logged work on this Jira issue and restores the remaining estimate. This cannot be undone."
-            : "This permanently deletes this logged work on this Jira issue and restores the remaining estimate. This cannot be undone."
+            ? t("jiraView.deleteOwnWorklogBody")
+            : t("jiraView.deleteWorklogBody")
         }
-        confirmLabel="Delete worklog"
+        confirmLabel={t("jiraView.deleteWorklogConfirm")}
         confirmVariant="destructive"
         pending={deleteHold !== undefined}
         paused={deleteHold?.paused ?? false}
@@ -1322,6 +1371,7 @@ export function JiraTimeTrackingSection({
    *  work and the estimate editors address `issueKey` alone and stay live. */
   stale?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const logWork = useJiraLogWork(repoPath, link);
   const setOriginal = useJiraSetOriginalEstimate(repoPath, link);
   const setRemaining = useJiraSetRemainingEstimate(repoPath, link);
@@ -1331,7 +1381,9 @@ export function JiraTimeTrackingSection({
   const logHold = jiraHold(jiraWrites, "log-work", issueKey);
   const logging = logHold !== undefined;
   const loggingReason = logHold
-    ? pendingWriteReason(logHold.paused, ACT_PENDING_REASON)
+    ? logHold.paused
+      ? t("shared.offlineQueued")
+      : t("jiraView.loggingWork")
     : undefined;
   const originalHold = jiraHold(jiraWrites, "set-original-estimate", issueKey);
   const remainingHold = jiraHold(
@@ -1381,26 +1433,38 @@ export function JiraTimeTrackingSection({
     }
     setLogDuration("");
     setLogNote("");
-    toast.success(`Logged ${logTrimmed} on ${issueKey}`);
+    toast.success(t("jiraView.loggedWork", {
+      duration: logTrimmed,
+      key: issueKey,
+    }));
   }
 
   return (
-    <section className="space-y-2" aria-label="Time tracking">
+    <section
+      className="space-y-2"
+      aria-label={t("jiraView.timeTracking")}
+    >
       <p className="text-[11px] font-medium text-muted-foreground">
-        Time tracking
+        {t("jiraView.timeTracking")}
       </p>
       {/* Display (always) — not permission-gated, unlike every block below. */}
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">Original</span>
+          <span className="text-muted-foreground">
+            {t("jiraView.original")}
+          </span>
           <span className="tabular-nums">{originalStr ?? "—"}</span>
         </div>
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">Remaining</span>
+          <span className="text-muted-foreground">
+            {t("jiraView.remaining")}
+          </span>
           <span className="tabular-nums">{remainingStr ?? "—"}</span>
         </div>
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">Spent</span>
+          <span className="text-muted-foreground">
+            {t("jiraView.spent")}
+          </span>
           <span className={cn("tabular-nums", overSpent && "text-warning")}>
             {spentStr ?? "—"}
           </span>
@@ -1409,7 +1473,10 @@ export function JiraTimeTrackingSection({
           <div
             className="h-1 w-full bg-muted"
             aria-hidden
-            title={`${spentStr} of ${originalStr}`}
+            title={t("jiraView.progressTitle", {
+              spent: spentStr,
+              estimate: originalStr,
+            })}
           >
             <div
               className={cn(
@@ -1422,11 +1489,13 @@ export function JiraTimeTrackingSection({
         )}
         {overSpent && (
           <p className="text-[11px] text-warning">
-            {formatHmDelta(spentSeconds - originalSeconds)} over
+            {formatHmDelta(spentSeconds - originalSeconds)} {t("jiraView.over")}
           </p>
         )}
         {originalSeconds === 0 && spentSeconds === 0 && (
-          <p className="text-[11px] text-muted-foreground">No time tracked.</p>
+          <p className="text-[11px] text-muted-foreground">
+            {t("jiraView.noTimeTracked")}
+          </p>
         )}
       </div>
 
@@ -1443,8 +1512,8 @@ export function JiraTimeTrackingSection({
                 void submitLog();
               }
             }}
-            placeholder="Log work (e.g. 3h 30m)"
-            aria-label="Log work"
+            placeholder={t("jiraView.logWorkPlaceholder")}
+            aria-label={t("jiraView.logWork")}
             aria-invalid={logTrimmed.length > 0 && !logValid}
             disabled={logging}
           />
@@ -1458,13 +1527,13 @@ export function JiraTimeTrackingSection({
                 void submitLog();
               }
             }}
-            placeholder="Note (optional)"
-            aria-label="Worklog note"
+            placeholder={t("jiraView.optionalNote")}
+            aria-label={t("jiraView.worklogNote")}
             disabled={logging}
           />
           {logTrimmed.length > 0 && !logValid && (
             <p className="text-[11px] text-destructive">
-              Enter a Jira duration like 3h 30m or 1d.
+              {t("jiraView.durationHelp")}
             </p>
           )}
           <DisabledReasonButton
@@ -1474,7 +1543,7 @@ export function JiraTimeTrackingSection({
             reason={loggingReason}
             onClick={() => void submitLog()}
           >
-            Log
+            {t("jiraView.log")}
           </DisabledReasonButton>
         </div>
       )}
@@ -1484,8 +1553,8 @@ export function JiraTimeTrackingSection({
       {canEditEstimates && (
         <div className="space-y-1.5 pt-0.5">
           <JiraEstimateInput
-            label="Set original estimate"
-            placeholder="Original estimate (e.g. 2d)"
+            label={t("jiraView.setOriginalEstimate")}
+            placeholder={t("jiraView.originalEstimatePlaceholder")}
             currentDisplay={tracking.originalEstimate ?? ""}
             hasValue={originalSeconds > 0}
             pending={originalHold !== undefined}
@@ -1497,8 +1566,8 @@ export function JiraTimeTrackingSection({
             }
           />
           <JiraEstimateInput
-            label="Set remaining estimate"
-            placeholder="Remaining estimate (e.g. 1d)"
+            label={t("jiraView.setRemainingEstimate")}
+            placeholder={t("jiraView.remainingEstimatePlaceholder")}
             currentDisplay={tracking.remainingEstimate ?? ""}
             hasValue={(tracking.remainingEstimateSeconds ?? 0) > 0}
             pending={remainingHold !== undefined}
@@ -1539,7 +1608,7 @@ export function JiraTimeTrackingSection({
               className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
             >
               <ArrowSquareOutIcon className="size-3 shrink-0" />
-              View all {worklogsTotal} in Jira
+              {t("jiraView.viewAllWorklogs", { count: worklogsTotal })}
             </button>
           )}
         </div>
@@ -1574,6 +1643,7 @@ function JiraEstimateInput({
   paused: boolean;
   onSet: (estimate: string | null) => void;
 }) {
+  const { t } = useTranslation("issues");
   // Local invalid flag so the warning renders while the field is focused (the
   // input itself stays uncontrolled).
   const [invalid, setInvalid] = useState(false);
@@ -1626,19 +1696,19 @@ function JiraEstimateInput({
             size="xs"
             className="text-muted-foreground"
             disabled={pending}
-            reason={pendingWriteReason(paused, ACT_PENDING_REASON)}
+            reason={paused ? t("shared.offlineQueued") : t("shared.applying")}
             onClick={() => {
               setInvalid(false);
               onSet(null);
             }}
           >
-            Clear
+            {t("jiraView.clear")}
           </DisabledReasonButton>
         )}
       </div>
       {invalid && (
         <p className="text-[11px] text-destructive">
-          Enter a Jira duration like 3h 30m or 1d.
+          {t("jiraView.durationHelp")}
         </p>
       )}
     </div>
@@ -1660,6 +1730,8 @@ export function JiraIssueView({
   repoPath: string;
   issueKey: string;
 }) {
+  const { t } = useTranslation("issues");
+  const issueSwitchReason = t(ISSUE_SWITCH_LOADING_REASON_KEY);
   const link = useJiraLink(repoPath);
   const selectIssue = useUiStore((s) => s.selectIssue);
   const selectedIssue = useUiStore((s) => s.selectedIssue);
@@ -1726,10 +1798,10 @@ export function JiraIssueView({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="max-w-sm text-xs text-muted-foreground">
-          This repository is no longer linked to a Jira project.
+          {t("jiraView.notLinked")}
         </p>
         <Button variant="outline" size="sm" onClick={() => selectIssue(null)}>
-          Back to issues
+          {t("jiraView.backToIssues")}
         </Button>
       </div>
     );
@@ -1756,11 +1828,11 @@ export function JiraIssueView({
   }
   if (pane === "offline") {
     return (
-      <DiffPlaceholder message={offlinePendingMessage("this Jira issue")} />
+      <DiffPlaceholder message={t("remote.offlineIssueLoading")} />
     );
   }
   if (!details.data) {
-    return <DiffPlaceholder message="Could not load this Jira issue" />;
+    return <DiffPlaceholder message={t("jiraView.couldNotLoadIssue")} />;
   }
 
   const issue: JiraIssueDetails = details.data;
@@ -1775,23 +1847,22 @@ export function JiraIssueView({
   // Retained content says why it may be out of date: a failed refresh with its
   // Retry, or a parked one (no Retry, which would only park again).
   const detailFailed = refreshFailed(details);
-  const detailNotice = detailNoticeMessage({
-    noun: "Jira issue",
-    isError: detailFailed,
-    stale: detailsStale,
-  });
+  const detailNotice = detailFailed
+    ? t("jiraView.refreshIssueFailed")
+    : detailsStale
+      ? t("jiraView.offlinePreviousIssue")
+      : t("jiraView.offlineLastLoaded");
   // Which hold the composer names, ranked: the switch window outranks a write the
   // viewer started, being the hold they can't have caused themselves. A comment
   // pressed offline is parked, not running, until the connection returns.
   const composerReason = (() => {
     switch (true) {
       case detailsStale:
-        return ISSUE_SWITCH_LOADING_REASON;
+        return issueSwitchReason;
       case commenting !== undefined:
-        return pendingWriteReason(
-          commenting.paused,
-          COMMENT_POST_PENDING_REASON,
-        );
+        return commenting.paused
+          ? t("shared.offlineQueued")
+          : t("remote.postingComment");
       default:
         return undefined;
     }
@@ -1801,19 +1872,19 @@ export function JiraIssueView({
   const transitionReason = (() => {
     switch (true) {
       case detailsStale:
-        return ISSUE_SWITCH_LOADING_REASON;
+        return issueSwitchReason;
       case transitioning !== undefined:
-        return pendingWriteReason(transitioning.paused, "Changing the status…");
+        return transitioning.paused
+          ? t("shared.offlineQueued")
+          : t("jiraView.changingStatus");
       case transitioningTo !== undefined:
-        return pendingWriteReason(
-          transitioningTo.paused,
-          "Changing the status…",
-        );
+        return transitioningTo.paused
+          ? t("shared.offlineQueued")
+          : t("jiraView.changingStatus");
       case commenting !== undefined:
-        return pendingWriteReason(
-          commenting.paused,
-          COMMENT_POST_PENDING_REASON,
-        );
+        return commenting.paused
+          ? t("shared.offlineQueued")
+          : t("remote.postingComment");
       default:
         return offlineHold;
     }
@@ -1843,8 +1914,11 @@ export function JiraIssueView({
     }
     toast.success(
       direction === "close"
-        ? `Closed ${issueKey} · ${result.statusName}`
-        : `Reopened ${issueKey} · ${result.statusName}`,
+        ? t("jiraView.closed", { key: issueKey, status: result.statusName })
+        : t("jiraView.reopened", {
+            key: issueKey,
+            status: result.statusName,
+          }),
     );
   }
 
@@ -1854,7 +1928,7 @@ export function JiraIssueView({
       aria-busy={Boolean(staleDim)}
     >
       <DegradedListNotice
-        noun="this Jira issue"
+        noun={t("jiraView.noun")}
         degraded={pane === "content-degraded"}
         message={detailNotice}
         onRetry={detailFailed ? () => void details.refetch() : undefined}
@@ -1892,10 +1966,10 @@ export function JiraIssueView({
                 disabled={transitionReason !== undefined}
                 reason={transitionReason}
                 onClick={() => void doTransition("reopen")}
-                title="Reopen this issue"
+                title={t("jiraView.reopenIssue")}
               >
                 <ArrowCounterClockwiseIcon data-icon="inline-start" />
-                Reopen
+                {t("shared.reopen")}
               </DisabledReasonButton>
             ) : (
               <DisabledReasonButton
@@ -1904,10 +1978,10 @@ export function JiraIssueView({
                 disabled={transitionReason !== undefined}
                 reason={transitionReason}
                 onClick={() => void doTransition("close")}
-                title="Close this issue"
+                title={t("jiraView.closeIssue")}
               >
                 <CheckCircleIcon data-icon="inline-start" />
-                Close
+                {t("jiraView.close")}
               </DisabledReasonButton>
             ))}
           <Button
@@ -1915,7 +1989,7 @@ export function JiraIssueView({
             size="xs"
             className="cursor-pointer"
             onClick={() => openUrl(browseUrl)}
-            title="Open this issue in Jira"
+            title={t("jiraView.openInJira")}
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
             Jira
@@ -1952,7 +2026,7 @@ export function JiraIssueView({
           )}
           {parseableDate(issue.createdAt) && (
             <span>
-              · opened <RelativeTime date={issue.createdAt} />
+              · {t("remote.opened")} <RelativeTime date={issue.createdAt} />
             </span>
           )}
         </div>
@@ -1972,7 +2046,7 @@ export function JiraIssueView({
                   <Markdown>{issue.descriptionMd}</Markdown>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">
-                    No description provided.
+                    {t("jiraView.noDescription")}
                   </p>
                 )}
               </div>
@@ -2000,7 +2074,7 @@ export function JiraIssueView({
               ))}
               {issue.comments.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  No comments yet.
+                    {t("jiraView.noComments")}
                 </p>
               )}
             </div>
@@ -2035,13 +2109,13 @@ export function JiraIssueView({
       {canComment && (
         <CommentComposer
           ref={composerRef}
-          ariaLabel="Leave a comment"
-          placeholder="Leave a comment…"
+          ariaLabel={t("jiraView.leaveComment")}
+          placeholder={t("jiraView.leaveCommentPlaceholder")}
           value={compose.value}
           onChange={compose.set}
           onSubmit={submitComment}
           onClear={() => compose.set("")}
-          submitLabel="Comment"
+          submitLabel={t("shared.comment")}
           // A placeholder issue is the previously selected one, so submitting
           // would comment on it; typing stays live through the window.
           busy={commenting !== undefined || detailsStale}

@@ -1,4 +1,5 @@
 import { InfoIcon, SparkleIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { DiffStatSlot } from "@/components/diff-stat";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { PathText } from "@/components/path-text";
@@ -38,6 +39,7 @@ import { useCommitSubmit } from "./useCommitSubmit";
  * here is read-only.
  */
 export function CommitDialog({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("commit");
   const open = useUiStore((s) => s.commitDialogOpen);
   const closeCommitDialog = useUiStore((s) => s.closeCommitDialog);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -97,8 +99,8 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
   }
 
   const emptyStagedNote = amending
-    ? "Nothing staged — this rewrites the last commit's message only."
-    : "Nothing staged — stage files in the Changes panel.";
+    ? t("staged.emptyAmend")
+    : t("staged.empty");
 
   return (
     <Dialog
@@ -109,10 +111,9 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
     >
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Commit</DialogTitle>
+          <DialogTitle>{t("dialog.title")}</DialogTitle>
           <DialogDescription>
-            Compose the message with more room. Staging stays in the Changes
-            panel.
+            {t("dialog.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -121,9 +122,8 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
             <p className="flex items-start gap-2">
               <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
               <span className="flex-1">
-                <span className="font-medium">{branchName}</span> requires
-                changes via a pull request — direct commits are blocked by a
-                branch rule.
+                <span className="font-medium">{branchName}</span>{" "}
+                {t("blocked.directCommit")}
               </span>
             </p>
           </div>
@@ -139,9 +139,9 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
                   className="font-medium underline underline-offset-2 hover:no-underline"
                   onClick={stopAmending}
                 >
-                  Stop amending
+                  {t("amend.stop")}
                 </button>{" "}
-                to commit them separately instead.
+                {t("amend.separate")}
               </span>
             </p>
           </div>
@@ -151,7 +151,7 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
           <div className="relative">
             <Input
               autoFocus
-              placeholder="Commit title"
+              placeholder={t("fields.title")}
               value={title}
               onChange={(e) => setCommitTitle(e.target.value)}
               disabled={generating}
@@ -170,7 +170,7 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
             </span>
           </div>
           <Textarea
-            placeholder="Description (optional)"
+            placeholder={t("fields.descriptionOptional")}
             value={body}
             onChange={(e) => setCommitBody(e.target.value)}
             disabled={generating}
@@ -187,7 +187,7 @@ export function CommitDialog({ repoPath }: { repoPath: string }) {
 
         <div className="flex min-h-0 flex-1 flex-col gap-1.5">
           <h3 className="text-xs font-medium text-muted-foreground">
-            Staged ({stagedCount})
+            {t("staged.title", { count: stagedCount })}
           </h3>
           {stagedCount > 0 ? (
             <ScrollArea className="min-h-0 flex-1 overflow-hidden border">
@@ -288,11 +288,12 @@ function GenerateButton({
   onCancel: () => void;
   onSetUpAi: () => void;
 }) {
+  const { t } = useTranslation("commit");
   if (generating) {
     return (
       <Button variant="outline" onClick={onCancel}>
         <Spinner data-icon="inline-start" />
-        Cancel
+        {t("actions.cancel")}
       </Button>
     );
   }
@@ -303,10 +304,10 @@ function GenerateButton({
       <Button
         variant="outline"
         onClick={onSetUpAi}
-        title="Connect an AI provider to generate commit messages"
+        title={t("ai.connectProvider")}
       >
         <SparkleIcon data-icon="inline-start" />
-        Set up AI
+      {t("ai.setup")}
       </Button>
     );
   }
@@ -314,18 +315,18 @@ function GenerateButton({
     <DisabledReasonButton
       variant="outline"
       disabled={stagedCount === 0}
-      reason="Stage changes to generate a commit message"
+      reason={t("ai.stageToGenerate")}
       // The chord is only offered while it would do something — a disabled
       // Generate's shortcut is dead too.
       title={
         stagedCount > 0
-          ? `Generate commit message with AI${hint}`
-          : "Generate commit message with AI"
+        ? `${t("ai.generateCommitMessage")}${hint}`
+        : t("ai.generateCommitMessage")
       }
       onClick={onGenerate}
     >
       <SparkleIcon data-icon="inline-start" />
-      Generate
+      {t("ai.generate")}
     </DisabledReasonButton>
   );
 }

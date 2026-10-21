@@ -48,6 +48,7 @@ import {
   stampSent,
   type TouchedEdit,
 } from "./touched-draft";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 const PATHS = ["/", "/docs"];
 
@@ -74,15 +75,17 @@ export function PagesSection({
   return (
     <RemoteFormSection
       query={pages}
-      noun="Pages settings"
+      noun={tr("Pages settings")}
       skeleton={
         <div className="min-w-0 space-y-3">
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-20 w-full" />
         </div>
       }
-      errorTitle="Couldn't load Pages."
-      errorHint="If this is a permissions error, managing Pages needs repo-admin access."
+      errorTitle={tr("Couldn't load Pages.")}
+      errorHint={tr(
+        "If this is a permissions error, managing Pages needs repo-admin access.",
+      )}
     >
       {(data) =>
         // `null` is a loaded answer: Pages isn't enabled.
@@ -128,7 +131,7 @@ function PagesDisabled({ repoPath }: { repoPath: string }) {
         branch: mode === "branch" ? branch : null,
         path: mode === "branch" ? path : null,
       });
-      toast.success("GitHub Pages enabled");
+      toast.success(tr("GitHub Pages enabled"));
     } catch (e) {
       toastError(e);
     }
@@ -137,10 +140,12 @@ function PagesDisabled({ repoPath }: { repoPath: string }) {
   return (
     <div className="min-w-0 space-y-3">
       <p className="text-xs text-muted-foreground">
-        GitHub Pages isn't enabled. Choose a source to publish your site.
+        {tr(
+          "GitHub Pages isn't enabled. Choose a source to publish your site.",
+        )}
       </p>
       <div className="space-y-1.5">
-        <Label htmlFor="pages-mode">Source</Label>
+        <Label htmlFor="pages-mode">{tr("Source")}</Label>
         <Select
           items={MODE_ITEMS}
           value={mode}
@@ -162,11 +167,11 @@ function PagesDisabled({ repoPath }: { repoPath: string }) {
       {mode === "branch" && (
         <div className="flex gap-2">
           <div className="space-y-1.5">
-            <Label htmlFor="pages-branch">Branch</Label>
+            <Label htmlFor="pages-branch">{tr("Branch")}</Label>
             <Select value={branch} onValueChange={(v) => v && setBranch(v)}>
               <SelectTrigger id="pages-branch" className="w-44">
                 <SelectValue
-                  placeholder="Pick a branch"
+                  placeholder={tr("Pick a branch")}
                   onMouseEnter={clipTitleFromText}
                 />
               </SelectTrigger>
@@ -180,7 +185,7 @@ function PagesDisabled({ repoPath }: { repoPath: string }) {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="pages-path">Folder</Label>
+            <Label htmlFor="pages-path">{tr("Folder")}</Label>
             <Select value={path} onValueChange={(v) => v && setPath(v)}>
               <SelectTrigger id="pages-path" className="w-28">
                 <SelectValue />
@@ -207,7 +212,7 @@ function PagesDisabled({ repoPath }: { repoPath: string }) {
         onClick={handleEnable}
       >
         {enable.isPending && <Spinner data-icon="inline-start" />}
-        Enable Pages
+        {tr("Enable Pages")}
       </DisabledReasonButton>
     </div>
   );
@@ -328,7 +333,7 @@ function PagesEnabled({
     try {
       await update.mutateAsync({ buildType: "legacy", branch, path });
       markSent(at, { branch, path });
-      toast.success("Source updated");
+      toast.success(tr("Source updated"));
     } catch (e) {
       toastError(e);
     }
@@ -339,7 +344,7 @@ function PagesEnabled({
     try {
       await update.mutateAsync({ cname });
       markSent(at, { cname });
-      toast.success(cname ? "Domain saved" : "Domain removed");
+      toast.success(tr(cname ? "Domain saved" : "Domain removed"));
     } catch (e) {
       toastError(e);
     }
@@ -348,7 +353,7 @@ function PagesEnabled({
   async function handleHttpsEnforced(v: boolean) {
     try {
       await update.mutateAsync({ httpsEnforced: v });
-      toast.success("Updated");
+      toast.success(tr("Updated"));
     } catch (e) {
       toastError(e);
     }
@@ -357,7 +362,7 @@ function PagesEnabled({
   async function handleDisable() {
     try {
       await disable.mutateAsync(undefined);
-      toast.success("GitHub Pages disabled");
+      toast.success(tr("GitHub Pages disabled"));
       setConfirmingDisable(false);
     } catch (e) {
       toastError(e);
@@ -378,7 +383,9 @@ function PagesEnabled({
               <ArrowSquareOutIcon className="size-3 shrink-0" />
             </button>
           ) : (
-            <p className="text-xs text-muted-foreground">Not built yet.</p>
+            <p className="text-xs text-muted-foreground">
+              {tr("Not built yet.")}
+            </p>
           )}
           <p className="text-[11px] text-muted-foreground">
             {isWorkflow ? "Built with GitHub Actions" : "Deploy from a branch"}
@@ -394,12 +401,12 @@ function PagesEnabled({
       </div>
 
       {!isWorkflow && (
-        <LabeledGroup label="Source" className="space-y-1.5">
+        <LabeledGroup label={tr("Source")} className="space-y-1.5">
           <div className="flex items-end gap-2">
             <Select value={branch} onValueChange={(v) => v && setBranch(v)}>
               <SelectTrigger className="w-44">
                 <SelectValue
-                  placeholder="Branch"
+                  placeholder={tr("Branch")}
                   onMouseEnter={clipTitleFromText}
                 />
               </SelectTrigger>
@@ -430,20 +437,20 @@ function PagesEnabled({
               reason={sourceHeldReason}
               onClick={handleUpdateSource}
             >
-              Update
+              {tr("Update")}
             </DisabledReasonButton>
           </div>
         </LabeledGroup>
       )}
 
       <div className="space-y-1.5">
-        <Label htmlFor="pages-cname">Custom domain</Label>
+        <Label htmlFor="pages-cname">{tr("Custom domain")}</Label>
         <div className="flex items-end gap-2">
           <Input
             id="pages-cname"
             value={cname}
             onChange={(e) => setCname(e.target.value)}
-            placeholder="www.example.com"
+            placeholder={tr("www.example.com")}
             className="max-w-xs font-mono"
             autoComplete="off"
             spellCheck={false}
@@ -459,11 +466,11 @@ function PagesEnabled({
             }
             onClick={handleSaveDomain}
           >
-            Save
+            {tr("Save")}
           </DisabledReasonButton>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          Point your DNS at GitHub Pages, then add the domain here.
+          {tr("Point your DNS at GitHub Pages, then add the domain here.")}
         </p>
       </div>
 
@@ -472,7 +479,7 @@ function PagesEnabled({
         title={heldSwitchReason(httpsHeld, update.isPending)}
       >
         <span>
-          Enforce HTTPS
+          {tr("Enforce HTTPS")}
           {/* Visual only: the switch's description carries the full reason,
               and as label text this would join the switch's name. */}
           {!certReady && (
@@ -498,9 +505,9 @@ function PagesEnabled({
       <div className="flex items-center justify-end gap-2 border-t pt-3">
         {confirmingDisable ? (
           <InlineConfirm
-            prompt="Take the site down?"
+            prompt={tr("Take the site down?")}
             promptClassName="mr-auto text-xs"
-            actLabel="Disable Pages"
+            actLabel={tr("Disable Pages")}
             pending={disable.isPending}
             heldReason={offlineReason}
             swapFocusRef={swapFocus()}
@@ -515,7 +522,7 @@ function PagesEnabled({
             className="text-destructive hover:text-destructive"
             onClick={() => setConfirmingDisable(true)}
           >
-            Disable Pages
+            {tr("Disable Pages")}
           </Button>
         )}
       </div>

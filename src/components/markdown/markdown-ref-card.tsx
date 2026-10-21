@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { isUserDismissal } from "@/components/panel-portal";
 import { RelativeTime } from "@/components/relative-time";
@@ -286,6 +287,7 @@ function RefUserCard({
   lens: RemoteLens;
   login: string;
 }) {
+  const { t } = useTranslation("components");
   const ghHost = useForgeGhHost(repoPath);
   // Whatever the pickers have already fetched, read through the same hook they
   // use so the card repaints if the list lands under it — disabled, because a
@@ -304,7 +306,7 @@ function RefUserCard({
       />
       <div className="min-w-0">
         <p className="truncate font-medium">@{login}</p>
-        <p className="text-muted-foreground">Opens profile in browser</p>
+        <p className="text-muted-foreground">{t("reference.openProfileInBrowser")}</p>
       </div>
     </div>
   );
@@ -323,6 +325,7 @@ function RefCardBody({
   /** `undefined` while the reference is still resolving, `null` once it failed. */
   item: RefItem | null | undefined;
 }) {
+  const { t } = useTranslation("components");
   if (!target) return null;
   if (target.kind === "external")
     return <MarkdownLinkCard href={target.href} />;
@@ -348,12 +351,37 @@ function RefCardBody({
   const noun = target.kind === "mr" ? "merge request" : "pull request";
   if (item === undefined) return <RefCardSkeleton />;
   if (item === null) {
-    return <p className="text-muted-foreground">{`Couldn't load ${label}`}</p>;
+    return <p className="text-muted-foreground">{t("reference.loadError", { reference: label })}</p>;
   }
   const pill: StatePill =
     item.flavor === "pr"
       ? prPill(item.state, item.isDraft, noun)
       : (ISSUE_PILL[item.state] ?? neutralIssuePill(item.state));
+  const kindLabel = t(noun === "merge request" ? "reference.mergeRequest" : "reference.pullRequest");
+  const stateWord = item.flavor === "issue"
+    ? item.state === "OPEN"
+      ? t("reference.openIssue")
+      : item.state === "CLOSED"
+        ? t("reference.closedIssue")
+        : t("reference.unknownIssue", { state: item.state })
+    : item.isDraft
+      ? t("reference.draftPullRequest", { noun: kindLabel })
+      : item.state === "OPEN"
+        ? t("reference.openPullRequest", { noun: kindLabel })
+        : item.state === "MERGED"
+          ? t("reference.mergedPullRequest", { noun: kindLabel })
+          : item.state === "CLOSED"
+            ? t("reference.closedPullRequest", { noun: kindLabel })
+            : t("reference.unknownPullRequest", { state: item.state, noun: kindLabel });
+  const visibleState = item.isDraft
+    ? t("reference.draft")
+    : item.state === "OPEN"
+      ? t("reference.open")
+      : item.state === "MERGED"
+        ? t("reference.merged")
+        : item.state === "CLOSED"
+          ? t("reference.closed")
+          : item.state.toLowerCase();
   const { createdAt } = item;
   return (
     <div className="flex flex-col gap-1.5">
@@ -361,9 +389,9 @@ function RefCardBody({
         <pill.Icon className={cn("size-3.5 shrink-0", pill.tone)} />
         {/* The kind rides only here: the visible word names the state alone, so
             it is hidden from a reader rather than announced twice. */}
-        <span className="sr-only">{`${pill.word} `}</span>
+        <span className="sr-only">{`${stateWord} `}</span>
         <span className="capitalize" aria-hidden="true">
-          {item.isDraft ? "draft" : item.state.toLowerCase()}
+          {visibleState}
         </span>
         <span className="text-muted-foreground tabular-nums">{label}</span>
       </p>

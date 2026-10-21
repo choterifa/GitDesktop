@@ -2,6 +2,7 @@ import { CheckCircleIcon, LinkBreakIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL_X_HIDDEN } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -75,6 +76,7 @@ export function RepoJiraDialog({
   onOpenChange: (open: boolean) => void;
   existingLink: JiraLink | null;
 }) {
+  const { t } = useTranslation("issues");
   const save = useSaveJiraLink(repoPath);
   const clear = useClearJiraLink(repoPath);
   const bbAccount = useQuery({
@@ -209,18 +211,18 @@ export function RepoJiraDialog({
     siteHost.length > 0 && email.trim().length > 0 && token.trim().length > 0;
   const validateReason =
     siteHost.length === 0
-      ? "Enter your Jira site host"
+      ? t("repoJira.enterSite")
       : email.trim().length === 0
-        ? "Enter your Atlassian account email"
+        ? t("repoJira.enterEmail")
         : token.trim().length === 0
-          ? "Paste an Atlassian API token"
+          ? t("repoJira.enterToken")
           : null;
 
   const canSave = connected && !!project && project.key.length > 0;
   const saveReason = !connected
-    ? "Connect to your Jira site first"
+    ? t("repoJira.connectFirst")
     : !project
-      ? "Pick a project to link"
+      ? t("repoJira.pickProject")
       : null;
 
   const dirty =
@@ -240,7 +242,7 @@ export function RepoJiraDialog({
       toastError(e);
       return;
     }
-    toast.success(`Linked ${project.key}`);
+    toast.success(t("repoJira.linkedToast", { key: project.key }));
     onOpenChange(false);
   }
 
@@ -251,7 +253,7 @@ export function RepoJiraDialog({
       toastError(e);
       return;
     }
-    toast.success("Jira project unlinked");
+    toast.success(t("repoJira.unlinkedToast"));
     onOpenChange(false);
   }
 
@@ -265,19 +267,19 @@ export function RepoJiraDialog({
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {existingLink ? "Jira project" : "Link Jira project"}
+            {existingLink
+              ? t("repoJira.projectTitle")
+              : t("repoJira.linkProjectTitle")}
           </DialogTitle>
           <DialogDescription>
-            Browse a Jira Cloud project's issues alongside this repository. The
-            link is stored on this device — it changes nothing on your Jira
-            site.
+            {t("repoJira.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className={cn(DIALOG_SCROLL_X_HIDDEN, "min-h-0 flex-1 space-y-4")}>
           {/* ── Connect ─────────────────────────────────────────────────── */}
           <div className="space-y-2">
-            <Label htmlFor="jira-site">Jira site</Label>
+            <Label htmlFor="jira-site">{t("repoJira.site")}</Label>
             <Input
               id="jira-site"
               value={siteInput}
@@ -309,7 +311,9 @@ export function RepoJiraDialog({
               )}
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">
-                  Connected as {summaryAccount.displayName}
+                  {t("repoJira.connectedAsName", {
+                    name: summaryAccount.displayName,
+                  })}
                 </p>
               </div>
               <Button
@@ -317,7 +321,7 @@ export function RepoJiraDialog({
                 size="xs"
                 onClick={useDifferentCredentials}
               >
-                Use different credentials
+                {t("repoJira.changeCredentials")}
               </Button>
             </div>
           ) : (
@@ -332,35 +336,37 @@ export function RepoJiraDialog({
                       onClick={validateFromBitbucket}
                     >
                       {validating && <Spinner data-icon="inline-start" />}
-                      Use your Bitbucket credentials
+                      {t("repoJira.useBitbucketCredentials")}
                     </Button>
                     <p className="text-[11px] text-muted-foreground">
-                      Reuses the Atlassian token you connected to Bitbucket (
-                      {bbAccount.data?.email}) to check access to {siteHost}. It
-                      may not carry Jira scopes — if it fails, enter a Jira
-                      token below.
+                      {t("repoJira.reuseToken", {
+                        account: bbAccount.data?.email,
+                        site: siteHost,
+                      })}
                     </p>
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="jira-email">Atlassian account email</Label>
+                  <Label htmlFor="jira-email">
+                    {t("repoJira.email")}
+                  </Label>
                   <Input
                     id="jira-email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
+                    placeholder={t("repoJira.emailPlaceholder")}
                     autoComplete="off"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="jira-token">API token</Label>
+                  <Label htmlFor="jira-token">{t("repoJira.apiToken")}</Label>
                   <Input
                     id="jira-token"
                     type="password"
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
-                    placeholder="Paste your Atlassian API token"
+                    placeholder={t("repoJira.tokenPlaceholder")}
                     autoComplete="off"
                   />
                 </div>
@@ -374,7 +380,7 @@ export function RepoJiraDialog({
                     onClick={validate}
                   >
                     {validating && <Spinner data-icon="inline-start" />}
-                    Validate &amp; save
+                    {t("repoJira.validateSave")}
                   </DisabledReasonButton>
                   {validateReason && (
                     <span className="text-xs text-warning">
@@ -383,14 +389,15 @@ export function RepoJiraDialog({
                   )}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  A successful validation stores this credential in your OS
-                  keychain for {siteHost || "this site"}. Create a token at{" "}
+                  {t("repoJira.keychainNotice", {
+                    account: siteHost || t("repoJira.thisSite"),
+                  })}{" "}
                   <button
                     type="button"
                     className="cursor-pointer underline underline-offset-2"
                     onClick={() => openUrl(ATLASSIAN_TOKEN_URL)}
                   >
-                    id.atlassian.com
+                    {t("repoJira.tokenSite")}
                   </button>
                   .
                 </p>
@@ -403,7 +410,7 @@ export function RepoJiraDialog({
 
           {/* ── Project ─────────────────────────────────────────────────── */}
           <div className="space-y-2">
-            <Label htmlFor={projectInputId}>Project</Label>
+            <Label htmlFor={projectInputId}>{t("repoJira.project")}</Label>
             <Combobox
               items={projectSearch.data ?? []}
               itemToStringLabel={(p: JiraProject) => `${p.key} · ${p.name}`}
@@ -418,18 +425,18 @@ export function RepoJiraDialog({
                 className="w-full"
                 placeholder={
                   connected
-                    ? "Search projects by key or name"
-                    : "Connect to your Jira site first"
+                    ? t("repoJira.searchProjects")
+                    : t("repoJira.connectFirst")
                 }
                 disabled={!connected}
               />
               <ComboboxContent>
                 <ComboboxEmpty>
                   {projectSearch.isFetching
-                    ? "Searching…"
+                    ? t("repoJira.searching")
                     : projectSearch.isError
-                      ? "Couldn't search projects — your Jira connection may have expired. Reconnect and try again."
-                      : "No matching projects."}
+                      ? t("repoJira.searchFailed")
+                      : t("repoJira.noMatchingProjects")}
                 </ComboboxEmpty>
                 <ComboboxList>
                   {(item: JiraProject) => (
@@ -445,7 +452,7 @@ export function RepoJiraDialog({
             </Combobox>
             {project && (
               <p className="text-[11px] text-muted-foreground">
-                Linking{" "}
+                {t("repoJira.linking")}{" "}
                 <span className="font-mono text-foreground">{project.key}</span>
                 {project.name ? ` — ${project.name}` : ""}.
               </p>
@@ -461,28 +468,28 @@ export function RepoJiraDialog({
               className="mr-auto text-destructive"
               disabled={clear.isPending}
               onClick={() => void doUnlink()}
-              title="Remove this repository's Jira link (keeps your saved credential)"
+              title={t("repoJira.removeLinkTitle")}
             >
               <LinkBreakIcon data-icon="inline-start" />
-              Unlink project
+              {t("repoJira.unlinkProject")}
             </Button>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("repoJira.cancel")}
           </Button>
           <DisabledReasonButton
             disabled={!canSave || !dirty || save.isPending}
             reason={
               saveReason ??
               (save.isPending
-                ? "Saving…"
+                ? t("repoJira.saving")
                 : dirty
                   ? undefined
-                  : "No changes to save")
+                  : t("repoJira.noChangesToSave"))
             }
             onClick={() => void doSave()}
           >
-            Save
+            {t("repoJira.save")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

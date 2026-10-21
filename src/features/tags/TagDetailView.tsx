@@ -7,6 +7,7 @@ import {
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -30,17 +31,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useMentionCandidates } from "@/features/conversations/useMentionCandidates";
-import {
-  checkoutDetachedConfirm,
-  checkoutTagSuccessToast,
-} from "@/features/history/commit-confirms";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { checkoutDetachedConfirm } from "@/features/history/commit-confirms";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { formatBytes } from "@/features/repository/insights/primitives";
 import { presentError } from "@/lib/error-summary";
 import { UPDATER_MANIFEST_NAME } from "@/lib/git/api";
 import {
   forgeFeatureReady,
-  forgeProbeReason,
   forgeProbeState,
   pendingWriteMatching,
   RELEASE_WRITES_FAMILY,
@@ -63,11 +60,9 @@ import {
   useSyncUpdaterNotes,
   useTagList,
   useUploadReleaseAsset,
-  writeAccessReason,
 } from "@/lib/git/queries";
 import { providerLabel } from "@/lib/git/types";
 import {
-  ACT_PENDING_REASON,
   isOfflineNow,
   pendingWriteReason,
   refuseWhileOffline,
@@ -83,10 +78,6 @@ import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn, PLACEHOLDER_FADE } from "@/lib/utils";
 import { CreateReleaseDialog } from "./CreateReleaseDialog";
 
-/** Every asset row's Delete holds while one row's delete runs (one shared
- *  mutation), so the line names the operation, not the pressed row's write. */
-const ASSET_DELETE_PENDING_REASON = "Deleting an asset…";
-
 export function TagDetailView({
   repoPath,
   tag,
@@ -94,6 +85,8 @@ export function TagDetailView({
   repoPath: string;
   tag: string;
 }) {
+  const { t } = useTranslation("tags");
+  const { t: tHistory } = useTranslation("history");
   const gh = useForgeStatus(repoPath);
   // Release reads are provider-neutral; a tag with no release stays just a tag.
   const ghReady = forgeFeatureReady(gh.data, "releases");
@@ -109,12 +102,19 @@ export function TagDetailView({
   // Publishing a release is a repo write: an explicitly read-only viewer keeps
   // the buttons (disabled, with the reason). Releases are repo-wide — no lens.
   const writeAccess = useRepoWriteAccess(repoPath, undefined, !!provider);
-  const writeReason = writeAccessReason(writeAccess.data);
+  const writeReason =
+    writeAccess.data?.canPush === false
+      ? t("access.requiresWrite", {
+          repo: writeAccess.data.repo ?? t("access.thisRepository"),
+        })
+      : undefined;
   const writeBlocked = writeAccess.data?.canPush === false;
   // Remote release and tag writes hold offline rather than park — a parked publish,
   // delete or push lands whenever the connection returns, and a parked two-phase
   // save would latch the edit dialog open until then. Openers stay live.
-  const offlineHold = useOfflineHold();
+  const offlineHold = useOfflineHold()
+    ? t("states.offlineUnavailable")
+    : undefined;
   const remoteLabel = providerLabel(provider);
   // Release notes autolink the same `@`/`#`/`!` references a comment does.
   // Releases are repo-wide, so the candidate lists come off origin.
@@ -239,15 +239,18 @@ export function TagDetailView({
   const readReason = (() => {
     switch (true) {
       case probe !== null:
-        return forgeProbeReason(probe, "manage this release");
+        return t(
+          probe === "checking" ? "probe.checking" : "probe.unreachable",
+          { action: t("probe.actions.manageRelease") },
+        );
       case !ghReady && isGitLab && Boolean(gh.data?.installed):
-        return "Sign in with the GitLab CLI (glab) to manage this release.";
+        return t("detail.signInGitLabManage");
       case !ghReady && isGitLab:
-        return "Install the GitLab CLI (glab) to manage this release.";
+        return t("detail.installGitLabManage");
       case !ghReady:
-        return "Connect this repository to GitHub or GitLab to manage this release.";
+        return t("detail.connectForgeManage");
       case relStale:
-        return "Loading this tag's release…";
+        return t("detail.loadingTagRelease");
       default:
         return null;
     }
@@ -261,18 +264,21 @@ export function TagDetailView({
   // and fails live rather than parks if the connection drops under it. A hook
   // shared by several triggers (the asset rows' one delete) passes copy that
   // doesn't claim the write as each button's own.
-  const triggerReason = (pending: boolean, running = ACT_PENDING_REASON) =>
+  const triggerReason = (pending: boolean, running = t("states.applying")) =>
     pending ? running : writeHoldReason;
   const publishNote = (() => {
     switch (true) {
       case probe !== null:
-        return forgeProbeReason(probe, "publish a release for this tag");
+        return t(
+          probe === "checking" ? "probe.checking" : "probe.unreachable",
+          { action: t("probe.actions.publishTagRelease") },
+        );
       case isGitLab && Boolean(gh.data?.installed):
-        return "Sign in with the GitLab CLI (glab) to publish a release for this tag.";
+        return t("detail.signInGitLabPublish");
       case isGitLab:
-        return "Install the GitLab CLI (glab) to publish a release for this tag.";
+        return t("detail.installGitLabPublish");
       default:
-        return "Connect this repository to GitHub or GitLab to publish a release for this tag.";
+        return t("detail.connectForgePublish");
     }
   })();
 
@@ -293,11 +299,15 @@ export function TagDetailView({
   // callbacks once the observer loses listeners, and this whole view hides with
   // its <Activity> tab while a write is still in flight.
   async function onUpload() {
-    if (refuseWhileOffline()) return;
+    if (refuseWhileOffline(t("states.offlineUnavailable"))) return;
     const uploadIn = repoPath;
     const file = await openDialog({ multiple: false });
     // Again below the picker: the connection can drop while it is open.
-    if (typeof file !== "string" || refuseWhileOffline()) return;
+    if (
+      typeof file !== "string" ||
+      refuseWhileOffline(t("states.offlineUnavailable"))
+    )
+      return;
     if (refuseIfSwitched(uploadIn, "nothing was uploaded")) return;
     try {
       await uploadAsset.mutateAsync({ tag, filePath: file });
@@ -305,7 +315,7 @@ export function TagDetailView({
       onError(e);
       return;
     }
-    toast.success("Asset uploaded");
+    toast.success(t("toasts.assetUploaded"));
   }
 
   async function onDownload(assetName: string) {
@@ -322,7 +332,7 @@ export function TagDetailView({
       onError(e);
       return;
     }
-    toast.success(`Downloaded ${assetName}`);
+    toast.success(t("toasts.assetDownloaded", { name: assetName }));
   }
 
   // Shared by both provider arms, which differ in what is actually lost: GitHub's
@@ -333,16 +343,16 @@ export function TagDetailView({
     if (relStale) return;
     const deleteIn = repoPath;
     const ok = await useConfirm.getState().ask({
-      title: `Delete ${assetName}?`,
+      title: t("confirm.deleteAsset.title", { name: assetName }),
       body:
         kind === "asset"
-          ? "Removes this asset from the release. This cannot be undone."
-          : "Removes this link from the release.",
-      confirmLabel: "Delete",
+          ? t("confirm.deleteAsset.binaryBody")
+          : t("confirm.deleteAsset.linkBody"),
+      confirmLabel: t("common.delete"),
       confirmVariant: "destructive",
       holdOffline: true,
     });
-    if (!ok || refuseWhileOffline()) return;
+    if (!ok || refuseWhileOffline(t("states.offlineUnavailable"))) return;
     if (refuseIfSwitched(deleteIn, "nothing was deleted")) return;
     try {
       await deleteAsset.mutateAsync({ tag, assetName });
@@ -350,7 +360,7 @@ export function TagDetailView({
       onError(e);
       return;
     }
-    toast.success("Asset deleted");
+    toast.success(t("toasts.assetDeleted"));
   }
 
   // Checking out a tag detaches HEAD exactly as checking out its commit does, so
@@ -363,11 +373,11 @@ export function TagDetailView({
     const checkoutIn = repoPath;
     const ok = await useConfirm
       .getState()
-      .ask(checkoutDetachedConfirm("tag", tag));
+      .ask(checkoutDetachedConfirm("tag", tag, tHistory));
     if (!ok || refuseIfSwitched(checkoutIn, "nothing was checked out")) return;
     // Below the confirm: a promote can start while the prompt is open.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -376,18 +386,18 @@ export function TagDetailView({
       onError(e);
       return;
     }
-    toast.success(checkoutTagSuccessToast(tag));
+    toast.success(tHistory("toast.checkedOut", { name: tag }));
   }
 
   async function onPushTag() {
-    if (tagPush || refuseWhileOffline()) return;
+    if (tagPush || refuseWhileOffline(t("states.offlineUnavailable"))) return;
     try {
       await pushTag.mutateAsync(tag);
     } catch (e) {
       onError(e);
       return;
     }
-    toast.success(`Pushed ${tag}`);
+    toast.success(t("toasts.tagPushed", { name: tag }));
   }
 
   // `selectTag` is global — deselect only while THIS tag in THIS repo is still
@@ -400,7 +410,8 @@ export function TagDetailView({
 
   async function onDeleteTag() {
     // Only the remote arm is held: the local-only delete runs offline.
-    if (deleteTagRemote && refuseWhileOffline()) return;
+    if (deleteTagRemote && refuseWhileOffline(t("states.offlineUnavailable")))
+      return;
     const startedFor = tagKey;
     try {
       await (deleteTagRemote ? deleteTagOnOrigin : deleteLocalTag).mutateAsync(
@@ -411,7 +422,7 @@ export function TagDetailView({
       if (isLiveTag(startedFor)) setDeleteTagOpen(false);
       return;
     }
-    toast.success(`Deleted ${tag}`);
+    toast.success(t("toasts.tagDeleted", { name: tag }));
     if (isLiveTag(startedFor)) setDeleteTagOpen(false);
     deselectIfStillHere();
   }
@@ -435,7 +446,8 @@ export function TagDetailView({
     const onPublish = async () => {
       // `prerelease` rides the rendered release's flag, so a stale one would
       // really flip the new release's state on the forge.
-      if (relStale || refuseWhileOffline()) return;
+      if (relStale || refuseWhileOffline(t("states.offlineUnavailable")))
+        return;
       try {
         await editRelease.mutateAsync({
           tag,
@@ -453,13 +465,14 @@ export function TagDetailView({
         onError(e);
         return;
       }
-      toast.success("Published");
+      toast.success(t("toasts.releasePublished"));
     };
 
     const saveEdit = async () => {
       // `draft`/`latest` below are read off the rendered release at submit
       // time, so a switch behind the open dialog holds the save.
-      if (relStale || refuseWhileOffline()) return;
+      if (relStale || refuseWhileOffline(t("states.offlineUnavailable")))
+        return;
       // Empty notes leave the body untouched (the edit skips `--notes`), so
       // there's nothing to carry into the manifest either.
       const syncManifest =
@@ -501,7 +514,7 @@ export function TagDetailView({
       }
       if (!syncManifest) {
         disarm();
-        toast.success("Release updated");
+        toast.success(t("toasts.releaseUpdated"));
         close();
         return;
       }
@@ -513,15 +526,20 @@ export function TagDetailView({
         // would park, so it takes the partial-state path below instead. Nothing
         // retries it, so the line says how to.
         if (isOfflineNow())
-          throw new Error(
-            "You were offline, so the manifest wasn't uploaded. Save the release again once you're back online to update it.",
-          );
+          throw new Error(t("errors.offlineManifestNotUploaded"));
         // The upload builds from the live repo's options once the edit lands;
         // a switch or close during it takes the same partial-state path.
         const { live, away, closed } = landedIn(saveIn);
         if (!live)
           throw new Error(
-            `You ${closed ? "closed the repository" : "switched repositories"}, so the manifest wasn't uploaded${away}. Save the release again to update it.`,
+            t("errors.manifestNotUploadedAfterSwitch", {
+              action: t(
+                closed
+                  ? "errors.closedRepository"
+                  : "errors.switchedRepositories",
+              ),
+              away,
+            }),
           );
         await syncUpdaterNotes.mutateAsync({ tag, notes: editNotes.trim() });
       } catch (err) {
@@ -531,19 +549,19 @@ export function TagDetailView({
         // backend's own text (carried into Details by toastError) names the specifics.
         toastError(
           new Error(
-            `Release updated, but the updater manifest may not have been.\n\n${presentError(err).fullText}`,
+            `${t("errors.releaseUpdatedManifestMayBeMissing")}\n\n${presentError(err).fullText}`,
           ),
         );
         close();
         return;
       }
       disarm();
-      toast.success("Release updated");
+      toast.success(t("toasts.releaseUpdated"));
       close();
     };
 
     const onDeleteRelease = async () => {
-      if (refuseWhileOffline()) return;
+      if (refuseWhileOffline(t("states.offlineUnavailable"))) return;
       const startedFor = tagKey;
       try {
         await deleteRelease.mutateAsync({ tag, cleanupTag });
@@ -552,7 +570,7 @@ export function TagDetailView({
         if (isLiveTag(startedFor)) setDeleteOpen(false);
         return;
       }
-      toast.success("Release deleted");
+      toast.success(t("toasts.releaseDeleted"));
       if (isLiveTag(startedFor)) setDeleteOpen(false);
       deselectIfStillHere();
     };
@@ -580,7 +598,7 @@ export function TagDetailView({
                     reason={triggerReason(editPending)}
                     onClick={() => void onPublish()}
                   >
-                    Publish
+                    {t("detail.publish")}
                   </DisabledReasonButton>
                 )}
                 <DisabledReasonButton
@@ -602,7 +620,7 @@ export function TagDetailView({
                     setEditOpen(true);
                   }}
                 >
-                  Edit
+                  {t("detail.edit")}
                 </DisabledReasonButton>
                 <DisabledReasonButton
                   variant="outline"
@@ -614,7 +632,7 @@ export function TagDetailView({
                     setDeleteOpen(true);
                   }}
                 >
-                  Delete
+                  {t("common.delete")}
                 </DisabledReasonButton>
               </>
             )}
@@ -638,13 +656,17 @@ export function TagDetailView({
             )}
           >
             <span className="font-mono">{rel.tagName}</span>
-            {isLatest && <Badge variant="default">Latest</Badge>}
-            {rel.isPrerelease && <Badge variant="secondary">Pre-release</Badge>}
-            {rel.isDraft && <Badge variant="secondary">Draft</Badge>}
+            {isLatest && <Badge variant="default">{t("badges.latest")}</Badge>}
+            {rel.isPrerelease && (
+              <Badge variant="secondary">{t("badges.prerelease")}</Badge>
+            )}
+            {rel.isDraft && (
+              <Badge variant="secondary">{t("badges.draft")}</Badge>
+            )}
             {rel.author && <span>• {rel.author}</span>}
             {parseableDate(rel.publishedAt) && (
               <span>
-                • released <RelativeTime date={rel.publishedAt} />
+                • {t("detail.released")} <RelativeTime date={rel.publishedAt} />
               </span>
             )}
           </div>
@@ -657,14 +679,14 @@ export function TagDetailView({
               <Markdown refs={mentions.refs}>{rel.body}</Markdown>
             ) : (
               <p className="text-xs text-muted-foreground italic">
-                No release notes.
+                {t("detail.noReleaseNotes")}
               </p>
             )}
 
             <div className="space-y-1.5 border-t pt-3">
               <div className="flex items-center gap-2">
                 <h3 className="text-xs font-medium text-muted-foreground">
-                  Assets ({rel.assets.length})
+                  {t("detail.assetCount", { count: rel.assets.length })}
                 </h3>
                 <span className="flex-1" />
                 {/* GitHub attaches a binary; GitLab uploads + links the file. */}
@@ -683,13 +705,13 @@ export function TagDetailView({
                     ) : (
                       <UploadSimpleIcon data-icon="inline-start" />
                     )}
-                    Upload
+                    {t("detail.upload")}
                   </DisabledReasonButton>
                 )}
               </div>
               {rel.assets.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground">
-                  No assets attached.
+                  {t("detail.noAssets")}
                 </p>
               ) : (
                 rel.assets.map((a) => (
@@ -708,7 +730,9 @@ export function TagDetailView({
                         <DisabledReasonButton
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={`Download ${a.name}`}
+                          aria-label={t("detail.downloadAsset", {
+                            name: a.name,
+                          })}
                           disabled={relStale}
                           reason={readReason}
                           onClick={() => onDownload(a.name)}
@@ -718,7 +742,7 @@ export function TagDetailView({
                         <DisabledReasonButton
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={`Delete ${a.name}`}
+                          aria-label={t("detail.deleteAsset", { name: a.name })}
                           disabled={
                             deleteAssetPending ||
                             writeBlocked ||
@@ -727,7 +751,7 @@ export function TagDetailView({
                           }
                           reason={triggerReason(
                             deleteAssetPending,
-                            ASSET_DELETE_PENDING_REASON,
+                            t("states.deletingAsset"),
                           )}
                           className="text-muted-foreground"
                           onClick={() => onDeleteAsset(a.name, "asset")}
@@ -744,7 +768,7 @@ export function TagDetailView({
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            aria-label={`Open ${a.name}`}
+                            aria-label={t("detail.openAsset", { name: a.name })}
                             className="cursor-pointer"
                             onClick={() => openUrl(a.url)}
                           >
@@ -755,7 +779,9 @@ export function TagDetailView({
                           <DisabledReasonButton
                             variant="ghost"
                             size="icon-xs"
-                            aria-label={`Delete ${a.name}`}
+                            aria-label={t("detail.deleteAsset", {
+                              name: a.name,
+                            })}
                             disabled={
                               deleteAssetPending ||
                               writeBlocked ||
@@ -764,7 +790,7 @@ export function TagDetailView({
                             }
                             reason={triggerReason(
                               deleteAssetPending,
-                              ASSET_DELETE_PENDING_REASON,
+                              t("states.deletingAsset"),
                             )}
                             className="text-muted-foreground"
                             onClick={() => onDeleteAsset(a.name, "link")}
@@ -800,9 +826,9 @@ export function TagDetailView({
               }}
             >
               <DialogHeader>
-                <DialogTitle>Edit release</DialogTitle>
+                <DialogTitle>{t("detail.editRelease")}</DialogTitle>
                 <DialogDescription>
-                  Updates {tag} on {remoteLabel}.
+                  {t("detail.updatesTagOn", { tag, provider: remoteLabel })}
                 </DialogDescription>
               </DialogHeader>
               {/* Fields scroll; header and submit footer stay pinned. */}
@@ -815,14 +841,14 @@ export function TagDetailView({
                 <Input
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Title"
+                  placeholder={t("detail.titlePlaceholder")}
                 />
                 <div className="flex flex-1 flex-col">
                   <MarkdownEditor
-                    aria-label="Release notes"
+                    aria-label={t("detail.releaseNotes")}
                     value={editNotes}
                     onChange={setEditNotes}
-                    placeholder="Notes…"
+                    placeholder={t("detail.notesPlaceholder")}
                     fill
                     // No `rows`/`resize-y` in fill mode: the explicit floor plus
                     // `flex-1` set the height, and a manual drag fights the flex
@@ -839,7 +865,7 @@ export function TagDetailView({
                         checked={editPrerelease}
                         onCheckedChange={setEditPrerelease}
                       />
-                      Pre-release
+                      {t("badges.prerelease")}
                     </label>
                     {/* Latest applies only to published releases — GitHub sets it on
                         publish and ignores it on a draft. Disable + explain in visible
@@ -857,12 +883,11 @@ export function TagDetailView({
                           onCheckedChange={setEditLatest}
                           disabled={rel.isDraft}
                         />
-                        Latest release
+                        {t("detail.latestRelease")}
                       </label>
                       {rel.isDraft && (
                         <p className="text-muted-foreground text-[11px]">
-                          GitHub sets Latest when the release is published —
-                          this release will become Latest by default on publish.
+                          {t("detail.latestDraftExplanation")}
                         </p>
                       )}
                     </div>
@@ -884,11 +909,10 @@ export function TagDetailView({
                         disabled={savePending}
                         onCheckedChange={(c) => setEditSyncUpdater(c === true)}
                       />
-                      Also update the updater manifest (latest.json)
+                      {t("detail.updateUpdaterManifest")}
                     </label>
                     <p className="text-muted-foreground text-[11px]">
-                      Keeps the notes installed apps see on update in sync with
-                      this edit.
+                      {t("detail.updaterManifestExplanation")}
                     </p>
                   </div>
                 )}
@@ -903,7 +927,7 @@ export function TagDetailView({
                     setEditOpen(false);
                   }}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 {/* An in-flight save says so with the spinner, so only the
                     held arms carry a reason. */}
@@ -913,7 +937,7 @@ export function TagDetailView({
                   reason={savePending ? null : writeHoldReason}
                 >
                   {savePending && <Spinner data-icon="inline-start" />}
-                  Save
+                  {t("common.save")}
                 </DisabledReasonButton>
               </DialogFooter>
             </form>
@@ -925,9 +949,13 @@ export function TagDetailView({
             <DialogHeader>
               {/* Labelled from the `tag` PROP, which is also what the delete
                   targets — the rendered release can be the previous tag's. */}
-              <DialogTitle>Delete release {tag}?</DialogTitle>
+              <DialogTitle>
+                {t("confirm.deleteRelease.title", { name: tag })}
+              </DialogTitle>
               <DialogDescription>
-                Removes the {remoteLabel} release. This cannot be undone.
+                {t("confirm.deleteRelease.description", {
+                  provider: remoteLabel,
+                })}
               </DialogDescription>
             </DialogHeader>
             <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
@@ -935,11 +963,13 @@ export function TagDetailView({
                 checked={cleanupTag}
                 onCheckedChange={(c) => setCleanupTag(c === true)}
               />
-              Also delete the <span className="font-mono">{tag}</span> tag
+              {t("confirm.deleteRelease.cleanupTagBefore")}{" "}
+              <span className="font-mono">{tag}</span>{" "}
+              {t("confirm.deleteRelease.cleanupTagAfter")}
             </label>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <DisabledReasonButton
                 variant="destructive"
@@ -948,7 +978,7 @@ export function TagDetailView({
                 onClick={() => void onDeleteRelease()}
               >
                 {deleteReleasePending && <Spinner data-icon="inline-start" />}
-                Delete
+                {t("common.delete")}
               </DisabledReasonButton>
             </DialogFooter>
           </DialogContent>
@@ -972,12 +1002,14 @@ export function TagDetailView({
               reason={writeReason}
               onClick={() => setCreateReleaseOpen(true)}
             >
-              Create release
+              {t("detail.createRelease")}
             </DisabledReasonButton>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {tagInfo?.annotated && <Badge variant="secondary">annotated</Badge>}
+          {tagInfo?.annotated && (
+            <Badge variant="secondary">{t("detail.annotated")}</Badge>
+          )}
           {tagInfo?.target && (
             <span className="font-mono">{tagInfo.target.slice(0, 7)}</span>
           )}
@@ -993,7 +1025,7 @@ export function TagDetailView({
           <p className="text-sm">{tagInfo.subject}</p>
         ) : (
           <p className="text-xs text-muted-foreground italic">
-            No description for this tag.
+            {t("detail.noTagDescription")}
           </p>
         )}
         {!ghReady && (
@@ -1007,7 +1039,7 @@ export function TagDetailView({
           disabled={!tagInfo?.target || checkout.isPending}
           onClick={onCheckout}
         >
-          Checkout
+          {t("detail.checkout")}
         </Button>
         <DisabledReasonButton
           variant="outline"
@@ -1015,12 +1047,12 @@ export function TagDetailView({
           disabled={!!tagPush || !!offlineHold}
           reason={
             tagPush
-              ? pendingWriteReason(tagPush.paused, ACT_PENDING_REASON)
+              ? pendingWriteReason(tagPush.paused, t("states.applying"))
               : offlineHold
           }
           onClick={() => void onPushTag()}
         >
-          Push tag
+          {t("detail.pushTag")}
         </DisabledReasonButton>
         <span className="flex-1" />
         <Button
@@ -1031,7 +1063,7 @@ export function TagDetailView({
             setDeleteTagOpen(true);
           }}
         >
-          Delete tag
+          {t("detail.deleteTag")}
         </Button>
       </div>
 
@@ -1045,9 +1077,11 @@ export function TagDetailView({
       <Dialog open={deleteTagOpen} onOpenChange={setDeleteTagOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete tag {tag}?</DialogTitle>
+            <DialogTitle>
+              {t("confirm.deleteTag.title", { name: tag })}
+            </DialogTitle>
             <DialogDescription>
-              Deletes the local tag. This cannot be undone.
+              {t("confirm.deleteTag.description")}
             </DialogDescription>
           </DialogHeader>
           <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
@@ -1055,11 +1089,12 @@ export function TagDetailView({
               checked={deleteTagRemote}
               onCheckedChange={(c) => setDeleteTagRemote(c === true)}
             />
-            Also delete it from <span className="font-mono">origin</span>
+            {t("confirm.deleteTag.remoteBeforeOrigin")}{" "}
+            <span className="font-mono">origin</span>
           </label>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTagOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             {/* Held offline only while the remote arm is ticked; unticked, the
                 local delete runs offline. */}
@@ -1069,7 +1104,7 @@ export function TagDetailView({
               reason={(() => {
                 switch (true) {
                   case deleteTagPending:
-                    return ACT_PENDING_REASON;
+                    return t("states.applying");
                   case deleteTagRemote:
                     return offlineHold;
                   default:
@@ -1079,7 +1114,7 @@ export function TagDetailView({
               onClick={() => void onDeleteTag()}
             >
               {deleteTagPending && <Spinner data-icon="inline-start" />}
-              Delete
+              {t("common.delete")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>

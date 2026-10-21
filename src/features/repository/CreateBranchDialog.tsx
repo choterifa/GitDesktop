@@ -1,5 +1,6 @@
 import { useSelector } from "@tanstack/react-store";
 import { useEffectEvent, useId, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +33,7 @@ import {
   useHasBaseOptions,
   useSeedBase,
 } from "./BaseBranchCombobox";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 import {
   GenerateBranchNameButton,
   useBranchNameGenerateAction,
@@ -94,6 +95,7 @@ export function CreateBranchDialog({
   defaultName: string | null;
   onOpenSettings: (section: "ai") => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const createBranch = useCreateBranch(repoPath);
   const branchNameGen = useGenerateBranchName(repoPath);
   // The open session a create settles against: minted by the open seed, dropped
@@ -132,7 +134,7 @@ export function CreateBranchDialog({
     onSubmit: async ({ value }) => {
       // This create always checks the branch out, so it moves HEAD.
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(promotionBlocksCheckoutCopy());
         return;
       }
       // Hoisted out of the try: a `||` value block inside try/catch bails the
@@ -257,13 +259,13 @@ export function CreateBranchDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New branch</DialogTitle>
+            <DialogTitle>{t("createBranch.title")}</DialogTitle>
             <DialogDescription>
-              Branches from{" "}
+              {t("createBranch.descriptionStart")}{" "}
               <span className="font-mono wrap-break-word">
                 {createBase || "HEAD"}
               </span>{" "}
-              and switches to it.
+              {t("createBranch.descriptionEnd")}
             </DialogDescription>
           </DialogHeader>
           <createForm.AppField
@@ -277,7 +279,7 @@ export function CreateBranchDialog({
           >
             {(field) => (
               <field.TextField
-                label="Branch name"
+                label={t("createBranch.nameLabel")}
                 placeholder={namePlaceholder}
                 // Surface the branch-rules naming requirement (so a disabled
                 // Create button is explained), else the sanitization hint.
@@ -312,7 +314,9 @@ export function CreateBranchDialog({
             <createForm.AppField name="base">
               {(field) => (
                 <div className="space-y-2">
-                  <Label htmlFor={baseTriggerId}>Base it on</Label>
+                  <Label htmlFor={baseTriggerId}>
+                    {t("createBranch.baseLabel")}
+                  </Label>
                   <BaseBranchCombobox
                     repoPath={repoPath}
                     open={open}
@@ -331,11 +335,11 @@ export function CreateBranchDialog({
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={closeDialog}>
-              Cancel
+              {t("createBranch.cancel")}
             </Button>
             <createForm.AppForm>
               <createForm.SubmitButton disabled={branchNameGen.generating}>
-                Create branch
+                {t("createBranch.create")}
               </createForm.SubmitButton>
             </createForm.AppForm>
           </DialogFooter>

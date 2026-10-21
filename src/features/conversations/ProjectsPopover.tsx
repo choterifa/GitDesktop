@@ -30,6 +30,7 @@ import type {
   RemoteLens,
 } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useRovingRows } from "@/lib/list-keyboard-nav";
 import {
   pendingWriteReason,
@@ -37,10 +38,7 @@ import {
 } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { cn } from "@/lib/utils";
-import {
-  OFFLINE_ROWS_NOTICE,
-  offlinePendingMessage,
-} from "./remote-section-state";
+import { OFFLINE_ROWS_NOTICE } from "./remote-section-state";
 
 /** The two holds every Projects surface states the same way — exported beside
  *  {@link projectScopeReadOnly} for the same reason that predicate is: a claim
@@ -85,8 +83,13 @@ export function projectScopeReadOnly(scopes: GhScopes | undefined): boolean {
 
 /** A closed board still holds items, so its rows and chips stay — the state rides
  *  the label as words, never as a colour. */
-function projectLabel(project: ProjectV2Ref): string {
-  return project.closed ? `${project.title} (closed)` : project.title;
+function projectLabel(
+  project: ProjectV2Ref,
+  tx: ReturnType<typeof useCommonText>,
+): string {
+  return project.closed
+    ? tx("{{name}} (closed)", { name: project.title })
+    : project.title;
 }
 
 /**
@@ -132,6 +135,7 @@ export function ProjectsPopover({
    *  selection of its own (a create dialog) registers nothing. */
   paletteEnabled?: boolean;
 }) {
+  const tx = useCommonText();
   const host = useActiveGhHost();
   const scopes = useGhScopes(host);
   const openReconnect = useUiStore((s) => s.openReconnect);
@@ -165,6 +169,10 @@ export function ProjectsPopover({
     kind,
     number,
   });
+  const offlineProjects = () =>
+    tx("You're offline — {{subject}} will load once you're back online.", {
+      subject: tx("projects"),
+    });
   // Gated on `canRead` so a disabled query — the missing-scope path, whose whole
   // point is the popup's Reconnect button — can't hold the trigger shut forever.
   // An ERRORED read likewise mustn't hold it: the popup owns the Retry. A first
@@ -177,18 +185,20 @@ export function ProjectsPopover({
   const heldReason = (() => {
     switch (true) {
       case disabledReason !== undefined:
-        return disabledReason;
+        return tx(disabledReason);
       // No second edit may be drafted while one is in flight: the cache still
       // holds `pending:` placeholders, and unlinking one has no item id to
       // address. The mutation's `onSettled` returns its invalidate promise, so
       // this hold spans the settle REFETCH too — the placeholders are always
       // gone by the time it frees.
       case editWrite.pending:
-        return pendingWriteReason(editWrite.paused, SAVING_LAST_CHANGE_REASON);
+        return tx(
+          pendingWriteReason(editWrite.paused, SAVING_LAST_CHANGE_REASON),
+        );
       case membershipsParked:
-        return offlinePendingMessage("projects");
+        return offlineProjects();
       case loadingMemberships:
-        return "Loading projects…";
+        return tx("Loading projects…");
       default:
         return undefined;
     }
@@ -221,9 +231,9 @@ export function ProjectsPopover({
       // `!seededSettled` covers the one paint between the read settling and the
       // reseed effect running — rows must not unlock over the stale snapshot.
       case !memberships.isSuccess || !seededSettled:
-        return UNSETTLED_REASON;
+        return tx(UNSETTLED_REASON);
       case readOnlyScope:
-        return READ_ONLY_SCOPE_REASON;
+        return tx(READ_ONLY_SCOPE_REASON);
       default:
         return undefined;
     }
@@ -295,7 +305,7 @@ export function ProjectsPopover({
     // refetch can fail under a draft made while it was still good — say so, since
     // the checkboxes were showing that draft right up to the close.
     if (!memberships.isSuccess) {
-      if (!sameIds(draft, seeded)) toast.info(DISCARDED_NOTICE);
+      if (!sameIds(draft, seeded)) toast.info(tx(DISCARDED_NOTICE));
       return;
     }
     const adds = [...draft]
@@ -349,7 +359,7 @@ export function ProjectsPopover({
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Edit projects"
+            aria-label={tx("Edit projects")}
             disabled={!!heldReason}
             reason={heldReason}
           />
@@ -362,7 +372,7 @@ export function ProjectsPopover({
         ) : (
           <KanbanIcon data-icon="inline-start" />
         )}
-        Projects
+        {tx("Projects")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner
@@ -377,12 +387,13 @@ export function ProjectsPopover({
               render={<p />}
               className="px-1 pb-1.5 text-xs font-medium"
             >
-              Projects
+              {tx("Projects")}
             </Popover.Title>
             {classicMissing ? (
               <ScopeGapBlock host={host} onReconnect={reconnectForProjectScope}>
-                Projects need the <span className="font-mono">project</span>{" "}
-                scope, which your GitHub sign-in is missing.
+                {tx(
+                  "Projects need the project scope, which your GitHub sign-in is missing.",
+                )}
               </ScopeGapBlock>
             ) : (
               <>
@@ -392,14 +403,14 @@ export function ProjectsPopover({
                 {readsParked && (readError !== null || catalogPending) && (
                   <p className="px-1 py-1 text-xs text-muted-foreground">
                     {rows.length > 0
-                      ? OFFLINE_ROWS_NOTICE
-                      : offlinePendingMessage("projects")}
+                      ? tx(OFFLINE_ROWS_NOTICE)
+                      : offlineProjects()}
                   </p>
                 )}
                 {readError !== null && !readsParked && (
                   <div className="px-1 py-1 text-xs">
                     <p className="text-muted-foreground">
-                      {presentError(readError).summary}
+                      {tx(presentError(readError).summary)}
                     </p>
                     <Button
                       variant="outline"
@@ -410,7 +421,7 @@ export function ProjectsPopover({
                         available.refetch();
                       }}
                     >
-                      Retry
+                      {tx("Retry")}
                     </Button>
                   </div>
                 )}
@@ -420,9 +431,9 @@ export function ProjectsPopover({
                       host={host}
                       onReconnect={reconnectForProjectScope}
                     >
-                      Changing projects needs the{" "}
-                      <span className="font-mono">project</span> scope, which
-                      your GitHub sign-in is missing.
+                      {tx(
+                        "Changing projects needs the project scope, which your GitHub sign-in is missing.",
+                      )}
                     </ScopeGapBlock>
                   </div>
                 )}
@@ -431,12 +442,12 @@ export function ProjectsPopover({
                       under a list that already looks complete. */}
                 {catalogPending && !readsParked && (
                   <p className="px-1 py-1 text-xs text-muted-foreground">
-                    Loading projects…
+                    {tx("Loading projects…")}
                   </p>
                 )}
                 {rows.length === 0 && readError === null && !catalogPending && (
                   <p className="px-1 py-1 text-xs text-muted-foreground">
-                    No open projects in this repository or its owner.
+                    {tx("No open projects in this repository or its owner.")}
                   </p>
                 )}
                 {rows.length > 0 && (
@@ -474,10 +485,14 @@ export function ProjectsPopover({
                   showTruncated ||
                   showMembershipsTruncated) && (
                   <div className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground">
-                    {showApplyNote && <p>Changes apply when this closes.</p>}
-                    {showTruncated && <p>Some projects aren't shown.</p>}
+                    {showApplyNote && (
+                      <p>{tx("Changes apply when this closes.")}</p>
+                    )}
+                    {showTruncated && (
+                      <p>{tx("Some projects aren't shown.")}</p>
+                    )}
                     {showMembershipsTruncated && (
-                      <p>Some of this item's projects aren't shown.</p>
+                      <p>{tx("Some of this item's projects aren't shown.")}</p>
                     )}
                   </div>
                 )}
@@ -492,9 +507,9 @@ export function ProjectsPopover({
     <span
       key={item.itemId}
       className="inline-flex max-w-full items-center border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-      title={projectLabel(item.project)}
+      title={projectLabel(item.project, tx)}
     >
-      <span className="truncate">{projectLabel(item.project)}</span>
+      <span className="truncate">{projectLabel(item.project, tx)}</span>
     </span>
   ));
 
@@ -511,14 +526,19 @@ export function ProjectsPopover({
         case membershipsParked:
           return (
             <span className="text-[11px] text-muted-foreground">
-              {offlinePendingMessage("projects")}
+              {tx(
+                "You're offline — {{subject}} will load once you're back online.",
+                {
+                  subject: tx("projects"),
+                },
+              )}
             </span>
           );
         // A settled empty read never renders this: `empty` on the cell takes it.
         default:
           return (
             <span className="text-[11px] text-muted-foreground">
-              unavailable
+              {tx("Unavailable")}
             </span>
           );
       }
@@ -527,7 +547,7 @@ export function ProjectsPopover({
       <>
         {trigger}
         <MetaValueCell
-          label="Projects"
+          label={tx("Projects")}
           empty={memberships.isSuccess && items.length === 0}
           busy={loadingMemberships}
         >
@@ -571,8 +591,9 @@ function ProjectRow({
   onToggle: (on: boolean) => void;
   onFocus: () => void;
 }) {
-  const label = projectLabel(project);
-  const held = (() => {
+  const tx = useCommonText();
+  const label = projectLabel(project, tx);
+  const heldSource = (() => {
     switch (true) {
       case lockedReason !== undefined:
         return lockedReason;
@@ -582,6 +603,7 @@ function ProjectRow({
         return undefined;
     }
   })();
+  const held = heldSource ? tx(heldSource) : undefined;
   if (held !== undefined) {
     return (
       <div
@@ -631,6 +653,7 @@ export function ScopeGapBlock({
   onReconnect: () => void;
   children: ReactNode;
 }) {
+  const tx = useCommonText();
   // A host outside the reconnect grammar never reaches a copyable command string
   // (shell-syntax injection via a crafted remote) — only the command block is
   // suppressed: the explanation and the button stay.
@@ -645,12 +668,12 @@ export function ScopeGapBlock({
         className="mt-2"
         onClick={onReconnect}
       >
-        Reconnect GitHub…
+        {tx("Reconnect GitHub…")}
       </Button>
       {hostSafe && (
         <>
           <p className="mt-2 text-muted-foreground">
-            Or run this, then reopen:
+            {tx("Or run this, then reopen:")}
           </p>
           {/* Wraps rather than truncates: an Enterprise hostname outruns any popup
               width, and a half-shown command reads as the whole one. */}
@@ -660,8 +683,8 @@ export function ScopeGapBlock({
             </code>
             <CopyIconButton
               text={cmd}
-              label="Copy command"
-              toast="Command copied"
+              label={tx("Copy command")}
+              toast={tx("Command copied")}
             />
           </div>
         </>

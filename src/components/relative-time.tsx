@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { getAppLanguage } from "@/lib/i18n";
 import { formatRelativeTime, parseableDate } from "@/lib/time";
 
 // All mounted timestamps compute from ONE shared snapshot, refreshed every 30s.
@@ -56,7 +57,7 @@ export function RelativeTime({ date }: { date: string }) {
   // unparseable date — its year unit matches NaN.
   if (!parseableDate(date)) return null;
   return (
-    <time dateTime={date} title={parsed.toLocaleString()}>
+    <time dateTime={date} title={parsed.toLocaleString(getAppLanguage())}>
       {formatRelativeTime(date, nowMs)}
     </time>
   );

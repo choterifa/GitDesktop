@@ -28,6 +28,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 function validKey(k: string): boolean {
   return /^[A-Za-z0-9_]{1,255}$/.test(k);
@@ -100,7 +101,7 @@ export function GitLabVariablesSection({
         create: true,
         scope: "*",
       });
-      toast.success(`Added ${key.trim()}`);
+      toast.success(tr("Added {{key}}", { key: key.trim() }));
       setKey("");
       setValue("");
       setIsProtected(false);
@@ -120,7 +121,7 @@ export function GitLabVariablesSection({
         create: false,
         scope: variable.environmentScope,
       });
-      toast.success(`Updated ${variable.key}`);
+      toast.success(tr("Updated {{key}}", { key: variable.key }));
     } catch (e) {
       toastError(e);
     }
@@ -132,7 +133,7 @@ export function GitLabVariablesSection({
         key: variable.key,
         scope: variable.environmentScope,
       });
-      toast.success(`Deleted ${variable.key}`);
+      toast.success(tr("Deleted {{key}}", { key: variable.key }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -147,7 +148,7 @@ export function GitLabVariablesSection({
             data-confirm-fallback
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="VARIABLE_KEY"
+            placeholder={tr("VARIABLE_KEY")}
             autoComplete="off"
             spellCheck={false}
             className="font-mono"
@@ -155,7 +156,7 @@ export function GitLabVariablesSection({
           <Input
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="value"
+            placeholder={tr("value")}
             autoComplete="off"
             spellCheck={false}
             className="font-mono"
@@ -171,7 +172,7 @@ export function GitLabVariablesSection({
             ) : (
               <PlusIcon data-icon="inline-start" />
             )}
-            Add
+            {tr("Add")}
           </DisabledReasonButton>
         </div>
         <div className="flex items-center gap-4">
@@ -180,14 +181,14 @@ export function GitLabVariablesSection({
               checked={isProtected}
               onCheckedChange={(v) => setIsProtected(v === true)}
             />
-            Protected (protected branches and tags only)
+            {tr("Protected (protected branches and tags only)")}
           </Label>
           <Label className="flex items-center gap-1.5 text-xs">
             <Checkbox
               checked={isMasked}
               onCheckedChange={(v) => setIsMasked(v === true)}
             />
-            Masked in job logs
+            {tr("Masked in job logs")}
           </Label>
         </div>
         {keyWarning && <p className="text-[11px] text-warning">{keyWarning}</p>}
@@ -196,12 +197,14 @@ export function GitLabVariablesSection({
       <RemoteListSection
         query={variables}
         rowCount={variables.data?.length ?? 0}
-        noun="variables"
-        loadFailed="Couldn't load variables."
-        emptyLabel="No CI/CD variables yet."
+        noun={tr("variables")}
+        loadFailed={tr("Couldn't load variables.")}
+        emptyLabel={tr("No CI/CD variables yet.")}
         skeletonClassName="h-11 w-full"
-        errorTitle="Couldn't load variables."
-        errorHint="If this is a permissions error, managing CI/CD variables needs the Maintainer role."
+        errorTitle={tr("Couldn't load variables.")}
+        errorHint={tr(
+          "If this is a permissions error, managing CI/CD variables needs the Maintainer role.",
+        )}
       >
         {variables.data?.map((v) => {
           // A key can repeat at different environment scopes — address both.
@@ -273,12 +276,14 @@ function VariableRow({
             detail="Scoped to this environment (scopes are managed on GitLab)"
           />
         )}
-        {variable.protected && <Badge variant="secondary">protected</Badge>}
-        {variable.masked && <Badge variant="secondary">masked</Badge>}
+        {variable.protected && (
+          <Badge variant="secondary">{tr("protected")}</Badge>
+        )}
+        {variable.masked && <Badge variant="secondary">{tr("masked")}</Badge>}
         {confirming ? (
           <InlineConfirm
-            prompt="Delete?"
-            actLabel="Delete"
+            prompt={tr("Delete?")}
+            actLabel={tr("Delete")}
             pending={pending}
             heldReason={writeHeld}
             swapFocusRef={swapFocus()}
@@ -292,8 +297,8 @@ function VariableRow({
             variant="ghost"
             className="text-muted-foreground hover:text-destructive"
             onClick={onConfirm}
-            aria-label={`Delete ${rowName}`}
-            title="Delete"
+            aria-label={tr("Delete {{name}}", { name: rowName })}
+            title={tr("Delete")}
           >
             <XIcon />
           </Button>
@@ -318,7 +323,7 @@ function VariableRow({
           }
           onClick={() => onSave(draft)}
         >
-          Save
+          {tr("Save")}
         </DisabledReasonButton>
       </div>
     </div>

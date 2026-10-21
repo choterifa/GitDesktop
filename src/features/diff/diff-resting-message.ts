@@ -10,8 +10,10 @@
 export function restingDiffMessage(
   statusPending: boolean,
   entryCount: number,
+  noChangesMessage = "No changes to review",
+  selectFileMessage = "Select a file to see its changes",
 ): string {
   return !statusPending && entryCount === 0
-    ? "No changes to review"
-    : "Select a file to see its changes";
+    ? noChangesMessage
+    : selectFileMessage;
 }

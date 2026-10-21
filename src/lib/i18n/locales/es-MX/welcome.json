@@ -1,0 +1,89 @@
+{
+  "actions": {
+    "openRepository": "Abrir repositorio",
+    "cloneRepository": "Clonar repositorio",
+    "createRepository": "Crear repositorio",
+    "myWork": "Mi trabajo",
+    "exploreRepositories": "Explorar repositorios",
+    "userGuide": "Guía de usuario",
+    "userGuideShortcut": "Guía de usuario (F1)",
+    "settings": "Configuración",
+    "settingsUpdateAvailable": "Configuración — hay una actualización disponible"
+  },
+  "guideNudge": {
+    "message": "¿Es tu primera vez en GitDesktop? La guía integrada te acompaña por todo el flujo de trabajo.",
+    "dismiss": "Descartar",
+    "open": "Abrir guía"
+  },
+  "hero": {
+    "titleLineOne": "Todo el flujo,",
+    "titleLineTwo": "en una ventana.",
+    "description": "Abre un repositorio para empezar a revisar, crear commits y publicar cambios.",
+    "descriptionWithAi": "Abre un repositorio para empezar a revisar, crear commits y publicar cambios — con IA cuando quieras.",
+    "dragHint": "…o arrastra una carpeta de repositorio a cualquier parte de la ventana."
+  },
+  "recent": {
+    "heading": "Repositorios",
+    "emptyTitle": "Aún no hay repositorios",
+    "emptyDescription": "Abre, clona o crea un repositorio y aparecerá aquí para que accedas rápidamente."
+  },
+  "gitMissing": {
+    "title": "No se encontró Git",
+    "description": "GitDesktop necesita la herramienta de línea de comandos de Git en PATH. Instálala e inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "download": "Descargar Git"
+  },
+  "create": {
+    "created": "Se creó {{name}}",
+    "folderPickerTitle": "Crear repositorio en una carpeta",
+    "title": "Crear un repositorio",
+    "description": "Inicializa un repositorio Git en la rama \"{{branch}}\" (puedes cambiarla en Configuración).",
+    "name": "Nombre",
+    "namePlaceholder": "nombre del repositorio",
+    "descriptionLabel": "Descripción",
+    "localPath": "Ruta local",
+    "pathPlaceholder": "Escribe, pega o elige una carpeta…",
+    "choose": "Elegir…",
+    "initializeReadme": "Inicializar este repositorio con un README",
+    "gitignore": "Git ignore",
+    "license": "Licencia",
+    "none": "Ninguna",
+    "cancel": "Cancelar",
+    "submit": "Crear repositorio"
+  },
+  "clone": {
+    "localPath": "Ruta local",
+    "title": "Clonar un repositorio",
+    "description": "Elige uno de tus repositorios de GitHub, GitLab o Bitbucket, o pega una URL. Se clona por HTTPS o SSH con las credenciales de Git de tu sistema.",
+    "filterRepositories": "Filtrar tus repositorios",
+    "refresh": "Actualizar",
+    "repositoryUrlLabel": "URL del repositorio o propietario/nombre",
+    "destinationPlaceholder": "Elige una carpeta de destino…",
+    "choose": "Elegir…",
+    "clonesInto": "Se clonará en",
+    "submodulesLabel": "Clonar submódulos",
+    "submodulesDescription": "Inicializa todos los submódulos, incluidos los anidados, después de clonar.",
+    "cancel": "Cancelar",
+    "submit": "Clonar",
+    "noRepositoriesMatch": "Ningún repositorio coincide.",
+    "archived": "Archivado",
+    "fork": "Bifurcación",
+    "privateFork": "Bifurcación privada",
+    "privateRepository": "Repositorio privado",
+    "bitbucket": {
+      "title": "Conecta tu cuenta de Bitbucket",
+      "description": "Agrega un token de API de Atlassian en Configuración → Cuentas para explorar tus repositorios de Bitbucket, o clona desde una URL.",
+      "openSettings": "Abrir Configuración → Cuentas",
+      "cloneUrl": "Clonar desde una URL"
+    },
+    "errors": {
+      "choosePath": "Elige una ruta local donde clonar",
+      "enterUrl": "Escribe la URL del repositorio que quieres clonar",
+      "selectRepository": "Selecciona un repositorio para clonar",
+      "cliMissing": "No se encontró {{cli}}",
+      "loadRepositories": "No se pudieron cargar tus repositorios",
+      "installCli": "Instala {{cli}} y ejecuta {{authCmd}} para explorar tus repositorios, o clona desde una URL."
+    },
+    "repositoryListLabel": "Tus repositorios"
+  }
+}

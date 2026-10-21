@@ -13,6 +13,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Markdown } from "@/components/markdown/markdown";
 import { usePanelPortalContainer } from "@/components/panel-portal";
@@ -62,7 +63,6 @@ import {
   useUpdateLocalIssue,
 } from "@/lib/issues/queries";
 import { useJiraLink, useJiraPermissions } from "@/lib/jira/queries";
-import { ACT_PENDING_REASON } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { PlanIssueButton } from "../plan/PlanIssueButton";
@@ -76,6 +76,7 @@ export function LocalIssueView({
   repoPath: string;
   id: string;
 }) {
+  const { t } = useTranslation("issues");
   const issues = useLocalIssues(repoPath);
   const issue = issues.data?.find((i) => i.id === id);
   const update = useUpdateLocalIssue(repoPath);
@@ -162,7 +163,7 @@ export function LocalIssueView({
   );
 
   if (!issue) {
-    return <DiffPlaceholder message="This local issue no longer exists" />;
+    return <DiffPlaceholder message={t("local.issueGone")} />;
   }
 
   const isOpen = issue.status === "open";
@@ -285,23 +286,25 @@ export function LocalIssueView({
               variant="outline"
               size="xs"
               onClick={openEdit}
-              title="Edit the title and description"
+              title={t("local.editTitleDescription")}
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Edit
+              {t("shared.edit")}
             </Button>
           )}
           <Badge
             variant={isOpen ? "default" : "secondary"}
             className="capitalize"
           >
-            {issue.status}
+            {t(`local.status.${issue.status}`)}
           </Badge>
-          {issue.archived && <Badge variant="secondary">archived</Badge>}
+          {issue.archived && (
+            <Badge variant="secondary">{t("local.archived")}</Badge>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
-            local · opened <RelativeTime date={issue.createdAt} />
+            {t("panel.localLabel")} · {t("local.opened")} <RelativeTime date={issue.createdAt} />
           </span>
         </div>
         {(issue.labels.length > 0 || isOpen) && (
@@ -311,11 +314,15 @@ export function LocalIssueView({
               <Popover.Root>
                 <Popover.Trigger
                   render={
-                    <Button variant="ghost" size="xs" aria-label="Add label" />
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label={t("local.addLabel")}
+                    />
                   }
                 >
                   <TagIcon data-icon="inline-start" />
-                  Labels
+                  {t("local.labels")}
                 </Popover.Trigger>
                 <Popover.Portal container={portalContainer}>
                   <Popover.Positioner
@@ -325,7 +332,7 @@ export function LocalIssueView({
                   >
                     <Popover.Popup className="w-60 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                       <p className="px-1 pb-1.5 text-xs font-medium">
-                        Add label
+                        {t("local.addLabel")}
                       </p>
                       <div className="flex gap-2 px-1">
                         <Input
@@ -337,7 +344,7 @@ export function LocalIssueView({
                               addLabel();
                             }
                           }}
-                          placeholder="e.g. bug, idea"
+                          placeholder={t("local.labelPlaceholder")}
                           className="h-7 flex-1"
                           autoComplete="off"
                         />
@@ -347,7 +354,7 @@ export function LocalIssueView({
                           disabled={!labelInput.trim()}
                           onClick={addLabel}
                         >
-                          Add
+                          {t("shared.add")}
                         </Button>
                       </div>
                     </Popover.Popup>
@@ -364,7 +371,7 @@ export function LocalIssueView({
                 {isOpen && (
                   <button
                     type="button"
-                    aria-label={`Remove label ${label}`}
+                    aria-label={t("local.removeLabel", { label })}
                     className="text-muted-foreground hover:text-foreground"
                     onClick={() => removeLabel(label)}
                   >
@@ -384,7 +391,9 @@ export function LocalIssueView({
               {issue.body.trim() ? (
                 <Markdown refs={mentions.refs}>{issue.body}</Markdown>
               ) : (
-                <p className="text-xs text-muted-foreground">No description.</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("shared.noDescription")}
+                </p>
               )}
             </div>
             <DropdownMenu>
@@ -393,7 +402,7 @@ export function LocalIssueView({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Description actions"
+                    aria-label={t("shared.descriptionActions")}
                     className="shrink-0 text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                   />
                 }
@@ -402,15 +411,17 @@ export function LocalIssueView({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-44">
                 <DropdownMenuItem onClick={() => quoteReply(issue.body)}>
-                  Quote reply
+                  {t("shared.quoteReply")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => copyText(issue.body, "Markdown copied")}
+                  onClick={() => copyText(issue.body, t("shared.markdownCopied"))}
                 >
-                  Copy markdown
+                  {t("shared.copyMarkdown")}
                 </DropdownMenuItem>
                 {isOpen && (
-                  <DropdownMenuItem onClick={openEdit}>Edit</DropdownMenuItem>
+                  <DropdownMenuItem onClick={openEdit}>
+                    {t("shared.edit")}
+                  </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -428,20 +439,22 @@ export function LocalIssueView({
             />
           ))}
           {issue.comments.length === 0 && (
-            <p className="text-xs text-muted-foreground">No comments yet.</p>
+            <p className="text-xs text-muted-foreground">
+              {t("shared.noComments")}
+            </p>
           )}
         </div>
       </ConversationScrollArea>
 
       <CommentComposer
         ref={composerRef}
-        ariaLabel="Leave a note"
-        placeholder="Leave a note…"
+        ariaLabel={t("local.leaveNote")}
+        placeholder={t("local.leaveNotePlaceholder")}
         value={comment}
         onChange={setComment}
         onSubmit={addComment}
         onClear={() => setComment("")}
-        submitLabel="Comment"
+        submitLabel={t("shared.comment")}
         mentions={mentions}
       />
 
@@ -453,7 +466,7 @@ export function LocalIssueView({
           onClick={() => setConfirmDelete(true)}
         >
           <TrashIcon data-icon="inline-start" />
-          Delete
+          {t("shared.delete")}
         </Button>
         <Button
           variant="outline"
@@ -461,7 +474,7 @@ export function LocalIssueView({
           onClick={() => void setArchived(issue.id, !issue.archived)}
         >
           <ArchiveIcon data-icon="inline-start" />
-          {issue.archived ? "Unarchive" : "Archive"}
+          {issue.archived ? t("local.unarchive") : t("local.archive")}
         </Button>
         <span className="flex-1" />
         {isOpen && (
@@ -473,10 +486,15 @@ export function LocalIssueView({
                 onClick={() => setPromoteOpen(true)}
                 title={
                   canPublishForge && canPublishJira
-                    ? "Publish this issue to your forge or Jira, carrying its comments"
+                    ? t("local.publishToForgeOrJiraTitle")
                     : canPublishJira
-                      ? "Open this issue in Jira, carrying its comments"
-                      : `Open this issue on ${ghStatus.data?.provider === "gitlab" ? "GitLab" : "GitHub"}, carrying its comments`
+                      ? t("local.openIssueInJiraTitle")
+                      : t("local.openIssueOnProviderTitle", {
+                          provider:
+                            ghStatus.data?.provider === "gitlab"
+                              ? "GitLab"
+                              : "GitHub",
+                        })
                 }
               >
                 {canPublishForge && canPublishJira ? (
@@ -489,10 +507,15 @@ export function LocalIssueView({
                   <GithubLogoIcon data-icon="inline-start" />
                 )}
                 {canPublishForge && canPublishJira
-                  ? "Publish"
+                  ? t("local.publish")
                   : canPublishJira
-                    ? "Publish to Jira"
-                    : `Publish to ${ghStatus.data?.provider === "gitlab" ? "GitLab" : "GitHub"}`}
+                    ? t("local.publishToJira")
+                    : t("local.publishToProvider", {
+                        provider:
+                          ghStatus.data?.provider === "gitlab"
+                            ? "GitLab"
+                            : "GitHub",
+                      })}
               </Button>
             )}
             {/* The label swaps while a note rides along: the action changed
@@ -501,15 +524,17 @@ export function LocalIssueView({
               variant="outline"
               size="sm"
               disabled={statusHeld}
-              reason="Saving…"
+              reason={statusHeld ? t("shared.saving") : undefined}
               onClick={() => void setStatus("closed")}
               title={
                 draftRidesStateChange
-                  ? "Closes and posts your draft as a comment"
+                  ? t("local.closeDraftTitle")
                   : undefined
               }
             >
-              {draftRidesStateChange ? "Close with comment" : "Close"}
+              {draftRidesStateChange
+                ? t("local.closeWithComment")
+                : t("shared.close")}
             </DisabledReasonButton>
           </>
         )}
@@ -518,16 +543,18 @@ export function LocalIssueView({
             variant="outline"
             size="sm"
             disabled={statusHeld}
-            reason="Saving…"
+            reason={statusHeld ? t("shared.saving") : undefined}
             onClick={() => void setStatus("open")}
             title={
               draftRidesStateChange
-                ? "Reopens and posts your draft as a comment"
+                ? t("local.reopenDraftTitle")
                 : undefined
             }
           >
             <ArrowCounterClockwiseIcon data-icon="inline-start" />
-            {draftRidesStateChange ? "Reopen with comment" : "Reopen"}
+            {draftRidesStateChange
+              ? t("local.reopenWithComment")
+              : t("shared.reopen")}
           </DisabledReasonButton>
         )}
       </div>
@@ -542,29 +569,32 @@ export function LocalIssueView({
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete this local issue?</DialogTitle>
+            <DialogTitle>{t("local.deleteIssueTitle")}</DialogTitle>
             <DialogDescription>
-              Permanently deletes "{issue.title}"
-              {issue.comments.length > 0
-                ? ` and its ${issue.comments.length} comment${
-                    issue.comments.length === 1 ? "" : "s"
-                  }`
-                : ""}
-              . This cannot be undone.
+              {issue.comments.length === 0
+                ? t("local.deleteIssueNoComments", { title: issue.title })
+                : issue.comments.length === 1
+                  ? t("local.deleteIssueOneComment", {
+                      title: issue.title,
+                    })
+                  : t("local.deleteIssueManyComments", {
+                      title: issue.title,
+                      count: issue.comments.length,
+                    })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Cancel
+              {t("shared.cancel")}
             </Button>
             <DisabledReasonButton
               variant="destructive"
               disabled={deleteHold !== undefined}
-              reason={deleteHold ? ACT_PENDING_REASON : undefined}
+              reason={deleteHold ? t("shared.saving") : undefined}
               onClick={() => void deleteIssue(issue.id)}
             >
               {deleteHold && <Spinner data-icon="inline-start" />}
-              Delete
+              {t("shared.delete")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>
@@ -574,8 +604,8 @@ export function LocalIssueView({
         form={edit.form}
         open={edit.open}
         onOpenChange={edit.setOpen}
-        title="Edit issue"
-        description="Updates the title and description of this local issue."
+        title={t("local.editIssueTitle")}
+        description={t("local.editIssueDescription")}
         contentClassName={undefined}
         bodyTextareaClassName="max-h-72"
         mentions={mentions}
@@ -584,7 +614,7 @@ export function LocalIssueView({
       <DeleteCommentDialog
         commentId={deletingCommentId}
         onClose={() => setDeletingCommentId(null)}
-        description="Removes this comment from the local issue. This cannot be undone."
+        description={t("local.deleteCommentDescription")}
         onConfirm={(commentId) => {
           deleteComment(commentId);
           setDeletingCommentId(null);

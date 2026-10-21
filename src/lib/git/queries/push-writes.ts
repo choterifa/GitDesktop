@@ -10,6 +10,11 @@
  */
 import type { PendingMutationEntry } from "./pr-writes";
 
+type PushCopyTranslator = (
+  key: string,
+  options?: Record<string, string>,
+) => string;
+
 /** Filter prefix for every branch push ({@link branchPushKey}). */
 export const BRANCH_PUSH_KEY = ["branch-push"] as const;
 
@@ -52,16 +57,30 @@ export interface BranchPushState {
 export const BRANCH_PUSH_ACTIVE_MESSAGE =
   "A push is already running — wait for it to finish.";
 
+/** The localized twin used by UI and fire-time guards. Kept injectable so this
+ *  bookkeeping module stays import-free for its Node-side contract tests. */
+export const branchPushActiveMessage = (
+  translate?: PushCopyTranslator,
+): string => translate?.("activeMessage") ?? BRANCH_PUSH_ACTIVE_MESSAGE;
+
 /** Why a control that isn't the push is held by one. A push parked offline is
  *  waiting for the connection; the held control itself sends nothing, so the
  *  generic parked-write copy ("this sends…") would misdescribe it. */
-export const branchPushHoldReason = (paused: boolean): string =>
-  paused ? "A push is waiting for the connection." : "A push is running.";
+export const branchPushHoldReason = (
+  paused: boolean,
+  translate?: PushCopyTranslator,
+): string =>
+  translate?.(paused ? "holdPaused" : "holdRunning") ??
+  (paused ? "A push is waiting for the connection." : "A push is running.");
 
 /** The menu-label twin of {@link branchPushHoldReason}, for the parenthetical a
  *  disabled item carries. */
-export const branchPushHoldItemReason = (paused: boolean): string =>
-  paused ? "a push is waiting for the connection" : "a push is running";
+export const branchPushHoldItemReason = (
+  paused: boolean,
+  translate?: PushCopyTranslator,
+): string =>
+  translate?.(paused ? "holdPausedItem" : "holdRunningItem") ??
+  (paused ? "a push is waiting for the connection" : "a push is running");
 
 /** The pushes among `entries` filed against `repo`, one per invocation in cache
  *  order. Every field is `typeof`-guarded: the cache holds `Mutation<any>`, so the
@@ -96,8 +115,13 @@ export function pendingBranchPushesFor(
 /** A label names a destination only when the push itself fixes one: a push that
  *  names no remote or branch goes wherever git's push routing sends it, which a
  *  row can't know. */
-export const branchPublishLabel = (remote: string | null): string =>
-  remote === null ? "Publishing branch" : `Publishing to ${remote}`;
+export const branchPublishLabel = (
+  remote: string | null,
+  translate?: PushCopyTranslator,
+): string =>
+  remote === null
+    ? (translate?.("publishingBranch") ?? "Publishing branch")
+    : (translate?.("publishingTo", { remote }) ?? `Publishing to ${remote}`);
 
 /** The row spinner's label, arms in precedence order: a cross-name push names
  *  its exact destination, a push that sets or (re)creates tracking publishes, a
@@ -106,13 +130,21 @@ export const branchPublishLabel = (remote: string | null): string =>
 export function branchPushLabel(
   push: BranchPushState,
   row: { upstream: string | null; upstreamGone: boolean },
+  translate?: PushCopyTranslator,
 ): string {
   if (push.remote !== null && push.remoteBranch !== null)
-    return `Pushing to ${push.remote}/${push.remoteBranch}`;
+    return (
+      translate?.("pushingTo", {
+        destination: `${push.remote}/${push.remoteBranch}`,
+      }) ?? `Pushing to ${push.remote}/${push.remoteBranch}`
+    );
   if (push.setUpstream || row.upstream === null || row.upstreamGone)
-    return branchPublishLabel(push.remote);
-  if (push.branch === null) return "Pushing";
-  return `Pushing to ${row.upstream}`;
+    return branchPublishLabel(push.remote, translate);
+  if (push.branch === null) return translate?.("pushing") ?? "Pushing";
+  return (
+    translate?.("pushingTo", { destination: row.upstream }) ??
+    `Pushing to ${row.upstream}`
+  );
 }
 
 /** The HEAD-push latch after a render's reads: `pending` is this repo's pushes,

@@ -31,6 +31,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 const ROLES: { value: RepoRole; label: string }[] = [
   { value: "read", label: "Read" },
@@ -48,6 +49,10 @@ const ROLE_ITEMS: Record<string, string> = Object.fromEntries(
 
 const ROLES_UNREAD_REASON =
   "Couldn't check which roles this repository supports";
+
+function localizedRolesReason(reason?: string) {
+  return reason === ROLES_UNREAD_REASON ? tr(ROLES_UNREAD_REASON) : reason;
+}
 
 function validUsername(u: string): boolean {
   return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(u);
@@ -81,7 +86,7 @@ export function CollaboratorsSection({
       case settings.isError:
         return ROLES_UNREAD_REASON;
       default:
-        return "Checking which roles this repository supports…";
+        return tr("Checking which roles this repository supports…");
     }
   })();
 
@@ -105,23 +110,25 @@ export function CollaboratorsSection({
       case add.isPending:
         return SAVING_LAST_CHANGE_REASON;
       case username.trim() === "":
-        return "Enter a GitHub username";
+        return tr("Enter a GitHub username");
       case !validUsername(username.trim()):
-        return "That isn't a valid GitHub username";
+        return tr("That isn't a valid GitHub username");
       default:
         return rolesUnknownReason;
     }
   })();
   const canAdd = inviteHeldReason === undefined;
   const offlineReason = online ? undefined : OFFLINE_WRITE_REASON;
-  const collabRoleHeld =
+  const collabRoleHeld = localizedRolesReason(
     rolesUnknownReason ??
-    offlineReason ??
-    (add.isPending ? SAVING_LAST_CHANGE_REASON : undefined);
-  const inviteRoleHeld =
+      offlineReason ??
+      (add.isPending ? SAVING_LAST_CHANGE_REASON : undefined),
+  );
+  const inviteRoleHeld = localizedRolesReason(
     rolesUnknownReason ??
-    offlineReason ??
-    (updateInvite.isPending ? SAVING_LAST_CHANGE_REASON : undefined);
+      offlineReason ??
+      (updateInvite.isPending ? SAVING_LAST_CHANGE_REASON : undefined),
+  );
 
   const collabRows = collaborators.data ?? [];
   const inviteRows = invitations.data ?? [];
@@ -142,7 +149,7 @@ export function CollaboratorsSection({
         username: username.trim(),
         role: inviteRole,
       });
-      toast.success(pending ? "Invitation sent" : "Collaborator added");
+      toast.success(tr(pending ? "Invitation sent" : "Collaborator added"));
       setUsername("");
     } catch (e) {
       toastError(e);
@@ -152,7 +159,12 @@ export function CollaboratorsSection({
   async function setCollaboratorRole(login: string, next: RepoRole) {
     try {
       await add.mutateAsync({ username: login, role: next });
-      toast.success(`${login} is now ${next}`);
+      toast.success(
+        tr("{{username}} is now {{role}}", {
+          username: login,
+          role: tr(ROLE_ITEMS[next] ?? next),
+        }),
+      );
     } catch (e) {
       toastError(e);
     }
@@ -161,7 +173,7 @@ export function CollaboratorsSection({
   async function removeCollaborator(login: string) {
     try {
       await remove.mutateAsync(login);
-      toast.success(`Removed ${login}`);
+      toast.success(tr("Removed {{username}}", { username: login }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -171,7 +183,7 @@ export function CollaboratorsSection({
   async function setInvitationRole(id: string, permission: RepoRole) {
     try {
       await updateInvite.mutateAsync({ id, permission });
-      toast.success("Invitation updated");
+      toast.success(tr("Invitation updated"));
     } catch (e) {
       toastError(e);
     }
@@ -180,7 +192,7 @@ export function CollaboratorsSection({
   async function cancelInvitation(id: string) {
     try {
       await cancelInvite.mutateAsync(id);
-      toast.success("Invitation canceled");
+      toast.success(tr("Invitation canceled"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -195,7 +207,7 @@ export function CollaboratorsSection({
             data-confirm-fallback
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="GitHub username"
+            placeholder={tr("GitHub username")}
             autoComplete="off"
             spellCheck={false}
             onKeyDown={(e) => {
@@ -206,7 +218,7 @@ export function CollaboratorsSection({
           <DisabledReasonButton
             size="sm"
             disabled={!canAdd}
-            reason={inviteHeldReason}
+            reason={localizedRolesReason(inviteHeldReason)}
             onClick={addCollaborator}
           >
             {add.isPending ? (
@@ -214,15 +226,16 @@ export function CollaboratorsSection({
             ) : (
               <UserPlusIcon data-icon="inline-start" />
             )}
-            Invite
+            {tr("Invite")}
           </DisabledReasonButton>
         </div>
         {personal && (
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Collaborators on a personal repository get{" "}
-            <span className="font-medium text-foreground">Write</span> access.
-            Read, Triage, Maintain, and Admin roles need the repository in an
-            organization.
+            {tr("Collaborators on a personal repository get")}{" "}
+            <span className="font-medium text-foreground">{tr("Write")}</span>{" "}
+            {tr(
+              "access.\r\n            Read, Triage, Maintain, and Admin roles need the repository in an\r\n            organization.",
+            )}
           </p>
         )}
         {/* The settings read has `retry: false`: an error holds Invite and the row
@@ -230,14 +243,14 @@ export function CollaboratorsSection({
             invalidation, or reopening the dialog. */}
         {rolesUnknownReason === ROLES_UNREAD_REASON && (
           <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-            <p>{ROLES_UNREAD_REASON}.</p>
+            <p>{tr("Couldn't check which roles this repository supports.")}</p>
             <Button
               variant="outline"
               size="xs"
               onClick={() => void settings.refetch()}
             >
               {settings.isFetching && <Spinner data-icon="inline-start" />}
-              Retry
+              {tr("Retry")}
             </Button>
           </div>
         )}
@@ -246,16 +259,18 @@ export function CollaboratorsSection({
       <RemoteListSection
         query={collaborators}
         rowCount={collabRows.length}
-        noun="collaborators"
-        loadFailed="Couldn't load collaborators."
-        emptyLabel="No collaborators yet."
+        noun={tr("collaborators")}
+        loadFailed={tr("Couldn't load collaborators.")}
+        emptyLabel={tr("No collaborators yet.")}
         skeletonClassName="h-11 w-full"
-        errorTitle="Couldn't load collaborators."
-        errorHint="If this is a permissions error, managing collaborators needs repo-admin access."
+        errorTitle={tr("Couldn't load collaborators.")}
+        errorHint={tr(
+          "If this is a permissions error, managing collaborators needs repo-admin access.",
+        )}
       >
         <div
           role="listbox"
-          aria-label="Collaborators"
+          aria-label={tr("Collaborators")}
           tabIndex={0}
           className="space-y-2 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-ring"
           onKeyDown={listKeyboardNav({
@@ -274,10 +289,15 @@ export function CollaboratorsSection({
                 key={c.login}
                 login={c.login}
                 avatarUrl={c.avatarUrl}
-                meta={owner ? "Owner" : undefined}
+                meta={owner ? tr("Owner") : undefined}
                 removeHeld={
                   owner
-                    ? `${c.login} owns this repository and can't be removed`
+                    ? tr(
+                        "{{username}} owns this repository and can't be removed",
+                        {
+                          username: c.login,
+                        },
+                      )
                     : undefined
                 }
                 dataKey={c.login}
@@ -303,7 +323,7 @@ export function CollaboratorsSection({
       {inviteRows.length > 0 && (
         <div className="space-y-2">
           <Label id={invitesLabelId} className="text-xs text-muted-foreground">
-            Pending invitations
+            {tr("Pending invitations")}
           </Label>
           <div
             role="listbox"
@@ -331,8 +351,10 @@ export function CollaboratorsSection({
                   onFocus={() => setActiveInvite(i)}
                   meta={
                     inv.createdAt && parseableDate(inv.createdAt)
-                      ? `invited ${formatRelativeTime(inv.createdAt, now)}`
-                      : "pending"
+                      ? tr("Invited {{time}}", {
+                          time: formatRelativeTime(inv.createdAt, now),
+                        })
+                      : tr("pending")
                   }
                   roleValue={inv.permission}
                   roleHeld={inviteRoleHeld}
@@ -352,8 +374,9 @@ export function CollaboratorsSection({
       )}
 
       <p className="text-[11px] text-muted-foreground">
-        Removing someone revokes only their direct access — they may still reach
-        the repo through a team or organization.
+        {tr(
+          "Removing someone revokes only their direct access — they may still reach\r\n        the repo through a team or organization.",
+        )}
       </p>
     </div>
   );
@@ -380,8 +403,8 @@ function RoleSlot({
   if (personal)
     return (
       <span className="flex h-7 w-28 shrink-0 items-center pl-2.5 text-xs">
-        <span className="sr-only">Role: </span>
-        {ROLE_ITEMS[value] ?? value}
+        <span className="sr-only">{tr("Role:")} </span>
+        {tr(ROLE_ITEMS[value] ?? value)}
       </span>
     );
   return (
@@ -462,8 +485,8 @@ function PersonRow({
       {/* A confirm opened before settings named the owner yields to the hold. */}
       {confirming && removeHeld === undefined ? (
         <InlineConfirm
-          prompt="Remove?"
-          actLabel="Remove"
+          prompt={tr("Remove?")}
+          actLabel={tr("Remove")}
           pending={pending}
           heldReason={confirmHeld}
           swapFocusRef={swapFocus()}
@@ -476,7 +499,7 @@ function PersonRow({
             personal={personal}
             value={roleValue}
             heldReason={roleHeld}
-            label={`Role for ${login}`}
+            label={tr("Role for {{username}}", { username: login })}
             onRole={onRole}
           />
           {removeHeld !== undefined ? (
@@ -487,7 +510,7 @@ function PersonRow({
               className="text-muted-foreground"
               disabled
               reason={removeHeld}
-              aria-label={`Remove ${login}`}
+              aria-label={tr("Remove {{username}}", { username: login })}
             >
               <XIcon />
             </DisabledReasonButton>
@@ -498,8 +521,8 @@ function PersonRow({
               variant="ghost"
               className="text-muted-foreground hover:text-destructive"
               onClick={onConfirm}
-              title="Remove"
-              aria-label={`Remove ${login}`}
+              title={tr("Remove")}
+              aria-label={tr("Remove {{username}}", { username: login })}
             >
               <XIcon />
             </Button>

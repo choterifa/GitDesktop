@@ -18,6 +18,7 @@ import { required, useAppForm } from "@/lib/form";
 import { useCreateDiscussion, useDiscussionMeta } from "@/lib/git/queries";
 import {
   ACT_PENDING_REASON,
+  OFFLINE_WRITE_REASON,
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/use-disabled-reason";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
+import { useDiscussionsText } from "./use-discussions-text";
 
 export function CreateDiscussionDialog({
   repoPath,
@@ -39,6 +41,7 @@ export function CreateDiscussionDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tx = useDiscussionsText();
   const meta = useDiscussionMeta(repoPath, open);
   const createDiscussion = useCreateDiscussion(repoPath);
   const selectDiscussion = useUiStore((s) => s.selectDiscussion);
@@ -57,7 +60,7 @@ export function CreateDiscussionDialog({
   const form = useAppForm({
     defaultValues: { title: "", body: "", categoryId: "" },
     onSubmit: async ({ value }) => {
-      if (refuseWhileOffline()) return;
+      if (refuseWhileOffline(tx(OFFLINE_WRITE_REASON))) return;
       const submitGen = seedGenRef.current;
       try {
         const { number, url } = await createDiscussion.mutateAsync({
@@ -66,9 +69,9 @@ export function CreateDiscussionDialog({
           title: value.title.trim(),
           body: value.body,
         });
-        toast.success(`Opened discussion #${number}`, {
+        toast.success(tx("Opened discussion #{{number}}", { number }), {
           description: url,
-          action: { label: "View", onClick: () => openUrl(url) },
+          action: { label: tx("View"), onClick: () => openUrl(url) },
         });
         if (
           draftRepoRef.current === repoPath &&
@@ -97,11 +100,11 @@ export function CreateDiscussionDialog({
     reason: (() => {
       switch (true) {
         case isSubmitting:
-          return ACT_PENDING_REASON;
+          return tx(ACT_PENDING_REASON);
         case offlineHold !== undefined:
-          return offlineHold;
+          return tx(offlineHold);
         case !categoryId:
-          return "Choose a category first";
+          return tx("Choose a category first");
         default:
           return undefined;
       }
@@ -142,9 +145,9 @@ export function CreateDiscussionDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New discussion</DialogTitle>
+            <DialogTitle>{tx("New discussion")}</DialogTitle>
             <DialogDescription>
-              Starts a discussion on GitHub in the chosen category.
+              {tx("Starts a discussion on GitHub in the chosen category.")}
             </DialogDescription>
           </DialogHeader>
 
@@ -152,13 +155,16 @@ export function CreateDiscussionDialog({
           <div className={cn(DIALOG_SCROLL, "min-h-0 flex-1 space-y-4")}>
             <ScopeRefreshHint
               scope="write:discussion"
-              action="Creating a discussion"
+              action={tx("Creating a discussion")}
               coveredBy={["repo"]}
             />
             <div className="min-w-0">
               <form.AppField name="categoryId">
                 {(field) => (
-                  <field.SelectField label="Category" items={categoryItems} />
+                  <field.SelectField
+                    label={tx("Category")}
+                    items={categoryItems}
+                  />
                 )}
               </form.AppField>
             </div>
@@ -168,16 +174,16 @@ export function CreateDiscussionDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Title"
-                  placeholder="Summarize the discussion"
+                  label={tx("Title")}
+                  placeholder={tx("Summarize the discussion")}
                 />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Body"
-                  placeholder="What would you like to discuss?"
+                  label={tx("Body")}
+                  placeholder={tx("What would you like to discuss?")}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                 />
@@ -191,7 +197,7 @@ export function CreateDiscussionDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -207,7 +213,7 @@ export function CreateDiscussionDialog({
                   aria-describedby={offlineSubmit.describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Start discussion
+                  {tx("Start discussion")}
                 </form.SubmitButton>
                 {offlineSubmit.blockedReason ? (
                   <span id={offlineSubmit.reasonId} className="sr-only">

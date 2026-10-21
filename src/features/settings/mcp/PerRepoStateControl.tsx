@@ -11,6 +11,7 @@ import {
   pickForRepo,
   type RepoKeys,
 } from "@/lib/settings/mcp";
+import { useSettingsText } from "../use-settings-text";
 
 /** Per-repo state picker for a GLOBAL server, shown on its row when a repo is
  *  open: On (available + default-on) / Optional (available, off by default) /
@@ -36,18 +37,19 @@ export function PerRepoStateControl({
   disabled?: boolean;
   onChange: (state: McpRepoState | null) => void;
 }) {
+  const tx = useSettingsText();
   const override = pickForRepo(server.repoOverrides, repoKeys);
-  const baseline = server.enabled ? "On" : "Optional";
+  const baseline = tx(server.enabled ? "On" : "Optional");
   // Labels, built here because the inherited option names the baseline; without
   // them Base UI shows the raw value ("optional") in the trigger. The popup
   // renders from this map too, so the two can never drift. Record-typed against
   // McpRepoState — plus "default", which is stored as key ABSENCE — so a new
   // state can't reach `loadSettings`'s heal without a label here.
   const items: Record<McpRepoState | "default", string> = {
-    default: `Default · ${baseline}`,
-    on: "On",
-    optional: "Optional",
-    off: "Off",
+    default: tx("Default · {{baseline}}", { baseline }),
+    on: tx("On"),
+    optional: tx("Optional"),
+    off: tx("Off"),
   };
   return (
     <Select
@@ -60,7 +62,9 @@ export function PerRepoStateControl({
     >
       <SelectTrigger
         size="sm"
-        aria-label={`Availability of ${server.name} in this repo`}
+        aria-label={tx("Availability of {{server}} in this repo", {
+          server: server.name,
+        })}
         className={`w-auto gap-1 ${override ? "" : "text-muted-foreground"}`}
       >
         <SelectValue />

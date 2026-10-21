@@ -9,6 +9,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import { ProviderIcon } from "@/components/provider-icon";
 import {
@@ -34,6 +35,7 @@ import {
 import { useRepoOwners } from "@/lib/git/queries";
 import { type ForgeProvider, providerLabel } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import {
   persistRepoVisibility,
   type RecentRepo,
@@ -122,6 +124,7 @@ export function RepoList({
   onAliasRepo: (repo: RecentRepo) => void;
   onRemoveRepo: (repo: RecentRepo) => void;
 }) {
+  const { t } = useTranslation("repository");
   const settings = useSettings();
   const recents = settings.data?.recentRepos ?? [];
   const owners = useRepoOwners(recents.map((r) => r.path));
@@ -371,8 +374,8 @@ export function RepoList({
             setHighlight(-1);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Filter repositories"
-          aria-label="Filter repositories"
+          placeholder={t("repositoryList.filter")}
+          aria-label={t("repositoryList.filter")}
           role="combobox"
           // The listbox is always rendered (the empty state lives inside it), and
           // aria-expanded reflects popup visibility, not result count.
@@ -393,23 +396,31 @@ export function RepoList({
                 onContextMenuCapture={handleContextMenu}
                 role="listbox"
                 id={REPO_LISTBOX_ID}
-                aria-label="Repositories"
+                aria-label={t("repositoryList.repositories")}
               />
             }
           >
             {filtered.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
                 {recents.length === 0
-                  ? "No repositories yet."
-                  : "No repositories match."}
+                  ? t("repositoryList.empty")
+                  : t("repositoryList.noMatches")}
               </p>
             ) : (
               <>
-                <RepoSection title="Recent" repos={recent} {...sectionProps} />
+                <RepoSection
+                  title={t("repositoryList.recent")}
+                  repos={recent}
+                  {...sectionProps}
+                />
                 {groupNames.map((name) => (
                   <RepoSection
                     key={name}
-                    title={name}
+                    title={
+                      name === OTHER_GROUP
+                        ? t("repositoryList.otherGroup")
+                        : name
+                    }
                     repos={groups.get(name) ?? []}
                     {...sectionProps}
                   />
@@ -472,15 +483,28 @@ function RepoSection({
 
 /** The trailing visibility badge (icon + accessible label) for a resolved
  *  visibility, or null when it's unknown — absence must never read as public. */
-function visibilityBadge(
-  visibility: string | undefined,
-): { Icon: typeof LockSimpleIcon; label: string } | null {
+function visibilityBadge(visibility: string | undefined): {
+  Icon: typeof LockSimpleIcon;
+  labelKey:
+    | "repositoryList.visibility.private"
+    | "repositoryList.visibility.internal"
+    | "repositoryList.visibility.public";
+} | null {
   if (visibility === "private")
-    return { Icon: LockSimpleIcon, label: "Private" };
+    return {
+      Icon: LockSimpleIcon,
+      labelKey: "repositoryList.visibility.private",
+    };
   if (visibility === "internal")
-    return { Icon: BuildingsIcon, label: "Internal" };
+    return {
+      Icon: BuildingsIcon,
+      labelKey: "repositoryList.visibility.internal",
+    };
   if (visibility === "public")
-    return { Icon: GlobeSimpleIcon, label: "Public" };
+    return {
+      Icon: GlobeSimpleIcon,
+      labelKey: "repositoryList.visibility.public",
+    };
   return null;
 }
 
@@ -493,6 +517,7 @@ function RepoRow({
   providerOf,
   hostOf,
 }: RepoRowsProps & { repo: RecentRepo }) {
+  const { t } = useTranslation("repository");
   const highlighted = repo.path === highlightedPath;
   // Normalized: the recents write can respell the row's path (case refresh) while
   // the open is still in flight, and the spinner must stay on it.
@@ -503,7 +528,10 @@ function RepoRow({
   const host = hostOf(repo);
   const badge = visibilityBadge(repo.visibility);
   // Name the upstream when we know it, so the glyph's meaning isn't shape-only.
-  const forkLabel = repo.forkParent ? `Fork of ${repo.forkParent}` : "Fork";
+  const forkLabel = repo.forkParent
+    ? t("repositoryList.forkOf", { repository: repo.forkParent })
+    : t("repositoryList.fork");
+  const badgeLabel = badge ? t(badge.labelKey) : null;
 
   return (
     <div
@@ -554,8 +582,8 @@ function RepoRow({
           <span
             className="shrink-0 text-muted-foreground"
             role="img"
-            title={badge.label}
-            aria-label={badge.label}
+            title={badgeLabel ?? undefined}
+            aria-label={badgeLabel ?? undefined}
           >
             <badge.Icon className="size-3" />
           </span>
@@ -577,6 +605,7 @@ function LeadingGlyph({
   provider: ForgeProvider | null;
   host: string | undefined;
 }) {
+  const { t } = useTranslation("repository");
   if (opening)
     return <Spinner className="size-3.5 shrink-0 text-muted-foreground" />;
   if (provider) {
@@ -593,7 +622,7 @@ function LeadingGlyph({
     );
   }
   if (host) {
-    const label = `Remote: ${host}`;
+    const label = t("repositoryList.remote", { host });
     return (
       <span
         className="shrink-0 text-muted-foreground"
@@ -605,7 +634,7 @@ function LeadingGlyph({
       </span>
     );
   }
-  const label = "Local repository — no remote";
+  const label = t("repositoryList.localNoRemote");
   return (
     <span
       className="shrink-0 text-muted-foreground"
@@ -643,20 +672,24 @@ function RepoMenuItems({
   onAlias: (repo: RecentRepo) => void;
   onRemove: (repo: RecentRepo) => void;
 }) {
+  const { t } = useTranslation("repository");
+  const tx = useCommonText();
   return (
     <>
       <ContextMenuItem onClick={() => onAlias(repo)}>
-        {repo.alias ? "Change alias…" : "Create alias…"}
+        {repo.alias
+          ? t("repositoryList.changeAlias")
+          : t("repositoryList.createAlias")}
       </ContextMenuItem>
       <ContextMenuItem
-        onClick={() => copyText(repo.name, "Repository name copied")}
+        onClick={() => copyText(repo.name, t("repositoryList.nameCopied"))}
       >
-        Copy repo name
+        {t("repositoryList.copyName")}
       </ContextMenuItem>
       <ContextMenuItem
-        onClick={() => copyText(repo.path, "Repository path copied")}
+        onClick={() => copyText(repo.path, t("repositoryList.pathCopied"))}
       >
-        Copy repo path
+        {t("repositoryList.copyPath")}
       </ContextMenuItem>
       <ContextMenuSeparator />
       {owner && (
@@ -670,7 +703,9 @@ function RepoMenuItems({
           {/* Name the repo's actual provider (incl. self-managed GitLab and
               Bitbucket); unrecognized hosts route through gh (Enterprise etc.),
               so GitHub is the honest default label. */}
-          View on {providerLabel(provider as ForgeProvider | null)}
+          {t("repositoryList.viewOn", {
+            provider: providerLabel(provider as ForgeProvider | null),
+          })}
         </ContextMenuItem>
       )}
       <ContextMenuItem
@@ -683,22 +718,24 @@ function RepoMenuItems({
           ).catch(toastError)
         }
       >
-        Open in terminal
+        {t("repositoryList.openTerminal")}
       </ContextMenuItem>
       <ContextMenuItem
         onClick={() => openWithDefault(repo.path).catch(toastError)}
       >
-        Show in Explorer
+        {t("repositoryList.showInExplorer")}
       </ContextMenuItem>
       {editor && (
         <ContextMenuItem
           onClick={() => openWithProgram(editor, repo.path).catch(toastError)}
         >
-          Open in {editorName}
+          {t("repositoryList.openInEditor", { editor: editorName })}
         </ContextMenuItem>
       )}
       <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => onRemove(repo)}>Remove…</ContextMenuItem>
+      <ContextMenuItem onClick={() => onRemove(repo)}>
+        {tx("Remove…")}
+      </ContextMenuItem>
     </>
   );
 }

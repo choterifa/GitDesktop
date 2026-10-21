@@ -1,0 +1,70 @@
+{
+  "actions": {
+    "switchBranch": "Cambiar de rama…",
+    "newBranch": "Nueva rama…",
+    "createBranch": "Crear rama",
+    "createTag": "Crear etiqueta"
+  },
+  "empty": {
+    "detachedTitle": "Estás en un HEAD separado",
+    "detachedDescription": "Para comparar, primero debes tener una rama activa. Cambia a una rama para ver en qué difiere de otra.",
+    "noOtherBranchesTitle": "No hay otras ramas",
+    "noOtherBranchesDescription": "La comparación muestra cómo {{branch}} difiere de otra rama. Crea una rama para tener con qué compararla."
+  },
+  "header": {
+    "compareWith": "Comparar",
+    "with": "con"
+  },
+  "pr": {
+    "mergeRequest": "solicitud de integración",
+    "pullRequest": "pull request",
+    "view": "Ver {{noun}} n.º {{number}}",
+    "draft": "borrador",
+    "create": "Crear {{noun}}",
+    "createLocal": "Crear PR local…",
+    "noCommitsReason": "{{branch}} no tiene commits para proponer a {{base}}",
+    "openTitle": "Abrir un {{noun}} hacia {{branch}}",
+    "proposeLocally": "Proponer la integración local de {{branch}} en {{base}}"
+  },
+  "list": {
+    "ariaLabel": "Selección de comparación",
+    "allChanges": "Todos los cambios",
+    "ahead_one": "{{count}} por delante",
+    "ahead_other": "{{count}} por delante",
+    "behind_one": "{{count}} por detrás",
+    "behind_other": "{{count}} por detrás",
+    "onBranchNotOther": "en {{branch}}, no en {{other}}",
+    "even": "Las ramas están sincronizadas."
+  },
+  "branchPicker": {
+    "ariaLabel": "Comparar con una rama",
+    "filterPlaceholder": "Filtrar ramas…",
+    "noMatches": "No hay ramas coincidentes",
+    "default": "predeterminada",
+    "divergence": "{{ahead}} por delante y {{behind}} por detrás de {{branch}}"
+  },
+  "diff": {
+    "error": "No se pudieron comparar estas ramas",
+    "noChanges": "{{compare}} no tiene cambios respecto de {{base}}",
+    "versus": "frente a",
+    "fileCount_one": "{{count}} archivo",
+    "fileCount_other": "{{count}} archivos",
+    "changedFiles": "Archivos modificados",
+    "selectFile": "Selecciona un archivo para ver sus cambios"
+  },
+  "createBranch": {
+    "title": "Crear rama desde un commit",
+    "description": "Crea una rama desde {{hash}} y cambia a ella.",
+    "name": "Nombre de la rama"
+  },
+  "createTag": {
+    "title": "Crear etiqueta",
+    "description": "Crea una etiqueta para el commit {{hash}}.",
+    "name": "Nombre de la etiqueta"
+  },
+  "toast": {
+    "branchCreated": "Se creó la rama {{name}}",
+    "tagCreated": "Se creó la etiqueta {{name}}",
+    "cherryPicked": "Se aplicó el commit {{hash}} con cherry-pick"
+  }
+}

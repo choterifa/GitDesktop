@@ -3,6 +3,7 @@ import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { buildSolveIssuePrompt } from "@/lib/ai/prompt";
 import { useAiEnabled } from "@/lib/settings/queries";
 import { handoffToAgent } from "./handoff";
+import { useSessionText } from "./use-session-text";
 
 /**
  * "Solve with agent" action for an issue: hands the issue to a new write-capable
@@ -25,6 +26,7 @@ export function SolveIssueButton({
    *  loading): the button stays in place, disabled, with this as its reason. */
   disabledReason?: string;
 }) {
+  const tx = useSessionText();
   const aiEnabled = useAiEnabled();
   if (!aiEnabled) return null;
 
@@ -34,13 +36,15 @@ export function SolveIssueButton({
       size="xs"
       disabled={!!disabledReason}
       reason={disabledReason}
-      title="Hand this issue to a write-capable agent to investigate and fix"
+      title={tx(
+        "Hand this issue to a write-capable agent to investigate and fix",
+      )}
       onClick={() =>
         handoffToAgent(repoPath, buildSolveIssuePrompt({ title, body }))
       }
     >
       <WrenchIcon data-icon="inline-start" />
-      Solve with agent
+      {tx("Solve with agent")}
     </DisabledReasonButton>
   );
 }

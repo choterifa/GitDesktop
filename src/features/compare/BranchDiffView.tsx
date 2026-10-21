@@ -1,4 +1,5 @@
 import { useDeferredValue, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DetailRail, DetailRailRow } from "@/components/detail-rail";
 import { DiffStat } from "@/components/diff-stat";
 import { PathText } from "@/components/path-text";
@@ -29,6 +30,7 @@ export function BranchDiffView({
   base: string;
   compare: string;
 }) {
+  const { t } = useTranslation("compare");
   const files = useBranchDiffFiles(repoPath, base, compare);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   // Reset the manual selection when the comparison changes — a render-time
@@ -85,12 +87,12 @@ export function BranchDiffView({
     );
   }
   if (files.isError) {
-    return <DiffPlaceholder message="Could not compare these branches" />;
+    return <DiffPlaceholder message={t("diff.error")} />;
   }
   if (files.data.length === 0) {
     return (
       <DiffPlaceholder
-        message={`${compare} has no changes relative to ${base}`}
+        message={t("diff.noChanges", { compare, base })}
       />
     );
   }
@@ -123,14 +125,14 @@ export function BranchDiffView({
           className="min-w-0 truncate font-medium"
           onMouseEnter={clipTitleFromText}
         >
-          <span className="font-mono">{compare}</span> vs{" "}
+          <span className="font-mono">{compare}</span> {t("diff.versus")} {" "}
           <span className="font-mono">{base}</span>
         </span>
         <span className="flex-1" />
         <span
           className={cn("text-muted-foreground", PLACEHOLDER_FADE, staleDim)}
         >
-          {files.data.length} file{files.data.length === 1 ? "" : "s"}
+          {t("diff.fileCount", { count: files.data.length })}
         </span>
         <DiffStat
           added={totalAdded}
@@ -143,7 +145,7 @@ export function BranchDiffView({
         <DetailRail
           className={cn(PLACEHOLDER_FADE, staleDim)}
           role="listbox"
-          ariaLabel="Changed files"
+          ariaLabel={t("diff.changedFiles")}
         >
           {/* overflow-hidden contains the list's natural height (vendored Root is
               `relative`-only) so a long list can't leak a window scrollbar. */}
@@ -200,7 +202,7 @@ export function BranchDiffView({
               }
             />
           ) : (
-            <DiffPlaceholder message="Select a file to see its changes" />
+            <DiffPlaceholder message={t("diff.selectFile")} />
           )}
         </main>
       </DetailRailRow>

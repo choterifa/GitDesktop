@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,6 @@ import { cloneRepo, forgeClone, validateRepo } from "@/lib/git/api";
 import { useForgeRepos } from "@/lib/git/queries";
 import type { ForgeProvider, ForgeRepo } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
-import { repoStateLabel } from "@/lib/repo-labels";
 import { useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { isAppError } from "@/lib/tauri/invoke";
@@ -75,6 +75,7 @@ export function CloneRepoDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("welcome");
   const openRecorded = useOpenRecordedRepo();
   const settings = useSettings();
 
@@ -193,7 +194,10 @@ export function CloneRepoDialog({
   });
 
   async function pickDestination() {
-    const path = await openDialog({ directory: true, title: "Local path" });
+    const path = await openDialog({
+      directory: true,
+      title: t("clone.localPath"),
+    });
     if (path) form.setFieldValue("destination", path);
   }
 
@@ -207,11 +211,11 @@ export function CloneRepoDialog({
       case canClone:
         return undefined;
       case !values.destination.trim():
-        return "Choose a local path to clone into";
+        return t("clone.errors.choosePath");
       case tab === "url":
-        return "Enter a repository URL to clone";
+        return t("clone.errors.enterUrl");
       default:
-        return "Select a repository to clone";
+        return t("clone.errors.selectRepository");
     }
   })();
   const { blockedReason, reasonId, wrapperTitle, describedBy } =
@@ -228,12 +232,8 @@ export function CloneRepoDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Clone a repository</DialogTitle>
-            <DialogDescription>
-              Pick one of your GitHub, GitLab, or Bitbucket repositories, or
-              paste a URL. Clones over HTTPS or SSH using your system git
-              credentials.
-            </DialogDescription>
+            <DialogTitle>{t("clone.title")}</DialogTitle>
+            <DialogDescription>{t("clone.description")}</DialogDescription>
           </DialogHeader>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as CloneTab)}>
@@ -261,8 +261,8 @@ export function CloneRepoDialog({
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   onKeyDown={onFilterKeyDown}
-                  placeholder="Filter your repositories"
-                  aria-label="Filter your repositories"
+                  placeholder={t("clone.filterRepositories")}
+                  aria-label={t("clone.filterRepositories")}
                   role="combobox"
                   aria-expanded={repos.isSuccess}
                   aria-controls={REPO_LISTBOX_ID}
@@ -277,7 +277,7 @@ export function CloneRepoDialog({
                   type="button"
                   variant="outline"
                   size="icon-sm"
-                  aria-label="Refresh"
+                  aria-label={t("clone.refresh")}
                   disabled={repos.isFetching}
                   onClick={() => repos.refetch()}
                 >
@@ -303,7 +303,7 @@ export function CloneRepoDialog({
             <form.AppField name="url">
               {(field) => (
                 <field.TextField
-                  label="Repository URL or owner/name"
+                  label={t("clone.repositoryUrlLabel")}
                   placeholder="https://github.com/user/repo.git"
                 />
               )}
@@ -316,20 +316,20 @@ export function CloneRepoDialog({
                 <form.AppField name="destination">
                   {(field) => (
                     <field.TextField
-                      label="Local path"
-                      placeholder="Choose a folder to clone into…"
+                      label={t("clone.localPath")}
+                      placeholder={t("clone.destinationPlaceholder")}
                     />
                   )}
                 </form.AppField>
               </div>
               <Button type="button" variant="outline" onClick={pickDestination}>
-                Choose…
+                {t("clone.choose")}
               </Button>
             </div>
             {values.destination.trim() && finalName && (
               // gap-1, not a trailing label space — flex line boxes trim those.
               <p className="flex min-w-0 gap-1 text-[11px] text-muted-foreground">
-                <span className="shrink-0">Clones into</span>
+                <span className="shrink-0">{t("clone.clonesInto")}</span>
                 <PathText
                   path={`${values.destination.trim().replace(/[\\/]$/, "")}${
                     values.destination.includes("/") ? "/" : "\\"
@@ -344,13 +344,13 @@ export function CloneRepoDialog({
             <form.AppField name="recurseSubmodules">
               {(field) => (
                 <field.CheckboxField
-                  label="Clone submodules"
+                  label={t("clone.submodulesLabel")}
                   className="flex cursor-pointer items-center gap-2 text-xs"
                 />
               )}
             </form.AppField>
             <p className="text-[11px] text-muted-foreground">
-              Initializes every submodule, including nested ones, after cloning.
+              {t("clone.submodulesDescription")}
             </p>
           </div>
 
@@ -361,7 +361,7 @@ export function CloneRepoDialog({
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
             >
-              Cancel
+              {t("clone.cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -377,7 +377,7 @@ export function CloneRepoDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Clone
+                  {t("clone.submit")}
                 </form.SubmitButton>
                 {blockedReason ? (
                   <span id={reasonId} className="sr-only">
@@ -408,6 +408,7 @@ function RepoBrowser({
   onSelect: (repo: ForgeRepo) => void;
   onUseUrl: () => void;
 }) {
+  const { t } = useTranslation("welcome");
   const openSettings = useUiStore((s) => s.openSettings);
   const parentRef = useRef<HTMLDivElement>(null);
   // The virtualizer keys its measurement projection on `getItemKey`'s IDENTITY,
@@ -467,10 +468,9 @@ function RepoBrowser({
     if (bbUnconfigured) {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-          <p className="text-xs font-medium">Connect your Bitbucket account</p>
+          <p className="text-xs font-medium">{t("clone.bitbucket.title")}</p>
           <p className="max-w-xs text-xs text-muted-foreground">
-            Add an Atlassian API token in Settings → Accounts to browse your
-            Bitbucket repositories, or clone from a URL instead.
+            {t("clone.bitbucket.description")}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -479,10 +479,10 @@ function RepoBrowser({
               size="sm"
               onClick={() => openSettings("accounts")}
             >
-              Open Settings → Accounts
+              {t("clone.bitbucket.openSettings")}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onUseUrl}>
-              Clone from a URL
+              {t("clone.bitbucket.cloneUrl")}
             </Button>
           </div>
         </div>
@@ -491,15 +491,17 @@ function RepoBrowser({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <p className="text-xs font-medium">
-          {cliMissing ? `${cli} not found` : "Couldn't load your repositories"}
+          {cliMissing
+            ? t("clone.errors.cliMissing", { cli })
+            : t("clone.errors.loadRepositories")}
         </p>
         <p className="max-w-xs text-xs text-muted-foreground">
           {cliMissing
-            ? `Install the ${cli} and run ${authCmd} to browse your repositories, or clone from a URL instead.`
+            ? t("clone.errors.installCli", { cli, authCmd })
             : presentError(repos.error).summary}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={onUseUrl}>
-          Clone from a URL
+          {t("clone.bitbucket.cloneUrl")}
         </Button>
       </div>
     );
@@ -508,7 +510,7 @@ function RepoBrowser({
   if (rows.length === 0) {
     return (
       <p className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-        No repositories match.
+        {t("clone.noRepositoriesMatch")}
       </p>
     );
   }
@@ -519,7 +521,7 @@ function RepoBrowser({
       className="h-full overflow-auto"
       role="listbox"
       id={REPO_LISTBOX_ID}
-      aria-label="Your repositories"
+      aria-label={t("clone.repositoryListLabel")}
     >
       <div
         className="relative w-full"
@@ -566,6 +568,7 @@ function RepoRow({
   active: boolean;
   onSelect: (repo: ForgeRepo) => void;
 }) {
+  const { t } = useTranslation("welcome");
   const Icon = repo.private
     ? LockSimpleIcon
     : repo.fork
@@ -573,7 +576,13 @@ function RepoRow({
       : BookBookmarkIcon;
   // The glyph takes no `title`: the row already hovers its description / full
   // name.
-  const stateLabel = repoStateLabel(repo.private, repo.fork);
+  const stateLabel = repo.private
+    ? repo.fork
+      ? t("clone.privateFork")
+      : t("clone.privateRepository")
+    : repo.fork
+      ? t("clone.fork")
+      : null;
   return (
     <button
       type="button"
@@ -601,7 +610,7 @@ function RepoRow({
       <span className="min-w-0 flex-1 truncate">{repo.name}</span>
       {repo.archived && (
         <Badge variant="secondary" className="shrink-0 text-[10px]">
-          Archived
+          {t("clone.archived")}
         </Badge>
       )}
     </button>

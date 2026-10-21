@@ -10,7 +10,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DegradedListNotice } from "@/features/conversations/ConversationListPanel";
 import {
   detailNoticeMessage,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
 } from "@/features/conversations/remote-section-state";
@@ -33,6 +32,7 @@ import {
   CommitLineComposer,
   useCommitLineAnchors,
 } from "./CommitComments";
+import { usePullsText } from "./use-pulls-text";
 
 interface PrCommitDetailProps {
   repoPath: string;
@@ -82,6 +82,7 @@ export function PrCommitDetail({
   provider = "github",
   lens,
 }: PrCommitDetailProps) {
+  const tx = usePullsText();
   const diff = usePrCommitDiff(repoPath, number, commit.oid, lens);
   const comments = useCommitComments(repoPath, commit.oid, lens);
   // Markdown preview reads the file at this commit, so it's offered only once
@@ -190,10 +191,10 @@ export function PrCommitDetail({
           variant="ghost"
           size="sm"
           onClick={onBack}
-          aria-label="Back to commits"
+          aria-label={tx("Back to commits")}
           className="-ml-2 h-7 text-muted-foreground hover:text-foreground"
         >
-          ‹ Commits
+          ‹ {tx("Commits")}
         </Button>
         <h2 className="text-sm font-medium">{commit.headline}</h2>
         {commit.messageBody && (
@@ -220,8 +221,8 @@ export function PrCommitDetail({
           <button
             type="button"
             className="inline-flex items-center gap-1 font-mono hover:text-foreground"
-            onClick={() => copyText(commit.oid, "SHA copied")}
-            title="Copy full SHA"
+            onClick={() => copyText(commit.oid, tx("SHA copied"))}
+            title={tx("Copy full SHA")}
           >
             {commit.oid.slice(0, 7)}
             <CopyIcon className="size-3" />
@@ -241,12 +242,17 @@ export function PrCommitDetail({
           case "offline":
             return (
               <DiffPlaceholder
-                message={offlinePendingMessage("this commit's changes")}
+                message={tx(
+                  "You're offline — {{subject}} will load once you're back online.",
+                  { subject: tx("this commit's changes") },
+                )}
               />
             );
           case "error":
             return (
-              <DiffPlaceholder message="Could not load this commit's changes" />
+              <DiffPlaceholder
+                message={tx("Could not load this commit's changes")}
+              />
             );
           case "content":
           case "content-degraded":
@@ -257,21 +263,27 @@ export function PrCommitDetail({
                   degraded={pane === "content-degraded"}
                   // The diff is keyed on this commit alone and serves no
                   // placeholder, so the retained patch is always its own.
-                  message={detailNoticeMessage({
-                    noun: "commit's changes",
-                    isError: failed,
-                    stale: false,
-                  })}
+                  message={tx(
+                    detailNoticeMessage({
+                      noun: "commit's changes",
+                      isError: failed,
+                      stale: false,
+                    }),
+                  )}
                   onRetry={failed ? () => void diff.refetch() : undefined}
                   className="shrink-0 border-b px-4 py-1.5"
                 />
                 <DetailRailRow>
                   <DetailRail
-                    ariaLabel="Changed files"
+                    ariaLabel={tx("Changed files")}
                     header={
                       <p className="truncate text-xs text-muted-foreground">
-                        {files.length} changed file
-                        {files.length === 1 ? "" : "s"}
+                        {tx(
+                          files.length === 1
+                            ? "{{count}} changed file"
+                            : "{{count}} changed files",
+                          { count: files.length },
+                        )}
                       </p>
                     }
                   >
@@ -326,7 +338,9 @@ export function PrCommitDetail({
                           lineWidget={lineWidget}
                         />
                       ) : (
-                        <DiffPlaceholder message="No file changes in this commit" />
+                        <DiffPlaceholder
+                          message={tx("No file changes in this commit")}
+                        />
                       )}
                     </div>
                     <CommitComments

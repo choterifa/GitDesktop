@@ -31,8 +31,8 @@ import {
   checksRerunOffer,
   isPipelineProvider,
   jobRerunOffer,
-  RERUN_TITLES,
   rerunSuccessMessage,
+  rerunTitle,
   rerunWindowReason,
   StatusIcon,
   statusLabel,
@@ -91,6 +91,7 @@ import {
   stillLatchedRunIds,
 } from "./checks-rerun";
 import { PR_SWITCH_LOADING_REASON } from "./PrMergeabilityBanner";
+import { usePullsText } from "./use-pulls-text";
 
 /** The one wording for releasing a held workflow run — this strip and the Actions
  *  run view both ask through it, so the two prompts can't drift apart. It lives
@@ -191,6 +192,7 @@ function CheckLogTail({
   repoPath: string;
   check: PrCheckOut;
 }) {
+  const tx = usePullsText();
   // A job id gets the per-job log; a run without a job id falls back to the
   // run-wide failed-step logs (same as the Actions panel's failed-logs view).
   // Ids stay *strings* the whole way — they can exceed JS's safe-integer range,
@@ -217,8 +219,8 @@ function CheckLogTail({
   const notice = sectionReadNotice({
     noun: "logs",
     loadFailed: reason
-      ? `Couldn't load logs: ${reason}`
-      : "Couldn't load logs.",
+      ? tx("Couldn't load logs: {{reason}}", { reason })
+      : tx("Couldn't load logs."),
     rowCount,
     isError: logs.isError,
     isPaused: logs.isPaused,
@@ -232,8 +234,8 @@ function CheckLogTail({
       <DegradedListNotice
         noun="logs"
         degraded={notice !== null}
-        message={notice?.message}
-        retryLabel={notice?.retryLabel}
+        message={notice?.message ? tx(notice.message) : undefined}
+        retryLabel={notice?.retryLabel ? tx(notice.retryLabel) : undefined}
         onRetry={notice?.retry ? () => void logs.refetch() : undefined}
         className="px-0 pb-1"
       />
@@ -359,6 +361,7 @@ function CheckRow({
    *  first await, so it can hand focus on only when the click would lose it. */
   onJobRerun?: (buttonEl: HTMLElement) => void;
 }) {
+  const tx = usePullsText();
   const { tone, Icon, label } = checkPresentation(check.status, provider);
   // The live counter is gated on `isRunning`, never on `check.completedAt`: that
   // field rides usePrDetails (focus-only refetch), so a finished check keeps it
@@ -377,7 +380,7 @@ function CheckRow({
   // "queued" once resolved but no step is in progress yet.
   const stepPeek = isRunning
     ? runJob
-      ? (currentStep(runJob)?.name ?? "queued")
+      ? (currentStep(runJob)?.name ?? tx("queued"))
       : undefined
     : undefined;
 
@@ -410,7 +413,9 @@ function CheckRow({
       {requiredAttention && (
         // Visible text, not a tone: the row keeps its muted cancelled glyph, and
         // this word is what says the merge is still waiting on the check.
-        <span className="shrink-0 text-muted-foreground">· required</span>
+        <span className="shrink-0 text-muted-foreground">
+          {tx("· required")}
+        </span>
       )}
       {stepPeek !== undefined && (
         // The running check's current step, after the name — muted + truncated so
@@ -452,7 +457,7 @@ function CheckRow({
             type="button"
             data-row={rowId}
             onClick={() => check.detailsUrl && openUrl(check.detailsUrl)}
-            title="Open this check"
+            title={tx("Open this check")}
             className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs"
           >
             {inner}
@@ -496,11 +501,11 @@ function CheckRow({
           <button
             type="button"
             onClick={() => check.detailsUrl && openUrl(check.detailsUrl)}
-            title="Open the full run"
+            title={tx("Open the full run")}
             className="mr-2 inline-flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             <ArrowSquareOutIcon className="size-3" />
-            Open full run
+            {tx("Open full run")}
           </button>
         )}
       </div>
@@ -606,6 +611,7 @@ export function ChecksRollup({
    *  itself. */
   unmetRequiredContexts?: string[];
 }) {
+  const tx = usePullsText();
   const passed = checks.filter(
     (c) => checkPresentation(c.status, provider).bucket === "passed",
   ).length;
@@ -954,11 +960,11 @@ export function ChecksRollup({
       case writeReason !== undefined:
         return writeReason;
       case writeAccess.isPending:
-        return "Checking write access…";
+        return tx("Checking write access…");
       case rerunBusy:
         return pendingWriteReason(
           rerunFamilyPaused,
-          "A re-run is already in flight…",
+          tx("A re-run is already in flight…"),
         );
       default:
         return undefined;
@@ -1004,13 +1010,22 @@ export function ChecksRollup({
 
   async function approveBlockedRuns() {
     if (writeBlocked || stale || held || approvePending) return;
-    const ok = await useConfirm.getState().ask(APPROVE_RUN_CONFIRM);
+    const ok = await useConfirm.getState().ask({
+      title: tx(APPROVE_RUN_CONFIRM.title),
+      body: tx(APPROVE_RUN_CONFIRM.body),
+      confirmLabel: tx(APPROVE_RUN_CONFIRM.confirmLabel),
+      confirmVariant: "default",
+      holdOffline: true,
+    });
     if (!ok) return;
     // The prompt names no pull request, so a switch under it refuses, saying so
     // rather than letting a just-confirmed action go silent.
     if (switchedRef.current) {
       toast.info(
-        `You switched ${PR_NOUN[provider]}s while the dialog was open — nothing was approved.`,
+        tx(
+          "You switched {{pullRequestPlural}} while the dialog was open — nothing was approved.",
+          { pullRequestPlural: `${PR_NOUN[provider]}s` },
+        ),
       );
       return;
     }
@@ -1025,7 +1040,10 @@ export function ChecksRollup({
           // has to account for them rather than read as nothing happened.
           if (approved > 0)
             toast.info(
-              `You're offline — approved ${approved} of ${blockedRunIds.length} runs before the connection dropped. Approve the rest once you're back online.`,
+              tx(
+                "You're offline — approved {{approved}} of {{total}} runs before the connection dropped. Approve the rest once you're back online.",
+                { approved, total: blockedRunIds.length },
+              ),
             );
           else refuseWhileOffline();
           break;
@@ -1247,7 +1265,7 @@ export function ChecksRollup({
       <DegradedListNotice
         noun="checks"
         degraded={checksUnknown}
-        message={notice.message}
+        message={tx(notice.message)}
         onRetry={notice.onRetry}
         className="px-0 pb-0"
       />
@@ -1257,9 +1275,12 @@ export function ChecksRollup({
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border bg-warning/10 px-2.5 py-1.5">
               <span className="flex min-w-0 items-center gap-1.5 text-warning">
                 <WarningIcon weight="fill" className="size-3 shrink-0" />
-                {`${blockedRunIds.length} workflow run${
-                  blockedRunIds.length === 1 ? "" : "s"
-                } awaiting maintainer approval.`}
+                {blockedRunIds.length === 1
+                  ? tx("1 workflow run awaiting maintainer approval.")
+                  : tx(
+                      "{{count}} workflow runs awaiting maintainer approval.",
+                      { count: blockedRunIds.length },
+                    )}
               </span>
               <DisabledReasonButton
                 variant="outline"
@@ -1280,7 +1301,7 @@ export function ChecksRollup({
                 ) : (
                   <PlayIcon data-icon="inline-start" />
                 )}
-                Approve and run
+                {tx("Approve and run")}
               </DisabledReasonButton>
             </div>
           )}
@@ -1339,13 +1360,13 @@ export function ChecksRollup({
                     case batchPending !== undefined:
                       return pendingWriteReason(
                         batchPending.paused,
-                        "A re-run is already in flight…",
+                        tx("A re-run is already in flight…"),
                       );
                     default:
                       return batchAgedOut;
                   }
                 })()}
-                title={RERUN_TITLES[rerunOffer.kind]}
+                title={rerunTitle(rerunOffer.kind)}
                 onClick={() => void rerunOfferedRuns()}
               >
                 {rerunning && !rerun.isPaused ? (

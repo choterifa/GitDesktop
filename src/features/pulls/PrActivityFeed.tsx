@@ -37,6 +37,7 @@ import {
   type SuggestionApply,
   threadToMarkdown,
 } from "./ReviewThreads";
+import { usePullsText } from "./use-pulls-text";
 
 /** Which reviews render, and which line-comment threads each of them claims. */
 export interface PrThreadClaims {
@@ -316,6 +317,7 @@ export function PrActivityFeed({
    *  completed reference pass one. */
   mentions?: MentionSource;
 }) {
+  const tx = usePullsText();
   const {
     renderedReviews,
     threadsByReview,
@@ -372,7 +374,7 @@ export function PrActivityFeed({
               <span className="font-medium text-foreground">
                 {displayLogin(r.author)}
               </span>
-              <span>replied in a review thread</span>
+              <span>{tx("replied in a review thread")}</span>
               {locator && <span className="min-w-0 truncate">· {locator}</span>}
               {t && (
                 <button
@@ -388,7 +390,7 @@ export function PrActivityFeed({
                     setRevealThreadId(t.id);
                   }}
                 >
-                  View thread
+                  {tx("View thread")}
                 </button>
               )}
               {parseableDate(r.date) && (

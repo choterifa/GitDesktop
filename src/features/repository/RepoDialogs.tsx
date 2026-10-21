@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,9 +21,6 @@ import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { useRetained } from "@/lib/use-retained";
 
-/** OS-accurate name for the system trash: "Recycle Bin" on Windows, else "Trash". */
-const trashName = isWindows ? "Recycle Bin" : "Trash";
-
 /**
  * Create/change a repo's display alias. Mount with a `key` derived from the
  * target repo so the form reseeds per repo.
@@ -34,6 +32,7 @@ export function RepoAliasDialog({
   repo: RecentRepo | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const setAlias = useSetRepoAlias();
 
   const form = useAppForm({
@@ -44,8 +43,11 @@ export function RepoAliasDialog({
         await setAlias.mutateAsync({ path: repo.path, alias: value.alias });
         toast.success(
           value.alias.trim()
-            ? `${repo.name} is now shown as ${value.alias.trim()}`
-            : "Alias removed",
+            ? t("repoDialogs.alias.updated", {
+                repo: repo.name,
+                alias: value.alias.trim(),
+              })
+            : t("repoDialogs.alias.removed"),
         );
         onClose();
       } catch (e) {
@@ -71,25 +73,32 @@ export function RepoAliasDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              {repo?.alias ? "Change alias" : "Create alias"}
+              {repo?.alias
+                ? t("repoDialogs.alias.changeTitle")
+                : t("repoDialogs.alias.createTitle")}
             </DialogTitle>
             <DialogDescription>
-              A display name for <span className="font-mono">{repo?.name}</span>{" "}
-              inside GitDesktop. It doesn't rename the folder or the repository.
-              Leave empty to remove the alias.
+              {t("repoDialogs.alias.descriptionStart")}{" "}
+              <span className="font-mono">{repo?.name}</span>{" "}
+              {t("repoDialogs.alias.descriptionEnd")}
             </DialogDescription>
           </DialogHeader>
           <form.AppField name="alias">
             {(field) => (
-              <field.TextField label="Alias" placeholder={repo?.name ?? ""} />
+              <field.TextField
+                label={t("repoDialogs.alias.label")}
+                placeholder={repo?.name ?? ""}
+              />
             )}
           </form.AppField>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {t("repoDialogs.alias.cancel")}
             </Button>
             <form.AppForm>
-              <form.SubmitButton>Save</form.SubmitButton>
+              <form.SubmitButton>
+                {t("repoDialogs.alias.save")}
+              </form.SubmitButton>
             </form.AppForm>
           </DialogFooter>
         </form>
@@ -109,6 +118,12 @@ export function RemoveRepoDialog({
   repo: RecentRepo | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
+  const trashName = t(
+    isWindows
+      ? "repoDialogs.remove.trashWindows"
+      : "repoDialogs.remove.trashOther",
+  );
   const removeRecent = useRemoveRecentRepo();
   const repoPath = useUiStore((s) => s.repoPath);
   const closeRepo = useUiStore((s) => s.closeRepo);
@@ -135,8 +150,11 @@ export function RemoveRepoDialog({
       await removeRecent.mutateAsync(repo.path);
       toast.success(
         moveToTrash
-          ? `${display} moved to the ${trashName}`
-          : `${display} removed from GitDesktop`,
+          ? t("repoDialogs.remove.movedToTrash", {
+              repo: display,
+              trash: trashName,
+            })
+          : t("repoDialogs.remove.removedFromApp", { repo: display }),
       );
       setMoveToTrash(false);
       onClose();
@@ -167,11 +185,13 @@ export function RemoveRepoDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Remove {display}?</DialogTitle>
+          <DialogTitle>
+            {t("repoDialogs.remove.title", { repo: display })}
+          </DialogTitle>
           <DialogDescription>
-            Removes the repository from GitDesktop. The folder at{" "}
-            <span className="font-mono">{shownRepo?.path}</span> is kept unless
-            you also move it to the {trashName}.
+            {t("repoDialogs.remove.descriptionStart")}{" "}
+            <span className="font-mono">{shownRepo?.path}</span>{" "}
+            {t("repoDialogs.remove.descriptionEnd", { trash: trashName })}
           </DialogDescription>
         </DialogHeader>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
@@ -179,15 +199,15 @@ export function RemoveRepoDialog({
             checked={moveToTrash}
             onCheckedChange={(v) => setMoveToTrash(v === true)}
           />
-          Also move this repository to the {trashName}
+          {t("repoDialogs.remove.moveToTrash", { trash: trashName })}
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("repoDialogs.remove.cancel")}
           </Button>
           <Button variant="destructive" disabled={busy} onClick={confirm}>
             {busy && <Spinner data-icon="inline-start" />}
-            Remove
+            {t("repoDialogs.remove.remove")}
           </Button>
         </DialogFooter>
       </DialogContent>

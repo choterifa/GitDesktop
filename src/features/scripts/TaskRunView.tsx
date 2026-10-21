@@ -18,6 +18,7 @@ import { useResolvedTaskScript } from "@/lib/scripts/queries";
 import { INTERPRETERS, parseArgs } from "@/lib/scripts/types";
 import { taskPtyId, useTaskRunStore } from "@/lib/stores/taskRun";
 import { useUiStore } from "@/lib/stores/ui";
+import { useScriptsText } from "./use-scripts-text";
 
 // Reuse the interactive PTY terminal (xterm + Rust PTY). Lazy so its chunk loads
 // with the first run rather than on boot.
@@ -30,6 +31,7 @@ const INTERPRETER_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export function TaskRunView() {
+  const tx = useScriptsText();
   const repoPath = useUiStore((s) => s.repoPath);
   const activeRun = useTaskRunStore((s) => s.activeRun);
   const rerun = useTaskRunStore((s) => s.rerun);
@@ -43,7 +45,7 @@ export function TaskRunView() {
     return (
       <DiffPlaceholder
         icon={PlayCircleIcon}
-        message="Run a task to see its output here"
+        message={tx("Run a task to see its output here")}
       />
     );
   }
@@ -74,24 +76,24 @@ export function TaskRunView() {
           </span>
         )}
         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-          {INTERPRETER_LABELS[task.interpreter] ?? task.interpreter}
+          {tx(INTERPRETER_LABELS[task.interpreter] ?? task.interpreter)}
         </span>
 
         {/* Status — icon + text, never color alone (WCAG AA). */}
         {running ? (
           <span className="flex items-center gap-1 text-muted-foreground">
             <CircleNotchIcon className="size-3.5 animate-spin" />
-            Running
+            {tx("Running")}
           </span>
         ) : succeeded ? (
           <span className="flex items-center gap-1 text-success">
             <CheckCircleIcon className="size-3.5" />
-            Exited · 0
+            {tx("Exited · 0")}
           </span>
         ) : (
           <span className="flex items-center gap-1 text-destructive">
             <WarningCircleIcon className="size-3.5" />
-            {code === null ? "Stopped" : `Exited · ${code}`}
+            {code === null ? tx("Stopped") : tx("Exited · {{code}}", { code })}
           </span>
         )}
 
@@ -102,10 +104,10 @@ export function TaskRunView() {
             size="xs"
             variant="ghost"
             onClick={() => ptyClose(ptyId).catch(() => undefined)}
-            title="Stop the running task"
+            title={tx("Stop the running task")}
           >
             <StopIcon data-icon="inline-start" />
-            Stop
+            {tx("Stop")}
           </Button>
         ) : (
           <>
@@ -113,18 +115,18 @@ export function TaskRunView() {
               size="xs"
               variant="ghost"
               onClick={rerun}
-              title="Run this task again"
+              title={tx("Run this task again")}
             >
               <ArrowClockwiseIcon data-icon="inline-start" />
-              Rerun
+              {tx("Rerun")}
             </Button>
             <Button
               size="icon-xs"
               variant="ghost"
               className="text-muted-foreground"
               onClick={clear}
-              title="Clear the run"
-              aria-label="Clear the run"
+              title={tx("Clear the run")}
+              aria-label={tx("Clear the run")}
             >
               <XIcon />
             </Button>
@@ -135,7 +137,7 @@ export function TaskRunView() {
       <Suspense
         fallback={
           <LazyPanelFallback
-            name="the task output"
+            name={tx("task output")}
             className="min-h-0 flex-1 p-1"
           />
         }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { settingsFormOpts } from "@/features/settings/settings-form";
@@ -86,6 +87,7 @@ export const AutomationsSection = withForm({
     onDirtyChange,
     onRegisterSave,
   }) {
+    const { t } = useTranslation("automations");
     const automations = useAutomations();
     const save = useSaveAutomations();
     const [draft, setDraft] = useState<LifecycleDraft>({});
@@ -184,28 +186,22 @@ export const AutomationsSection = withForm({
     return (
       <section className="space-y-3">
         <div>
-          <h2 className="text-sm font-medium">Automations</h2>
+          <h2 className="text-sm font-medium">{t("section.title")}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Run an AI action automatically when something happens. These
-            defaults apply to every repository; a repository can override them
-            from its ⋯ menu. Reviews use the review model configured in the AI
-            section — PR results are posted as a comment, commit results open
-            from their notification row, and from Automation history whatever
-            your Notify on choice for Automation results is (Settings →
-            Notifications).
+            {t("section.description")}
           </p>
         </div>
         <div className="space-y-1.5">
           <form.AppField name="reviewDraftPrs">
             {(field) => (
               <field.CheckboxField
-                label="Review draft PRs when created"
+                label={t("section.reviewDrafts")}
                 className="flex cursor-pointer items-center gap-2 text-xs"
               />
             )}
           </form.AppField>
           <p className="text-xs text-muted-foreground">
-            Off: automated review runs when a draft is marked ready for review.
+            {t("section.draftReviewsOff")}
           </p>
         </div>
         {automations.isPending ? (
@@ -216,14 +212,14 @@ export const AutomationsSection = withForm({
             {dirty && (
               <div className="flex items-center justify-between gap-3 border-t pt-3">
                 <span className="text-xs text-muted-foreground">
-                  You have unsaved changes
+                  {t("states.unsavedChanges")}
                 </span>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={discard}>
-                    Discard
+                    {t("actions.discard")}
                   </Button>
                   <Button size="sm" onClick={doSave} disabled={save.isPending}>
-                    Save changes
+                    {t("actions.saveChanges")}
                   </Button>
                 </div>
               </div>

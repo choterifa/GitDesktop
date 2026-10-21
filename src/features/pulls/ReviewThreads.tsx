@@ -32,6 +32,7 @@ import { pendingWriteReason } from "@/lib/offline-writes";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { synthesizeThreadHunk } from "./suggestion-utils";
+import { usePullsText } from "./use-pulls-text";
 
 /**
  * File:line-anchored review threads (Copilot/CodeRabbit/human line comments on
@@ -422,6 +423,7 @@ function SuggestionBlock({
   applied: boolean;
   onApplied: () => void;
 }) {
+  const tx = usePullsText();
   const [pending, setPending] = useState(false);
   const originals = recoverOriginals(thread, parsed, segment.glRange, provider);
 
@@ -436,13 +438,16 @@ function SuggestionBlock({
         replacementLines: segment.replacement,
       });
       if (result.staged) {
-        toast.success("Suggestion applied and staged");
+        toast.success(tx("Suggestion applied and staged"));
       } else if (result.hadLocalChanges) {
         toast.success(
-          `Suggestion applied — not staged: ${thread.path} has other local changes`,
+          tx(
+            "Suggestion applied — not staged: {{path}} has other local changes",
+            { path: thread.path },
+          ),
         );
       } else {
-        toast.success("Suggestion applied");
+        toast.success(tx("Suggestion applied"));
       }
       onApplied();
     } catch (e) {
@@ -466,7 +471,7 @@ function SuggestionBlock({
     <div className="ph-no-capture overflow-hidden rounded border text-xs">
       <div className="flex items-center gap-2 border-b bg-muted/30 px-2 py-1">
         <span className="font-mono text-muted-foreground">
-          Suggested change
+          {tx("Suggested change")}
         </span>
         {originals && apply && (
           <>
@@ -479,7 +484,7 @@ function SuggestionBlock({
               onClick={runApply}
             >
               {pending && <Spinner className="size-3" />}
-              {applied ? "Applied ✓" : "Apply"}
+              {applied ? tx("Applied ✓") : tx("Apply")}
             </DisabledReasonButton>
           </>
         )}
@@ -551,6 +556,7 @@ export function ReviewThreadCard({
    *  only surfaces whose forge autolinks the completed reference pass one. */
   mentions?: MentionSource;
 } & ThreadCallbacks) {
+  const tx = usePullsText();
   const [replying, setReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyPending, setReplyPending] = useState(false);
@@ -664,19 +670,19 @@ export function ReviewThreadCard({
           )}
           {thread.isOutdated && (
             <Badge variant="outline" className="shrink-0 text-warning">
-              Outdated
+              {tx("Outdated")}
             </Badge>
           )}
           {thread.isResolved && (
             <Badge variant="secondary" className="shrink-0 text-success">
-              Resolved
+              {tx("Resolved")}
             </Badge>
           )}
         </button>
         <CopyIconButton
           text={() => threadToMarkdown(thread)}
-          label="Copy thread as Markdown"
-          toast="Markdown copied"
+          label={tx("Copy thread as Markdown")}
+          toast={tx("Markdown copied")}
         />
         {onResolve && (
           <DisabledReasonButton
@@ -688,7 +694,7 @@ export function ReviewThreadCard({
             onClick={toggleResolve}
           >
             {resolveBusy && !resolvePaused && <Spinner className="size-3" />}
-            {thread.isResolved ? "Unresolve" : "Resolve"}
+            {thread.isResolved ? tx("Unresolve") : tx("Resolve")}
           </DisabledReasonButton>
         )}
       </div>
@@ -760,8 +766,8 @@ export function ReviewThreadCard({
             (replying ? (
               <div className="space-y-2">
                 <MarkdownEditor
-                  aria-label="Reply to review thread"
-                  placeholder="Reply…"
+                  aria-label={tx("Reply to review thread")}
+                  placeholder={tx("Reply…")}
                   value={replyBody}
                   onChange={setReplyBody}
                   onKeyDown={(e) => {
@@ -799,7 +805,7 @@ export function ReviewThreadCard({
                     {replyBusy && !replyPaused && (
                       <Spinner className="size-3" />
                     )}
-                    Reply
+                    {tx("Reply")}
                   </DisabledReasonButton>
                   {/* Cancel discards only this editor's draft, so it holds for
                       this card's own send, never for a reply queued elsewhere. */}
@@ -813,7 +819,7 @@ export function ReviewThreadCard({
                       setReplyBody("");
                     }}
                   >
-                    Cancel
+                    {tx("Cancel")}
                   </DisabledReasonButton>
                 </div>
               </div>
@@ -824,7 +830,7 @@ export function ReviewThreadCard({
                 className="text-muted-foreground"
                 onClick={() => setReplying(true)}
               >
-                Reply…
+                {tx("Reply…")}
               </Button>
             ))}
         </div>
@@ -856,6 +862,7 @@ function ResolvedExpander({
   open: boolean;
   onToggle: () => void;
 }) {
+  const tx = usePullsText();
   return (
     <button
       type="button"
@@ -866,7 +873,8 @@ function ResolvedExpander({
       <CaretRightIcon
         className={cn("size-3 transition-transform", open ? "rotate-90" : "")}
       />
-      <span className="text-success">✓</span> {count} resolved
+      <span className="text-success">✓</span>{" "}
+      {tx("{{count}} resolved", { count })}
     </button>
   );
 }

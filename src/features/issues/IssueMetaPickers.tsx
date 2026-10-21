@@ -6,6 +6,7 @@ import {
   UserPlusIcon,
 } from "@phosphor-icons/react";
 import { type ComponentProps, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { MetaValueCell, UserChip } from "@/components/meta-field-cells";
@@ -92,6 +93,7 @@ export function AssigneesPopover({
    *  column. Default renders the inline row. */
   cells?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const users = useAssignableUsers(repoPath, enabled, lens);
   const ghHost = useForgeGhHost(repoPath);
   const [open, setOpen] = useState(false);
@@ -155,14 +157,14 @@ export function AssigneesPopover({
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Edit assignees"
+            aria-label={t("meta.editAssignees")}
             disabled={!!disabledReason}
             reason={disabledReason}
           />
         }
       >
         <UserPlusIcon data-icon="inline-start" />
-        Assignees
+        {t("meta.assignees")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner
@@ -177,14 +179,15 @@ export function AssigneesPopover({
               render={<p />}
               className="px-1 pb-1.5 text-xs font-medium"
             >
-              Assignees
+              {t("meta.assignees")}
             </Popover.Title>
             {loaded.length === 0 && (
               <p className="px-1 py-1 text-xs text-muted-foreground">
                 {emptyPickerCopy(users, {
                   noun: "assignable users",
-                  loadFailed: "Couldn't load assignable users.",
-                  empty: "No assignable users.",
+                  loadFailed: t("meta.assignableUsersLoadFailed"),
+                  empty: t("meta.noAssignableUsers"),
+                  loading: t("shared.loading"),
                 })}
               </p>
             )}
@@ -218,7 +221,7 @@ export function AssigneesPopover({
                 render={<p />}
                 className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground"
               >
-                Tab cycles the rows; Esc closes.
+                {t("meta.tabCyclesRowsEscCloses")}
               </Popover.Description>
             )}
           </Popover.Popup>
@@ -234,7 +237,7 @@ export function AssigneesPopover({
     return (
       <>
         {trigger}
-        <MetaValueCell label="Assignees" empty={value.length === 0}>
+        <MetaValueCell label={t("meta.assignees")} empty={value.length === 0}>
           {chips}
         </MetaValueCell>
       </>
@@ -275,12 +278,13 @@ export function MilestoneMenu({
    *  and this text explains why. Absent = editable as before. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const milestones = useMilestones(repoPath, enabled, lens);
   const list = milestones.data ?? [];
   const current = list.find((m) => m.number === value);
   const display =
     value === null
-      ? "Milestone"
+      ? t("meta.milestone")
       : (current?.title ?? valueLabel ?? `#${value}`);
 
   return (
@@ -291,7 +295,7 @@ export function MilestoneMenu({
             <DisabledReasonButton
               variant="ghost"
               size="xs"
-              aria-label="Set milestone"
+              aria-label={t("meta.setMilestone")}
               disabled={!!disabledReason}
               reason={disabledReason}
             />
@@ -306,7 +310,7 @@ export function MilestoneMenu({
             onClick={() => onChange(null, null)}
             className={cn(value === null && "bg-accent text-accent-foreground")}
           >
-            No milestone
+            {t("meta.noMilestone")}
           </DropdownMenuItem>
           {list.map((m) => (
             <DropdownMenuItem
@@ -323,8 +327,9 @@ export function MilestoneMenu({
             <DropdownMenuItem disabled>
               {emptyPickerCopy(milestones, {
                 noun: "milestones",
-                loadFailed: "Couldn't load milestones.",
-                empty: "No open milestones",
+                loadFailed: t("meta.milestonesLoadFailed"),
+                empty: t("meta.noOpenMilestones"),
+                loading: t("shared.loading"),
               })}
             </DropdownMenuItem>
           )}
@@ -359,6 +364,7 @@ export function IssueTypeMenu({
    *  and this text explains why. Absent = editable as before. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const types = useIssueTypes(repoPath, enabled, lens);
   const list = types.data ?? [];
   // No types defined for this owner → hide the control entirely.
@@ -372,7 +378,7 @@ export function IssueTypeMenu({
             <DisabledReasonButton
               variant="ghost"
               size="xs"
-              aria-label="Set issue type"
+              aria-label={t("meta.setIssueType")}
               disabled={!!disabledReason}
               reason={disabledReason}
             />
@@ -391,7 +397,7 @@ export function IssueTypeMenu({
             onClick={() => onChange(null)}
             className={cn(!value && "bg-accent text-accent-foreground")}
           >
-            No type
+              {t("meta.noType")}
           </DropdownMenuItem>
           {list.map((t) => (
             <DropdownMenuItem

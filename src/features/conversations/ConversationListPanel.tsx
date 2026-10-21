@@ -20,15 +20,77 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ForgeNotReady } from "@/features/repository/ForgeNotReady";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { cn } from "@/lib/utils";
 import { LoadMoreRow } from "./LoadMoreRow";
 import {
   DEGRADED_ACTION_CLASS,
   type ListNoticeCause,
   listNotice,
+  OFFLINE_ROWS_NOTICE,
   offlinePendingMessage,
   resolveRemoteSection,
 } from "./remote-section-state";
+
+function localizedNoun(noun: string, tx: ReturnType<typeof useCommonText>) {
+  return tx(noun);
+}
+
+function localizedNotice(
+  message: string,
+  tx: ReturnType<typeof useCommonText>,
+) {
+  if (message === OFFLINE_ROWS_NOTICE) return tx(message);
+  const offline =
+    /^You're offline — (.+) will load once you're back online\.$/.exec(message);
+  if (offline)
+    return tx(
+      "You're offline — {{subject}} will load once you're back online.",
+      {
+        subject: localizedNoun(offline[1], tx),
+      },
+    );
+  const refreshWithRows =
+    /^Couldn't refresh (.+) — showing the last loaded results\.$/.exec(message);
+  if (refreshWithRows)
+    return tx("Couldn't refresh {{noun}} — showing the last loaded results.", {
+      noun: localizedNoun(refreshWithRows[1], tx),
+    });
+  const refreshWithoutRows = /^Couldn't refresh (.+)\.$/.exec(message);
+  if (refreshWithoutRows)
+    return tx("Couldn't refresh {{noun}}.", {
+      noun: localizedNoun(refreshWithoutRows[1], tx),
+    });
+  const loadMore =
+    /^Couldn't load more (.+) — showing the ones already loaded\.$/.exec(
+      message,
+    );
+  if (loadMore)
+    return tx(
+      "Couldn't load more {{noun}} — showing the ones already loaded.",
+      {
+        noun: localizedNoun(loadMore[1], tx),
+      },
+    );
+  return tx(message);
+}
+
+function localizedRetryLabel(
+  label: string | undefined,
+  noun: string,
+  tx: ReturnType<typeof useCommonText>,
+) {
+  const source = label ?? `Retry loading ${noun}`;
+  const more = /^Retry loading more (.+)$/.exec(source);
+  if (more)
+    return tx("Retry loading more {{noun}}", {
+      noun: localizedNoun(more[1], tx),
+    });
+  const retry = /^Retry loading (.+)$/.exec(source);
+  return retry
+    ? tx("Retry loading {{noun}}", { noun: localizedNoun(retry[1], tx) })
+    : tx(source);
+}
 
 /** The "New ▾" dropdown's items (GitHub + local, plus an optional third for a
  *  linked Jira project on the issues panel). */
@@ -162,6 +224,7 @@ export function DegradedListNotice(props: {
   /** Spacing for the visible line; the healthy state ignores it. */
   className?: string;
 }) {
+  const tx = useCommonText();
   const {
     noun,
     degraded,
@@ -189,19 +252,22 @@ export function DegradedListNotice(props: {
     >
       <p role="status">
         {degraded
-          ? (message ??
-            `Couldn't refresh ${noun} — showing the last loaded results.`)
+          ? localizedNotice(
+              message ??
+                `Couldn't refresh ${noun} — showing the last loaded results.`,
+              tx,
+            )
           : null}
       </p>
       {degraded && onRetry && (
         <button
           ref={retryRef}
           type="button"
-          aria-label={retryLabel ?? `Retry loading ${noun}`}
+          aria-label={localizedRetryLabel(retryLabel, noun, tx)}
           onClick={onRetry}
           className={DEGRADED_ACTION_CLASS}
         >
-          Retry
+          {tx("Retry")}
         </button>
       )}
       {degraded && extraAction}
@@ -408,6 +474,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
   /** Create dialogs etc. rendered after the list. */
   children?: ReactNode;
 }) {
+  const tx = useCommonText();
   const {
     stateFilter,
     onStateFilter,
@@ -578,7 +645,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
       case "offline":
         return (
           <p className="px-3 py-4 text-xs text-muted-foreground">
-            {offlinePendingMessage(remoteNoun)}
+            {localizedNotice(offlinePendingMessage(remoteNoun), tx)}
           </p>
         );
       case "gh-skeleton":
@@ -594,7 +661,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
           remoteNotReadySlot ?? (
             <ForgeNotReady
               repoPath={repoPath}
-              feature={feature}
+              feature={tx(feature)}
               retryRef={remoteRescue.retryRef}
             />
           )
@@ -614,7 +681,9 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
           <div ref={remoteRescue.retryRef}>
             {remoteErrorSlot ?? (
               <p className="px-3 py-4 text-xs text-muted-foreground">
-                Couldn't load {remoteNoun}.
+                {tx("Couldn't load {{noun}}.", {
+                  noun: localizedNoun(remoteNoun, tx),
+                })}
               </p>
             )}
           </div>
@@ -623,7 +692,16 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
         return (
           remoteEmptyCopy && (
             <p className="px-3 py-4 text-xs text-muted-foreground">
-              {remoteEmptyCopy}
+              {remoteEmptyCopy === null
+                ? null
+                : stateRemote.length > 0
+                  ? tx("No {{noun}} match the filter.", {
+                      noun: localizedNoun(remoteNoun, tx),
+                    })
+                  : tx("No {{state}} {{noun}}.", {
+                      state: tx(stateFilter === "open" ? "Open" : "Closed"),
+                      noun: localizedNoun(remoteNoun, tx),
+                    })}
             </p>
           )
         );
@@ -660,14 +738,14 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
       case "offline":
         return (
           <p className="px-3 py-4 text-xs text-muted-foreground">
-            {offlinePendingMessage("Jira issues")}
+            {localizedNotice(offlinePendingMessage("Jira issues"), tx)}
           </p>
         );
       case "error":
         return (
           jira.errorSlot ?? (
             <p className="px-3 py-4 text-xs text-muted-foreground">
-              Couldn't load Jira issues.
+              {tx("Couldn't load Jira issues.")}
             </p>
           )
         );
@@ -723,7 +801,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
               aria-pressed={stateFilter === s}
               onClick={() => onStateFilter(s)}
             >
-              {s === "open" ? "Open" : "Closed"}
+              {tx(s === "open" ? "Open" : "Closed")}
             </Button>
           ))}
           <DropdownMenu>
@@ -731,7 +809,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
               render={
                 <Button variant="ghost" size="xs" className="ml-auto">
                   <PlusIcon data-icon="inline-start" />
-                  New
+                  {tx("New")}
                   <CaretDownIcon data-icon="inline-end" />
                 </Button>
               }
@@ -772,7 +850,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
           ref={filterRef}
           value={filterText}
           onChange={(e) => onFilterText(e.target.value)}
-          placeholder="Search by title, #, author, or label"
+          placeholder={tx("Search by title, #, author, or label")}
           className="h-7 min-w-0 flex-1"
           autoComplete="off"
         />
@@ -792,7 +870,7 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
           onKeyDown={onListKeyDown}
         >
           <SectionHeader
-            label="Local"
+            label={tx("Local")}
             collapsed={localCollapsed}
             onToggle={onToggleLocal}
             count={visibleLocal.length}
@@ -803,8 +881,13 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
               {visibleLocal.length === 0 ? (
                 <p className="px-3 py-2 text-xs text-muted-foreground">
                   {stateLocal.length > 0
-                    ? `No local ${localNoun} match the filter.`
-                    : `No ${stateFilter} local ${localNoun}.`}
+                    ? tx("No local {{noun}} match the filter.", {
+                        noun: localizedNoun(localNoun, tx),
+                      })
+                    : tx("No {{state}} local {{noun}}.", {
+                        state: tx(stateFilter === "open" ? "Open" : "Closed"),
+                        noun: localizedNoun(localNoun, tx),
+                      })}
                 </p>
               ) : (
                 visibleLocal.map((item) => {
@@ -837,8 +920,10 @@ export function ConversationListPanel<L, R, J = never, P = never>(props: {
                   className="cursor-pointer px-3 py-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                 >
                   {showArchived
-                    ? "Hide archived"
-                    : `Show archived (${archivedLocalCount})`}
+                    ? tx("Hide archived")
+                    : tx("Show archived ({{count}})", {
+                        count: archivedLocalCount,
+                      })}
                 </button>
               )}
             </>

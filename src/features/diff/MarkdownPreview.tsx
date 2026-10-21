@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { InfoNote } from "@/components/info-note";
 import { Markdown } from "@/components/markdown/markdown";
 import { Button } from "@/components/ui/button";
@@ -43,15 +44,16 @@ export function MarkdownViewToggle({
   view: MarkdownDiffView;
   onChange: (view: MarkdownDiffView) => void;
 }) {
+  const { t } = useTranslation("diff");
   return (
-    <ButtonGroup aria-label="Markdown view">
+    <ButtonGroup aria-label={t("markdown.viewLabel")}>
       <Button
         variant={view === "raw" ? "secondary" : "ghost"}
         size="xs"
         aria-pressed={view === "raw"}
         onClick={() => onChange("raw")}
       >
-        Raw
+        {t("markdown.raw")}
       </Button>
       <Button
         variant={view === "preview" ? "secondary" : "ghost"}
@@ -59,7 +61,7 @@ export function MarkdownViewToggle({
         aria-pressed={view === "preview"}
         onClick={() => onChange("preview")}
       >
-        Preview
+        {t("markdown.preview")}
       </Button>
     </ButtonGroup>
   );
@@ -83,6 +85,7 @@ export function MarkdownDocPreview({
    *  unless the working tree really is that side — `null` reads the checkout. */
   revs: DiffContentRevs;
 }) {
+  const { t } = useTranslation("diff");
   const hasNew = revs.newRev !== undefined;
   const hasOld = revs.oldRev !== undefined;
   const newQ = useFileAtRev(repoPath, revs.newRev ?? null, filePath, hasNew);
@@ -119,35 +122,34 @@ export function MarkdownDocPreview({
   useReportPaneSettled((!hasNew && !hasOld) || !activeQ.isPending);
 
   if (!hasNew && !hasOld) {
-    return <DiffPlaceholder message="Nothing to preview" />;
+    return <DiffPlaceholder message={t("markdown.nothing")} />;
   }
   // Local reads settle near-instantly — render nothing on the way, the same
   // no-flash rule as the diff itself.
   if (activeQ.isPending) return null;
   if (activeQ.isError) {
-    return <DiffPlaceholder message="Could not load this file to preview" />;
+    return <DiffPlaceholder message={t("markdown.loadFailed")} />;
   }
   if (tooLarge) {
-    return <DiffPlaceholder message="File too large to preview" />;
+    return <DiffPlaceholder message={t("markdown.tooLarge")} />;
   }
   if (text === null) {
-    return <DiffPlaceholder message="Nothing to preview" />;
+    return <DiffPlaceholder message={t("markdown.nothing")} />;
   }
   if (cleaned === null) {
-    return <DiffPlaceholder message="File too large to preview" />;
+    return <DiffPlaceholder message={t("markdown.tooLarge")} />;
   }
   if (cleaned.trim() === "") {
-    return <DiffPlaceholder message="Nothing to preview" />;
+    return <DiffPlaceholder message={t("markdown.nothing")} />;
   }
   return (
     <>
       {showOld && (
-        <InfoNote>File deleted — previewing the previous version.</InfoNote>
+        <InfoNote>{t("markdown.deleted")}</InfoNote>
       )}
       {isMdxPath(filePath) && (
         <InfoNote>
-          Approximate preview: MDX components and expressions render as plain
-          text.
+          {t("markdown.mdxNote")}
         </InfoNote>
       )}
       {/* Same reading measure as the in-app guide's rendered pages. */}

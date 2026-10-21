@@ -48,7 +48,7 @@ import { useThreadJumpHotkeys } from "@/features/conversations/useThreadJumpHotk
 import { DiffPlaceholder } from "@/features/diff/DiffPlaceholder";
 import { CommitDetailView } from "@/features/history/CommitDetailView";
 import { JiraRefRow } from "@/features/issues/JiraRefRow";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { useStashReapplyRecovery } from "@/features/repository/useStashReapplyRecovery";
 import {
   isMergeMethodAllowed,
@@ -90,7 +90,7 @@ import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError } from "@/lib/toast";
 import { LinkedIssuesField } from "./LinkedIssuesField";
 import { LocalPrLifecycleRow } from "./LocalPrTimeline";
-import { PROMOTION_REASON, type PromotionKind } from "./PrMergeabilityBanner";
+import type { PromotionKind } from "./PrMergeabilityBanner";
 import { PromoteLocalPrDialog } from "./PromoteLocalPrDialog";
 import { PrReviewPanel } from "./PrReviewPanel";
 import {
@@ -100,6 +100,7 @@ import {
   type TimelineEntry,
 } from "./PrTimeline";
 import { ResolveConflictsView } from "./ResolveConflictsView";
+import { usePullsText } from "./use-pulls-text";
 import { useGeneratePrDescription } from "./useGeneratePrDescription";
 import {
   composeBodyWithRefs,
@@ -119,16 +120,23 @@ const MERGED_VERB: Record<MergeStrategy, string> = {
  *  read lands, and the tab then shows no count rather than a wrong one. */
 const SECTION_LABEL: Record<
   PrSection,
-  (counts: {
-    comments: number;
-    commits: number;
-    files: number | undefined;
-  }) => string
+  (
+    counts: {
+      comments: number;
+      commits: number;
+      files: number | undefined;
+    },
+    tx: ReturnType<typeof usePullsText>,
+  ) => string
 > = {
-  conversation: (c) => `Conversation (${c.comments})`,
-  commits: (c) => `Commits (${c.commits})`,
-  files: (c) => `Files${c.files === undefined ? "" : ` (${c.files})`}`,
-  review: () => "Review",
+  conversation: (c, tx) =>
+    tx("Conversation ({{count}})", { count: c.comments }),
+  commits: (c, tx) => tx("Commits ({{count}})", { count: c.commits }),
+  files: (c, tx) =>
+    c.files === undefined
+      ? tx("Files")
+      : tx("Files ({{count}})", { count: c.files }),
+  review: (_c, tx) => tx("Review"),
 };
 
 export function LocalPrView({
@@ -138,6 +146,7 @@ export function LocalPrView({
   repoPath: string;
   id: string;
 }) {
+  const tx = usePullsText();
   const prs = useLocalPrs(repoPath);
   const pr = prs.data?.find((p) => p.id === id);
   const update = useUpdateLocalPr(repoPath);
@@ -510,7 +519,7 @@ export function LocalPrView({
     // Any local merge in flight refuses another: they share the refs it advances.
     if (!pr || runningMerge) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const message = pr.body.trim() ? `${pr.title}\n\n${pr.body}` : pr.title;
@@ -534,7 +543,13 @@ export function LocalPrView({
             mergedAt: new Date().toISOString(),
           }),
         });
-        toast.success(`${MERGED_VERB[strategy]} ${pr.head} into ${pr.base}`);
+        toast.success(
+          tx("{{verb}} {{head}} into {{base}}", {
+            verb: tx(MERGED_VERB[strategy]),
+            head: pr.head,
+            base: pr.base,
+          }),
+        );
         return;
       }
       // Conflicts: the merge is paused in an isolated worktree (the user's
@@ -564,7 +579,7 @@ export function LocalPrView({
           },
         }),
       });
-      toast.warning("Merge has conflicts — resolve them to finish");
+      toast.warning(tx("Merge has conflicts — resolve them to finish"));
     } catch (e) {
       toastError(e);
     }
@@ -576,12 +591,14 @@ export function LocalPrView({
   async function doUpdateBranch() {
     if (!pr || runningUpdate) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
       await updateBranchFrom.mutateAsync({ branch: pr.head, base: pr.base });
-      toast.success(`Updated ${pr.head} from ${pr.base}`);
+      toast.success(
+        tx("Updated {{head}} from {{base}}", { head: pr.head, base: pr.base }),
+      );
     } catch (e) {
       // Only an in-place update (head IS the current branch) can be refused
       // over uncommitted changes — the throwaway worktree path is always
@@ -591,8 +608,14 @@ export function LocalPrView({
         recovery.handleError(e, {
           operationLabel: "update",
           detail: pr.base,
-          reappliedMessage: `Updated from ${pr.base} and reapplied your changes.`,
-          plainMessage: `Updated ${pr.head} from ${pr.base}`,
+          reappliedMessage: tx(
+            "Updated from {{base}} and reapplied your changes.",
+            { base: pr.base },
+          ),
+          plainMessage: tx("Updated {{head}} from {{base}}", {
+            head: pr.head,
+            base: pr.base,
+          }),
           run: { op: "merge", ref: pr.base },
         })
       ) {
@@ -627,13 +650,14 @@ export function LocalPrView({
           <div className="flex items-start gap-1.5 text-warning">
             <WarningIcon className="mt-px size-3.5 shrink-0" />
             <span className="min-w-0">
-              This merge will conflict in{" "}
+              {tx("This merge will conflict in")}{" "}
               <span className="font-mono">{list}</span>
             </span>
           </div>
           <div className="pl-5 text-muted-foreground">
-            You'll resolve the conflicts in an editor — your working tree stays
-            untouched.
+            {tx(
+              "You'll resolve the conflicts in an editor — your working tree stays untouched.",
+            )}
           </div>
         </>
       );
@@ -641,7 +665,7 @@ export function LocalPrView({
       prediction = (
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <CheckIcon className="size-3.5 shrink-0" />
-          Merges cleanly
+          {tx("Merges cleanly")}
         </div>
       );
     }
@@ -651,8 +675,8 @@ export function LocalPrView({
       <div className="flex items-center gap-1.5 text-muted-foreground">
         <InfoIcon className="size-3.5 shrink-0" />
         {!canMerge
-          ? "Approve this PR to merge"
-          : "Commit or stash your changes to merge into the current branch"}
+          ? tx("Approve this PR to merge")
+          : tx("Commit or stash your changes to merge into the current branch")}
       </div>
     ) : null;
 
@@ -665,14 +689,22 @@ export function LocalPrView({
         <div className="flex items-start gap-1.5 text-muted-foreground">
           <InfoIcon className="mt-px size-3.5 shrink-0" />
           <span className="min-w-0">
-            <span className="font-mono">{pr.base}</span> has {behind.length}{" "}
-            commit{behind.length === 1 ? "" : "s"}{" "}
-            <span className="font-mono">{pr.head}</span> doesn't.{" "}
-            <span className="font-mono">{pr.head}</span>
-            {PROMOTION_REASON[promotionKind]}, so this gap is expected and
-            doesn't need closing. Updating the branch would merge{" "}
-            <span className="font-mono">{pr.base}</span> back into{" "}
-            <span className="font-mono">{pr.head}</span>.
+            {tx(
+              behind.length === 1
+                ? "A {{head}} le falta {{count}} commit que sí está en {{base}}."
+                : "A {{head}} le faltan {{count}} commits que sí están en {{base}}.",
+              { head: pr.head, count: behind.length, base: pr.base },
+            )}{" "}
+            {tx(
+              promotionKind === "default"
+                ? "{{head}} es la rama predeterminada del repositorio."
+                : "{{head}} es una rama de publicación de este repositorio.",
+              { head: pr.head },
+            )}{" "}
+            {tx(
+              "Por eso, esta diferencia es esperada y no hace falta corregirla. Actualizar la rama integraría {{base}} de vuelta en {{head}}.",
+              { base: pr.base, head: pr.head },
+            )}
           </span>
         </div>
       ) : null;
@@ -712,7 +744,7 @@ export function LocalPrView({
             <span className="font-mono">{pr.base}</span>
             <span>•</span>
             <span>
-              local · <RelativeTime date={pr.createdAt} />
+              {tx("local ·")} <RelativeTime date={pr.createdAt} />
             </span>
           </div>
         </header>
@@ -764,10 +796,10 @@ export function LocalPrView({
               variant="outline"
               size="xs"
               onClick={openEdit}
-              title="Edit the title and description"
+              title={tx("Edit the title and description")}
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Edit
+              {tx("Edit")}
             </Button>
           )}
           <Badge
@@ -777,9 +809,9 @@ export function LocalPrView({
             {pr.status}
           </Badge>
           {pr.approved && pr.status === "open" && (
-            <Badge variant="secondary">approved</Badge>
+            <Badge variant="secondary">{tx("approved")}</Badge>
           )}
-          {pr.archived && <Badge variant="secondary">archived</Badge>}
+          {pr.archived && <Badge variant="secondary">{tx("archived")}</Badge>}
         </div>
         <JiraRefRow repoPath={repoPath} sources={jiraRefSources} />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -788,7 +820,7 @@ export function LocalPrView({
           <span className="font-mono">{pr.base}</span>
           <span>•</span>
           <span>
-            local · <RelativeTime date={pr.createdAt} />
+            {tx("local ·")} <RelativeTime date={pr.createdAt} />
           </span>
         </div>
         {(pr.labels.length > 0 || pr.status === "open") && (
@@ -798,11 +830,15 @@ export function LocalPrView({
               <Popover.Root>
                 <Popover.Trigger
                   render={
-                    <Button variant="ghost" size="xs" aria-label="Add label" />
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label={tx("Add label")}
+                    />
                   }
                 >
                   <TagIcon data-icon="inline-start" />
-                  Labels
+                  {tx("Labels")}
                 </Popover.Trigger>
                 <Popover.Portal container={portalContainer}>
                   <Popover.Positioner
@@ -812,7 +848,7 @@ export function LocalPrView({
                   >
                     <Popover.Popup className="w-60 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                       <p className="px-1 pb-1.5 text-xs font-medium">
-                        Add label
+                        {tx("Add label")}
                       </p>
                       <div className="flex gap-2 px-1">
                         <Input
@@ -824,7 +860,7 @@ export function LocalPrView({
                               addLabel();
                             }
                           }}
-                          placeholder="e.g. bug, refactor"
+                          placeholder={tx("e.g. bug, refactor")}
                           className="h-7 flex-1"
                           autoComplete="off"
                         />
@@ -834,7 +870,7 @@ export function LocalPrView({
                           disabled={!labelInput.trim()}
                           onClick={addLabel}
                         >
-                          Add
+                          {tx("Add")}
                         </Button>
                       </div>
                     </Popover.Popup>
@@ -851,7 +887,7 @@ export function LocalPrView({
                 {pr.status === "open" && (
                   <button
                     type="button"
-                    aria-label={`Remove label ${label}`}
+                    aria-label={tx("Remove label {{label}}", { label })}
                     className="text-muted-foreground hover:text-foreground"
                     onClick={() => removeLabel(label)}
                   >
@@ -871,11 +907,14 @@ export function LocalPrView({
               aria-pressed={section === s}
               onClick={() => setSection(s)}
             >
-              {SECTION_LABEL[s]({
-                comments: pr.comments.length,
-                commits: ahead.length,
-                files: fileCount,
-              })}
+              {SECTION_LABEL[s](
+                {
+                  comments: pr.comments.length,
+                  commits: ahead.length,
+                  files: fileCount,
+                },
+                tx,
+              )}
             </Button>
           ))}
         </div>
@@ -945,7 +984,7 @@ export function LocalPrView({
                     <Markdown refs={mentions.refs}>{pr.body}</Markdown>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      No description.
+                      {tx("No description.")}
                     </p>
                   )}
                 </div>
@@ -955,7 +994,7 @@ export function LocalPrView({
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        aria-label="Description actions"
+                        aria-label={tx("Description actions")}
                         className="shrink-0 text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                       />
                     }
@@ -964,16 +1003,16 @@ export function LocalPrView({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-44">
                     <DropdownMenuItem onClick={() => quoteReply(pr.body)}>
-                      Quote reply
+                      {tx("Quote reply")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => copyText(pr.body, "Markdown copied")}
                     >
-                      Copy markdown
+                      {tx("Copy markdown")}
                     </DropdownMenuItem>
                     {pr.status === "open" && (
                       <DropdownMenuItem onClick={openEdit}>
-                        Edit
+                        {tx("Edit")}
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>
@@ -1095,9 +1134,9 @@ export function LocalPrView({
             onChange={setComment}
             onSubmit={addComment}
             onClear={() => setComment("")}
-            submitLabel="Comment"
-            ariaLabel="Leave a note"
-            placeholder="Leave a note…"
+            submitLabel={tx("Comment")}
+            ariaLabel={tx("Leave a note")}
+            placeholder={tx("Leave a note…")}
             mentions={mentions}
             actions={
               pr.status === "open" && (
@@ -1108,7 +1147,7 @@ export function LocalPrView({
                   onClick={toggleApprove}
                 >
                   <CheckCircleIcon data-icon="inline-start" />
-                  {pr.approved ? "Approved" : "Approve"}
+                  {pr.approved ? tx("Approved") : tx("Approve")}
                 </Button>
               )
             }
@@ -1124,10 +1163,10 @@ export function LocalPrView({
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelectedCommitHash(null)}
-                aria-label="Back to commits"
+                aria-label={tx("Back to commits")}
                 className="-ml-2 h-7 text-muted-foreground hover:text-foreground"
               >
-                ‹ Commits
+                ‹ {tx("Commits")}
               </Button>
             </div>
             {/* Local commits exist in the repo, so the full commit detail (with
@@ -1145,7 +1184,7 @@ export function LocalPrView({
               author: c.author,
               date: c.date,
             }))}
-            emptyMessage="No commits to merge."
+            emptyMessage={tx("No commits to merge.")}
             onSelect={setSelectedCommitHash}
             selectedId={selectedCommitHash}
           />
@@ -1171,7 +1210,10 @@ export function LocalPrView({
                 variant="outline"
                 size="sm"
                 onClick={() => setPromoteOpen(true)}
-                title={`Push the branch and open this ${promoteNoun} on ${promoteLabel}`}
+                title={tx(
+                  "Push the branch and open this {{noun}} on {{provider}}",
+                  { noun: tx(promoteNoun), provider: promoteLabel },
+                )}
               >
                 {/* ProviderIcon forwards no attributes, so the wrapper carries the
                     `data-icon` the button's leading-icon padding keys off. An unset
@@ -1179,7 +1221,7 @@ export function LocalPrView({
                 <span data-icon="inline-start" className="flex">
                   <ProviderIcon provider={provider ?? "github"} />
                 </span>
-                Publish to {promoteLabel}
+                {tx("Publish to {{provider}}", { provider: promoteLabel })}
               </Button>
             )}
             {/* The label swaps while a note rides along: the action changed
@@ -1188,15 +1230,15 @@ export function LocalPrView({
               variant="outline"
               size="sm"
               disabled={statusHeld}
-              reason="Saving…"
+              reason={tx("Saving…")}
               onClick={() => void setStatus("closed")}
               title={
                 draftRidesStateChange
-                  ? "Closes and posts your draft as a comment"
+                  ? tx("Closes and posts your draft as a comment")
                   : undefined
               }
             >
-              {draftRidesStateChange ? "Close with comment" : "Close"}
+              {draftRidesStateChange ? tx("Close with comment") : tx("Close")}
             </DisabledReasonButton>
             <span className="flex-1" />
             {/* GitHub-style "Update branch": only when head has fallen behind
@@ -1224,27 +1266,35 @@ export function LocalPrView({
                   switch (true) {
                     case runningUpdate?.head === pr.head &&
                       runningUpdate.base === pr.base:
-                      return "Updating this branch…";
+                      return tx("Updating this branch…");
                     case runningUpdate?.head != null &&
                       runningUpdate.base != null:
-                      return `Updating ${runningUpdate.head} from ${runningUpdate.base}…`;
+                      return tx("Updating {{head}} from {{base}}…", {
+                        head: runningUpdate.head,
+                        base: runningUpdate.base,
+                      });
                     case runningUpdate !== undefined:
-                      return "Updating a branch…";
+                      return tx("Updating a branch…");
                     case recovery.pending:
-                      return "Another git operation is running.";
+                      return tx("Another git operation is running.");
                     case defaultBranch.isPending:
-                      return "Checking which branch is the default…";
+                      return tx("Checking which branch is the default…");
                     case rulesSettling:
-                      return "Checking this repository's promotion branches…";
+                      return tx(
+                        "Checking this repository's promotion branches…",
+                      );
                     default:
                       return undefined;
                   }
                 })()}
-                title={`Merge ${pr.base} into ${pr.head} to catch it up`}
+                title={tx("Merge {{base}} into {{head}} to catch it up", {
+                  base: pr.base,
+                  head: pr.head,
+                })}
                 onClick={() => void doUpdateBranch()}
               >
                 <ArrowClockwiseIcon data-icon="inline-start" />
-                Update branch
+                {tx("Update branch")}
               </DisabledReasonButton>
             )}
             <DropdownMenu>
@@ -1259,7 +1309,7 @@ export function LocalPrView({
                 }
               >
                 <GitMergeIcon data-icon="inline-start" />
-                Merge
+                {tx("Merge")}
                 <CaretDownIcon data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -1269,7 +1319,7 @@ export function LocalPrView({
                   }
                   onClick={() => void doMerge("merge")}
                 >
-                  Create a merge commit
+                  {tx("Create a merge commit")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={
@@ -1277,7 +1327,7 @@ export function LocalPrView({
                   }
                   onClick={() => void doMerge("squash")}
                 >
-                  Squash and merge
+                  {tx("Squash and merge")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={
@@ -1285,7 +1335,7 @@ export function LocalPrView({
                   }
                   onClick={() => void doMerge("rebase")}
                 >
-                  Rebase and merge
+                  {tx("Rebase and merge")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1298,16 +1348,16 @@ export function LocalPrView({
               variant="outline"
               size="sm"
               disabled={statusHeld}
-              reason="Saving…"
+              reason={tx("Saving…")}
               onClick={() => void setStatus("open")}
               title={
                 draftRidesStateChange
-                  ? "Reopens and posts your draft as a comment"
+                  ? tx("Reopens and posts your draft as a comment")
                   : undefined
               }
             >
               <ArrowCounterClockwiseIcon data-icon="inline-start" />
-              {draftRidesStateChange ? "Reopen with comment" : "Reopen"}
+              {draftRidesStateChange ? tx("Reopen with comment") : tx("Reopen")}
             </DisabledReasonButton>
           </>
         )}
@@ -1328,8 +1378,10 @@ export function LocalPrView({
           if (!open) prGen.cancel();
           edit.setOpen(open);
         }}
-        title="Edit pull request"
-        description="Updates the title and description of this local pull request."
+        title={tx("Edit pull request")}
+        description={tx(
+          "Updates the title and description of this local pull request.",
+        )}
         contentClassName={undefined}
         bodyTextareaClassName="max-h-72"
         mentions={mentions}
@@ -1358,7 +1410,7 @@ export function LocalPrView({
               onClick={prGen.cancel}
             >
               <XIcon data-icon="inline-start" />
-              Cancel
+              {tx("Cancel")}
             </Button>
           ) : (
             <Button
@@ -1371,12 +1423,12 @@ export function LocalPrView({
               // disabled Generate's shortcut is dead too.
               title={
                 ahead.length > 0
-                  ? `Generate the title and description with AI${generateHint}`
-                  : "Generate the title and description with AI"
+                  ? `${tx("Generate the title and description with AI")}${generateHint}`
+                  : tx("Generate the title and description with AI")
               }
             >
               <SparkleIcon data-icon="inline-start" />
-              Generate
+              {tx("Generate")}
             </Button>
           )
         }
@@ -1385,7 +1437,9 @@ export function LocalPrView({
       <DeleteCommentDialog
         commentId={deletingCommentId}
         onClose={() => setDeletingCommentId(null)}
-        description="Removes this comment from the local pull request. This cannot be undone."
+        description={tx(
+          "Removes this comment from the local pull request. This cannot be undone.",
+        )}
         onConfirm={(commentId) => {
           deleteComment(commentId);
           setDeletingCommentId(null);

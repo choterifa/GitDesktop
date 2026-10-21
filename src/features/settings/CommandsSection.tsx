@@ -18,6 +18,7 @@ import { withForm } from "@/lib/form";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import type { CustomCommand } from "@/lib/settings/api";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 const EMPTY_COMMAND: Omit<CustomCommand, "id"> = {
   name: "",
@@ -53,6 +54,7 @@ function CommandDialog({
   onSave: (cmd: CustomCommand) => void;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   const [draft, setDraft] = useState<Omit<CustomCommand, "id">>(
     initial ?? EMPTY_COMMAND,
   );
@@ -83,18 +85,19 @@ function CommandDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {initial ? "Edit command" : "New slash command"}
+            {initial ? tx("Edit command") : tx("New slash command")}
           </DialogTitle>
           <DialogDescription>
-            A reusable prompt you trigger by typing{" "}
-            <code className="font-mono">/name</code> in the agent composer.
+            {tx("A reusable prompt you trigger by typing")}{" "}
+            <code className="font-mono">/name</code>{" "}
+            {tx("in the agent composer.")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
           <div className="grid grid-cols-[10rem_1fr] gap-3">
             <div className="space-y-2">
-              <Label htmlFor="cc-name">Name</Label>
+              <Label htmlFor="cc-name">{tx("Name")}</Label>
               <div className="flex items-center gap-1">
                 <span className="text-muted-foreground">/</span>
                 <Input
@@ -109,42 +112,51 @@ function CommandDialog({
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cc-desc">Description</Label>
+              <Label htmlFor="cc-desc">{tx("Description")}</Label>
               <Input
                 id="cc-desc"
                 value={draft.description}
                 onChange={(e) => set("description", e.target.value)}
-                placeholder="Prep the branch for review"
+                placeholder={tx("Prep the branch for review")}
               />
             </div>
           </div>
           {duplicate && (
             <p className="text-xs text-destructive">
-              Another command is already called “/{name}”.
+              {tx("Another command is already called “/{name}”.").replace(
+                "{name}",
+                name,
+              )}
             </p>
           )}
           {!duplicate && overridesBuiltin && (
             <p className="text-xs text-warning">
-              This overrides the built-in “/{name}” command.
+              {tx("This overrides the built-in “/{name}” command.").replace(
+                "{name}",
+                name,
+              )}
             </p>
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="cc-prompt">Prompt</Label>
+            <Label htmlFor="cc-prompt">{tx("Prompt")}</Label>
             <Textarea
               id="cc-prompt"
               value={draft.prompt}
               onChange={(e) => set("prompt", e.target.value)}
-              placeholder={
-                "Review the staged changes, then open a PR.\n\n$ARGUMENTS"
-              }
+              placeholder={tx(
+                "Review the staged changes, then open a PR.\n\n$ARGUMENTS",
+              )}
               className="min-h-40 font-mono"
             />
             <p className="text-xs text-muted-foreground">
-              Use <code className="font-mono">$ARGUMENTS</code> for everything
-              typed after the command, or <code className="font-mono">$1</code>,{" "}
-              <code className="font-mono">$2</code>… for individual words. With
-              no placeholder, extra text is appended to the prompt.
+              {tx("Use")} <code className="font-mono">$ARGUMENTS</code>{" "}
+              {tx("for everything typed after the command, or")}{" "}
+              <code className="font-mono">$1</code>,{" "}
+              <code className="font-mono">$2</code>…{" "}
+              {tx(
+                "for individual words. With no placeholder, extra text is appended to the prompt.",
+              )}
             </p>
           </div>
         </div>
@@ -152,14 +164,14 @@ function CommandDialog({
         <DialogFooter>
           {!canSave && !duplicate && (
             <p className="mr-auto self-center text-xs text-muted-foreground">
-              A name and prompt are required.
+              {tx("A name and prompt are required.")}
             </p>
           )}
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <Button onClick={save} disabled={!canSave}>
-            {initial ? "Save command" : "Add command"}
+            {initial ? tx("Save command") : tx("Add command")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -170,6 +182,7 @@ function CommandDialog({
 export const CommandsSection = withForm({
   ...settingsFormOpts,
   render: function CommandsSectionRender({ form }) {
+    const tx = useSettingsText();
     const commands = useSelector(form.store, (s) => s.values.customCommands);
     const [editing, setEditing] = useState<CustomCommand | "new" | null>(null);
     const [activeIndex, setActiveIndex] = useState(-1);
@@ -217,17 +230,19 @@ export const CommandsSection = withForm({
       <section className="space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-medium">Slash commands</h2>
+            <h2 className="text-sm font-medium">{tx("Slash commands")}</h2>
             <p className="text-xs text-muted-foreground">
-              Reusable prompts for the agent composer — type{" "}
-              <code className="font-mono">/</code> to pick one. They appear
-              alongside the built-ins and the selected agent's own commands and{" "}
-              <strong className="font-medium">skills</strong> — project and
-              global, including the shared{" "}
+              {tx("Reusable prompts for the agent composer — type")}{" "}
+              <code className="font-mono">/</code>{" "}
+              {tx(
+                "to pick one. They appear alongside the built-ins and the selected agent's own commands and",
+              )}{" "}
+              <strong className="font-medium">{tx("skills")}</strong>
+              {` ${tx("— project and global, including the shared")}`}{" "}
               <code className="rounded bg-muted px-1 py-0.5">
                 .agents/skills
               </code>{" "}
-              store.
+              {tx("store.")}
             </p>
           </div>
           <Button
@@ -236,17 +251,17 @@ export const CommandsSection = withForm({
             className="shrink-0"
             onClick={() => setEditing("new")}
           >
-            <PlusIcon data-icon="inline-start" /> Add command
+            <PlusIcon data-icon="inline-start" /> {tx("Add command")}
           </Button>
         </div>
 
         {list.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No custom commands yet. Add one, or define{" "}
+            {tx("No custom commands yet. Add one, or define")}{" "}
             <code className="rounded bg-muted px-1 py-0.5">
               .claude/commands/*.md
             </code>{" "}
-            in a repo to share them with your team.
+            {tx("in a repo to share them with your team.")}
           </p>
         ) : (
           // A roving-focus list — arrow keys move between rows, Enter edits.
@@ -255,7 +270,7 @@ export const CommandsSection = withForm({
               <div
                 key={cmd.id}
                 data-cc-row={cmd.id}
-                aria-label={`/${cmd.name}${cmd.description ? `, ${cmd.description}` : ""}. Press Enter to edit.`}
+                aria-label={`${`/${cmd.name}${cmd.description ? `, ${cmd.description}` : ""}`}${tx(". Press Enter to edit.")}`}
                 tabIndex={
                   i === safeActive || (safeActive === -1 && i === 0) ? 0 : -1
                 }
@@ -282,7 +297,7 @@ export const CommandsSection = withForm({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Edit /${cmd.name}`}
+                    aria-label={tx("Edit /{name}").replace("{name}", cmd.name)}
                     onClick={() => setEditing(cmd)}
                   >
                     <PencilSimpleIcon />
@@ -290,7 +305,10 @@ export const CommandsSection = withForm({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Remove /${cmd.name}`}
+                    aria-label={tx("Remove /{name}").replace(
+                      "{name}",
+                      cmd.name,
+                    )}
                     onClick={() => removeCommand(cmd.id)}
                   >
                     <XIcon />

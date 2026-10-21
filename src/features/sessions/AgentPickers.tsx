@@ -35,6 +35,7 @@ import { EFFORT_LEVEL_LABELS, EFFORT_LEVELS } from "@/lib/ai/review-effort";
 import type { McpServer } from "@/lib/settings/api";
 import { useUiStore } from "@/lib/stores/ui";
 import { cn } from "@/lib/utils";
+import { useSessionText } from "./use-session-text";
 
 // The agent / model / effort pickers, shared by the task composer, the plan
 // composer, the plan's Implement popover, and the best-of-N arm editor. Kept in
@@ -51,8 +52,13 @@ export const AGENT_LABELS: Record<AgentKind, string> = {
 
 /** The warning shown when a container session's agent isn't baked into the image.
  *  One source so the composer's isolation note and the best-of-N arms can't drift. */
-export function imageMissingAgentText(agent: AgentKind): string {
-  return `The agent image wasn't built with ${AGENT_LABELS[agent]} — add it under Settings → AI and rebuild.`;
+export function imageMissingAgentText(
+  agent: AgentKind,
+  tx?: (source: string, options?: Record<string, unknown>) => string,
+): string {
+  return tx
+    ? tx("The agent image wasn't built with {{agent}} — add it under Settings → AI and rebuild.", { agent: AGENT_LABELS[agent] })
+    : `The agent image wasn't built with ${AGENT_LABELS[agent]} — add it under Settings → AI and rebuild.`;
 }
 
 /** The model for a run: the agent's models are searchable — its live catalog
@@ -69,6 +75,7 @@ export function ModelPicker({
   onChange: (m: string) => void;
   agent: AgentKind;
 }) {
+  const tx = useSessionText();
   // Listing a CLI's catalog spawns it, so the probe waits for intent to pick a
   // model — sticky, so the list stays put for the rest of the picker's life.
   const [wanted, setWanted] = useState(false);
@@ -104,8 +111,8 @@ export function ModelPicker({
       {/* Composer-toolbar weight: quiet until focus, matching the sibling
           Select-based pickers on the same row. */}
       <ComboboxInput
-        aria-label="Agent model"
-        placeholder="Default model"
+        aria-label={tx("Agent model")}
+        placeholder={tx("Default model")}
         // Long ids outrun the capped width with the caret hiding the tail, and
         // an input has no truncation tooltip of its own.
         title={value || undefined}
@@ -116,7 +123,7 @@ export function ModelPicker({
           long ids (e.g. `opencode/…`). Size to content, capped on-screen. */}
       <ComboboxContent className="w-fit max-w-sm">
         <ComboboxEmpty>
-          {modelPickerEmptyText(available.isFetching)}
+          {tx(modelPickerEmptyText(available.isFetching))}
         </ComboboxEmpty>
         {/* Render FUNCTION, not static rows: only this form maps the store's
             filtered items, so static children would never narrow as you type. */}
@@ -152,15 +159,19 @@ export function EffortPicker({
   value: string;
   onChange: (e: string) => void;
 }) {
+  const tx = useSessionText();
+  const items = Object.fromEntries(
+    Object.entries(EFFORT_ITEMS).map(([level, label]) => [level, tx(label)]),
+  );
   return (
     <Select
-      items={EFFORT_ITEMS}
+      items={items}
       value={value || DEFAULT_EFFORT}
       onValueChange={(v) => onChange(v === DEFAULT_EFFORT ? "" : String(v))}
     >
       <SelectTrigger
         size="sm"
-        aria-label="Reasoning effort"
+        aria-label={tx("Reasoning effort")}
         className="w-auto gap-1 border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent"
       >
         <GaugeIcon className="size-3.5" />
@@ -169,7 +180,7 @@ export function EffortPicker({
       <SelectContent>
         {Object.entries(EFFORT_ITEMS).map(([level, label]) => (
           <SelectItem key={level} value={level}>
-            {label}
+            {tx(label)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -200,6 +211,7 @@ function Segmented<T extends string>({
    *  so arrowing between options announces the warning with the selection. */
   describedBy?: string;
 }) {
+  const tx = useSessionText();
   const groupRef = useRef<HTMLDivElement>(null);
   // The tab stop. A value outside `options` (shouldn't happen) still leaves the
   // group reachable rather than trapping the keyboard past it.
@@ -251,7 +263,7 @@ function Segmented<T extends string>({
               : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
-          {o.label}
+      {tx(o.label)}
         </button>
       ))}
     </div>
@@ -368,6 +380,7 @@ export function ComposerOptions({
     disabledReason?: string;
   };
 }) {
+  const tx = useSessionText();
   const openSettings = useUiStore((s) => s.openSettings);
   // Links the Isolation caveat to its radiogroup (announced with the selection).
   const isolationNoteId = useId();
@@ -380,14 +393,18 @@ export function ComposerOptions({
   // A summary of the non-default choices, surfaced as a count badge + tooltip so
   // the collapsed state reads at a glance without opening the popover.
   const summary: string[] = [];
-  if (mode === "ensemble") summary.push("Best-of-N");
-  if (effort) summary.push(`Effort: ${effortLabel(effort)}`);
+  if (mode === "ensemble") summary.push(tx("Best-of-N"));
+  if (effort) summary.push(tx("Effort: {{level}}", { level: tx(effortLabel(effort)) }));
   // Only an EXPLICIT pick that differs from the global setting counts — following
   // Settings → AI isn't a choice the user made here.
   if (isolation?.isOverride)
-    summary.push(`Isolation: ${isolationLabel(isolation.value)}`);
+    summary.push(tx("Isolation: {{value}}", { value: tx(isolationLabel(isolation.value)) }));
   if (mcpCount > 0)
-    summary.push(`${mcpCount} MCP server${mcpCount > 1 ? "s" : ""}`);
+    summary.push(
+      mcpCount === 1
+        ? tx("1 MCP server")
+        : tx("{{count}} MCP servers", { count: mcpCount }),
+    );
   const count = summary.length;
 
   const toggleMcp = (id: string, on: boolean) =>
@@ -396,18 +413,18 @@ export function ComposerOptions({
   return (
     <Popover>
       <PopoverTrigger
-        title={count > 0 ? summary.join(" · ") : "Run options"}
+        title={count > 0 ? summary.join(" · ") : tx("Run options")}
         render={
           <Button
             size="sm"
             variant="ghost"
-            aria-label="Run options"
+            aria-label={tx("Run options")}
             className="gap-1 border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent"
           />
         }
       >
         <GearSixIcon className="size-3.5" />
-        Options
+        {tx("Options")}
         {count > 0 && (
           <span className="ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-medium text-primary tabular-nums">
             {count}
@@ -419,39 +436,39 @@ export function ComposerOptions({
           {mode !== undefined && onMode && (
             <OptionField
               icon={<UsersThreeIcon className="size-3.5" />}
-              label="Run mode"
+              label={tx("Run mode")}
             >
               <Segmented
-                ariaLabel="Run mode"
+                ariaLabel={tx("Run mode")}
                 value={mode}
                 onChange={onMode}
-                options={RUN_MODE_OPTIONS}
+                options={RUN_MODE_OPTIONS.map((option) => ({ ...option, label: tx(option.label) }))}
               />
             </OptionField>
           )}
           {effort !== undefined && onEffort && (
             <OptionField
               icon={<GaugeIcon className="size-3.5" />}
-              label="Reasoning effort"
+              label={tx("Reasoning effort")}
             >
               <Segmented
-                ariaLabel="Reasoning effort"
+                ariaLabel={tx("Reasoning effort")}
                 value={effort}
                 onChange={onEffort}
-                options={EFFORT_OPTIONS}
+                options={EFFORT_OPTIONS.map((option) => ({ ...option, label: tx(option.label) }))}
               />
             </OptionField>
           )}
           {isolation && (
             <OptionField
               icon={<ShieldCheckIcon className="size-3.5" />}
-              label="Isolation"
+              label={tx("Isolation")}
             >
               <Segmented
-                ariaLabel="Isolation"
+                ariaLabel={tx("Isolation")}
                 value={isolation.value}
                 onChange={isolation.onChange}
-                options={ISOLATION_OPTIONS}
+                options={ISOLATION_OPTIONS.map((option) => ({ ...option, label: tx(option.label) }))}
                 describedBy={isolation.note ? isolationNoteId : undefined}
               />
               {isolation.note && (
@@ -482,7 +499,7 @@ export function ComposerOptions({
                   className="h-7 justify-start text-muted-foreground"
                   onClick={isolation.onSettingsAction}
                 >
-                  Set up in Settings…
+                  {tx("Set up in Settings…")}
                 </Button>
               )}
             </OptionField>
@@ -490,7 +507,7 @@ export function ComposerOptions({
           {mcp?.disabledReason ? (
             <OptionField
               icon={<PlugsConnectedIcon className="size-3.5" />}
-              label="MCP servers"
+              label={tx("MCP servers")}
             >
               <p className="text-[11px] text-muted-foreground">
                 {mcp.disabledReason}
@@ -499,7 +516,7 @@ export function ComposerOptions({
           ) : mcpListable ? (
             <OptionField
               icon={<PlugsConnectedIcon className="size-3.5" />}
-              label="MCP servers"
+              label={tx("MCP servers")}
             >
               <div className="flex flex-col gap-0.5">
                 {mcp.servers.map((s) => (
@@ -528,7 +545,7 @@ export function ComposerOptions({
                   className="mt-0.5 h-7 justify-start text-muted-foreground"
                   onClick={() => openSettings("mcp-servers")}
                 >
-                  Manage servers…
+                  {tx("Manage servers…")}
                 </Button>
               </div>
             </OptionField>
@@ -560,15 +577,19 @@ export function AgentPicker({
   value: AgentKind;
   onChange: (a: AgentKind) => void;
 }) {
+  const tx = useSessionText();
+  const items = Object.fromEntries(
+    Object.entries(AGENT_PICKER_ITEMS).map(([kind, label]) => [kind, tx(label)]),
+  );
   return (
     <Select
-      items={AGENT_PICKER_ITEMS}
+      items={items}
       value={value}
       onValueChange={(v) => onChange(isAgentKind(v) ? v : "claude")}
     >
       <SelectTrigger
         size="sm"
-        aria-label="Agent"
+        aria-label={tx("Agent")}
         className="w-auto border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent"
       >
         <SelectValue />
@@ -576,7 +597,7 @@ export function AgentPicker({
       <SelectContent>
         {Object.entries(AGENT_PICKER_ITEMS).map(([kind, label]) => (
           <SelectItem key={kind} value={kind}>
-            {label}
+            {tx(label)}
           </SelectItem>
         ))}
       </SelectContent>

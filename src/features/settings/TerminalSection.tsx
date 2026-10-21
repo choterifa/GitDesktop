@@ -17,6 +17,7 @@ import { withForm } from "@/lib/form";
 import { detectTerminals } from "@/lib/git/api";
 import { isWindows, type Platform, platform } from "@/lib/hotkeys/binding";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 const DEFAULT = "__default__";
 const CUSTOM = "__custom__";
@@ -48,6 +49,7 @@ const CUSTOM_COMMAND_PLACEHOLDER = CUSTOM_COMMAND_PLACEHOLDERS[platform];
 export const TerminalSection = withForm({
   ...settingsFormOpts,
   render: function TerminalSectionRender({ form }) {
+    const tx = useSettingsText();
     const detected = useQuery({
       queryKey: ["detected-terminals"],
       queryFn: detectTerminals,
@@ -85,9 +87,9 @@ export const TerminalSection = withForm({
 
     // Base UI's Select.Value renders the raw value unless given value→label items
     const selectItems: Record<string, string> = {
-      [DEFAULT]: DEFAULT_LABEL,
-      [CUSTOM]: "Custom…",
-      [CUSTOM_COMMAND]: "Custom command…",
+      [DEFAULT]: tx(DEFAULT_LABEL),
+      [CUSTOM]: tx("Custom…"),
+      [CUSTOM_COMMAND]: tx("Custom command…"),
       ...Object.fromEntries(terminals.map((t) => [t.id, t.name])),
     };
 
@@ -100,11 +102,11 @@ export const TerminalSection = withForm({
 
     async function choose() {
       const picked = await openDialog({
-        title: "Choose a terminal program",
+        title: tx("Choose a terminal program"),
         // Windows programs are .exe/.cmd/.bat; macOS terminals are `.app`
         // bundles and Linux ones are bare binaries, so don't filter there.
         filters: isWindows
-          ? [{ name: "Programs", extensions: ["exe", "cmd", "bat"] }]
+          ? [{ name: tx("Programs"), extensions: ["exe", "cmd", "bat"] }]
           : undefined,
       });
       if (picked) setTerminal("custom", picked);
@@ -113,14 +115,13 @@ export const TerminalSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">Terminal</h2>
+          <h2 className="text-sm font-medium">{tx("Terminal")}</h2>
           <p className="text-xs text-muted-foreground">
-            Used by "Open in terminal" in the repository menu. Installed
-            terminals are detected automatically.
+            {tx('Used by "Open in terminal" in the repository menu. Installed terminals are detected automatically.')}
           </p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="terminal-select">Application</Label>
+          <Label htmlFor="terminal-select">{tx("Application")}</Label>
           <Select
             items={selectItems}
             value={selectValue}
@@ -150,13 +151,13 @@ export const TerminalSection = withForm({
                   {t.name}
                 </SelectItem>
               ))}
-              <SelectItem value={CUSTOM}>Custom…</SelectItem>
-              <SelectItem value={CUSTOM_COMMAND}>Custom command…</SelectItem>
+              <SelectItem value={CUSTOM}>{tx("Custom…")}</SelectItem>
+              <SelectItem value={CUSTOM_COMMAND}>{tx("Custom command…")}</SelectItem>
             </SelectContent>
           </Select>
           {detected.isPending && (
             <p className="text-xs text-muted-foreground">
-              Detecting terminals…
+              {tx("Detecting terminals…")}
             </p>
           )}
           {!showCustom && matched && (
@@ -168,7 +169,7 @@ export const TerminalSection = withForm({
         </div>
         {showCustom && (
           <div className="space-y-2">
-            <Label htmlFor="custom-terminal">Program path</Label>
+            <Label htmlFor="custom-terminal">{tx("Program path")}</Label>
             <div className="flex gap-2">
               <Input
                 id="custom-terminal"
@@ -179,17 +180,17 @@ export const TerminalSection = withForm({
                 onChange={(e) => setTerminal("custom", e.target.value)}
               />
               <Button type="button" variant="outline" onClick={choose}>
-                Choose…
+                {tx("Choose…")}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Launched in a new window at the repository folder.
+              {tx("Launched in a new window at the repository folder.")}
             </p>
           </div>
         )}
         {showCustomCommand && (
           <div className="space-y-2">
-            <Label htmlFor="custom-terminal-command">Command</Label>
+            <Label htmlFor="custom-terminal-command">{tx("Command")}</Label>
             <Input
               id="custom-terminal-command"
               className="font-mono"
@@ -202,11 +203,9 @@ export const TerminalSection = withForm({
               }
             />
             <p className="text-xs text-muted-foreground">
-              Runs without a shell.{" "}
-              <code className="font-mono">{"{path}"}</code> is replaced with the
-              repository path; when omitted, the command starts in the
-              repository directory. Use it for multiplexers, wrappers, or a
-              terminal that isn't auto-detected.
+              {tx("Runs without a shell.")}{" "}
+              <code className="font-mono">{"{path}"}</code>{" "}
+              {tx("is replaced with the repository path; when omitted, the command starts in the repository directory. Use it for multiplexers, wrappers, or a terminal that isn't auto-detected.")}
             </p>
             {missingPathToken && (
               <p
@@ -214,9 +213,8 @@ export const TerminalSection = withForm({
                 className="flex items-center gap-1 text-xs text-warning"
               >
                 <WarningCircleIcon className="size-3.5 shrink-0" />
-                No <code className="font-mono">{"{path}"}</code> in the command
-                — it will start in the repository directory without receiving
-                the path as an argument.
+                {tx("No")} <code className="font-mono">{"{path}"}</code>{" "}
+                {tx("in the command — it will start in the repository directory without receiving the path as an argument.")}
               </p>
             )}
           </div>

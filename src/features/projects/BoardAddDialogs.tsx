@@ -34,6 +34,7 @@ import {
   type ItemNoun,
   NOTES_PLACEHOLDER,
 } from "./board-model";
+import { projectsText, useProjectsText } from "./use-projects-text";
 
 /** Long enough that a word typed at speed makes one search, short enough that the
  *  list feels live. The Explore and registry searches sit either side of it. */
@@ -68,7 +69,7 @@ function SearchingRows() {
   return (
     <>
       <span role="status" className="sr-only">
-        Searching this repository…
+        {projectsText("Searching this repository…")}
       </span>
       <div aria-busy className="space-y-1.5 py-1">
         <Skeleton className="h-9 w-full" />
@@ -195,6 +196,7 @@ export function AddExistingItemsDialog({
    *  been closed over an add still in flight. */
   onAdd: (candidate: BoardCandidate) => Promise<boolean>;
 }) {
+  const tx = useProjectsText();
   const [raw, setRaw] = useState("");
   const search = useDebouncedValue(raw.trim(), SEARCH_DEBOUNCE_MS);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -265,13 +267,13 @@ export function AddExistingItemsDialog({
   function heldReason(candidate: BoardCandidate): string | undefined {
     switch (true) {
       case added.has(candidate.id):
-        return ADDED_REASON;
+        return tx(ADDED_REASON);
       case onBoardContentIds.has(candidate.id):
-        return ALREADY_DRAWN_REASON[noun];
+        return tx(ALREADY_DRAWN_REASON[noun]);
       case pendingId === candidate.id:
-        return ADDING_REASON;
+        return tx(ADDING_REASON);
       case pendingId !== null:
-        return ADDING_OTHER_REASON;
+        return tx(ADDING_OTHER_REASON);
       default:
         return undefined;
     }
@@ -312,12 +314,12 @@ export function AddExistingItemsDialog({
               size="xs"
               onClick={() => void candidates.refetch()}
             >
-              Retry
+              {tx("Retry")}
             </Button>
           </div>
         );
       case rows.length === 0:
-        return <ResultsNote>No matching items in this repository.</ResultsNote>;
+        return <ResultsNote>{tx("No matching items in this repository.")}</ResultsNote>;
       default:
         return (
           <div className="space-y-1">
@@ -333,11 +335,11 @@ export function AddExistingItemsDialog({
                 </span>
                 <button
                   type="button"
-                  aria-label="Retry searching this repository"
+                  aria-label={tx("Retry searching this repository")}
                   onClick={() => void candidates.refetch()}
                   className="cursor-pointer text-muted-foreground underline hover:text-foreground"
                 >
-                  Retry
+                  {tx("Retry")}
                 </button>
               </p>
             )}
@@ -358,7 +360,7 @@ export function AddExistingItemsDialog({
             {candidates.data?.truncated === true &&
               !candidates.isPlaceholderData && (
                 <p className="px-1 pt-1 text-[11px] text-muted-foreground">
-                  Some matching items aren't listed above.
+                  {tx("Some matching items aren't listed above.")}
                 </p>
               )}
           </div>
@@ -370,10 +372,9 @@ export function AddExistingItemsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add issue or pull request</DialogTitle>
+          <DialogTitle>{tx("Add issue or pull request")}</DialogTitle>
           <DialogDescription>
-            Adds to {projectTitle}. The dialog stays open, so you can add
-            several.
+            {tx("Adds to {{projectTitle}}. The dialog stays open, so you can add several.", { projectTitle })}
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -382,8 +383,8 @@ export function AddExistingItemsDialog({
             autoFocus
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            placeholder="Search this repository…"
-            aria-label="Search this repository's issues and pull requests"
+            placeholder={tx("Search this repository…")}
+            aria-label={tx("Search this repository's issues and pull requests")}
             className="pl-8"
             spellCheck={false}
           />
@@ -403,7 +404,7 @@ export function AddExistingItemsDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Close
+            {tx("Close")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -444,6 +445,7 @@ export function NewDraftDialog({
    *  toolbar's write indicator. */
   onCreate: (title: string, body: string) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const form = useAppForm({
     defaultValues: { title: "", body: "" },
     // Awaited but not acted on: the panel owns both outcomes. It closes this dialog
@@ -461,7 +463,7 @@ export function NewDraftDialog({
   const { blockedReason, reasonId, wrapperTitle, describedBy } =
     useDisabledReason({
       disabled: pending,
-      reason: DRAFT_PENDING_REASON,
+      reason: tx(DRAFT_PENDING_REASON),
       title: SUBMIT_HINT,
     });
 
@@ -498,10 +500,9 @@ export function NewDraftDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New draft</DialogTitle>
+            <DialogTitle>{tx("New draft")}</DialogTitle>
             <DialogDescription>
-              A note that lives on {projectTitle} alone. Convert it to an issue
-              from the {noun}'s menu whenever it earns one.
+              {tx("A note that lives on {{projectTitle}} alone. Convert it to an issue from the {{noun}}'s menu whenever it earns one.", { projectTitle, noun: tx(noun) })}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
@@ -510,14 +511,14 @@ export function NewDraftDialog({
               validators={{ onChange: ({ value }) => required(value) }}
             >
               {(field) => (
-                <field.TextField label="Title" placeholder="Name the note" />
+                <field.TextField label={tx("Title")} placeholder={tx("Name the note")} />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Notes"
-                  placeholder={NOTES_PLACEHOLDER[noun]}
+                  label={tx("Notes")}
+                  placeholder={tx(NOTES_PLACEHOLDER[noun])}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                 />
@@ -538,7 +539,7 @@ export function NewDraftDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               {/* The reasoned hold keeps the button FOCUSABLE — a natively-disabled
@@ -561,7 +562,7 @@ export function NewDraftDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Create draft
+                  {tx("Create draft")}
                 </form.SubmitButton>
               </span>
             </form.AppForm>

@@ -122,6 +122,7 @@ import {
 } from "./pr-label-selection";
 import { ReviewerNotesField } from "./ReviewerNotesField";
 import { ReviewersPopover } from "./ReviewersPopover";
+import { usePullsText } from "./use-pulls-text";
 import { useBranchPickerOptions } from "./useBranchPickerOptions";
 import { useGeneratePrDescription } from "./useGeneratePrDescription";
 import {
@@ -140,30 +141,36 @@ const NO_LABEL_EDITS: {
 /** The hint for label names the model proposed that the repo doesn't have:
  *  `Suggested label "x" isn't a repo label.`, plural `"a", "b" and "c"`.
  *  Callers pass at least one name. */
-function droppedLabelsHint(names: string[]): string {
+function droppedLabelsHint(
+  names: string[],
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string {
   const quoted = names.map((n) => `"${n}"`);
   if (quoted.length === 1)
-    return `Suggested label ${quoted[0]} isn't a repo label.`;
+    return tx("Suggested label {{label}} isn't a repo label.", {
+      label: quoted[0],
+    });
   const list = `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
-  return `Suggested labels ${list} aren't repo labels.`;
+  return tx("Suggested labels {{labels}} aren't repo labels.", {
+    labels: list,
+  });
 }
 
 /** Why the submit is held, per lane phase: the lane now survives the forge's
  *  answer for the seconds the list takes to catch up, and a reopen in that
  *  window must read as "it's done" rather than "still going". */
-const LANE_HINT: {
-  [P in PrCreate["phase"]]: (lane: Extract<PrCreate, { phase: P }>) => string;
-} = {
-  creating: (lane) =>
-    `A ${lane.noun} for this branch is already being created.`,
-  created: (lane) =>
-    `A ${lane.noun} for this branch was just created — #${lane.number}.`,
-};
-
-function laneHintFor(lane: PrCreate): string {
+function laneHintFor(
+  lane: PrCreate,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string {
   return lane.phase === "created"
-    ? LANE_HINT.created(lane)
-    : LANE_HINT.creating(lane);
+    ? tx("A {{noun}} for this branch was just created — #{{number}}.", {
+        noun: tx(lane.noun),
+        number: lane.number,
+      })
+    : tx("A {{noun}} for this branch is already being created.", {
+        noun: tx(lane.noun),
+      });
 }
 
 /** The open PR a create into `base` would duplicate. The probe already keys on the
@@ -198,6 +205,7 @@ export function CreatePrDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tx = usePullsText();
   const status = useRepoStatus(repoPath);
   const defaultBranch = useDefaultBranch(repoPath);
   const createPr = useCreatePr(repoPath);
@@ -464,10 +472,16 @@ export function CreatePrDialog({
             : duplicateOf(recheck.data, value.base, createLens);
         if (duplicate) {
           toast.error(
-            `A ${prNoun} for this branch already exists — #${duplicate.number}.`,
+            tx("A {{noun}} for this branch already exists — #{{number}}.", {
+              noun: tx(prNoun),
+              number: duplicate.number,
+            }),
             {
               description: duplicate.url,
-              action: { label: "View", onClick: () => openUrl(duplicate.url) },
+              action: {
+                label: tx("View"),
+                onClick: () => openUrl(duplicate.url),
+              },
             },
           );
           return;
@@ -615,10 +629,17 @@ export function CreatePrDialog({
         const where = targetSlug
           ? ` in ${targetSlug}`
           : landedIn(repoPath).away;
-        toast.success(`Opened ${prNoun} #${number}${where}`, {
-          description: url,
-          action: { label: "View", onClick: () => openUrl(url) },
-        });
+        toast.success(
+          tx("Opened {{noun}} #{{number}}{{where}}", {
+            noun: tx(prNoun),
+            number,
+            where,
+          }),
+          {
+            description: url,
+            action: { label: tx("View"), onClick: () => openUrl(url) },
+          },
+        );
         // Close only: under <Activity>, setRepoTab/selectPr here would defer the close and
         // unmount until the panel is next shown (hoist navigation to RepositoryView, like
         // CreateLocalPrDialog). `open` is one host state across repos, so stillHere() and
@@ -661,8 +682,15 @@ export function CreatePrDialog({
           toastErrorWithNote(
             e,
             awayRepo
-              ? `In ${awayRepo}, the ${prNoun} for ${value.head} wasn't created.`
-              : `The ${prNoun} for ${value.head} wasn't created.`,
+              ? tx("In {{repo}}, the {{noun}} for {{branch}} wasn't created.", {
+                  repo: awayRepo,
+                  noun: tx(prNoun),
+                  branch: value.head,
+                })
+              : tx("The {{noun}} for {{branch}} wasn't created.", {
+                  noun: tx(prNoun),
+                  branch: value.head,
+                }),
           );
           // The toast fades in seconds; this outlives it for a user who moved on.
           notifyPrCreateFailed({
@@ -819,7 +847,7 @@ export function CreatePrDialog({
   // already covers, and where a "someone else is creating this" refusal would
   // be nonsense under a spinning button.
   const creatingElsewhere = lane !== undefined && !isSubmitting;
-  const laneHint = lane && !isSubmitting ? laneHintFor(lane) : null;
+  const laneHint = lane && !isSubmitting ? laneHintFor(lane, tx) : null;
   const shownLaneHint = useRetained(laneHint, open);
 
   // Fork-side fallback base, mirroring the seed logic (default branch, else first
@@ -1118,11 +1146,19 @@ export function CreatePrDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Create {prNoun}</DialogTitle>
+            <DialogTitle>
+              {tx("Create {{noun}}", { noun: tx(prNoun) })}
+            </DialogTitle>
             <DialogDescription>
-              Pushes <span className="font-mono">{head || "…"}</span> and opens
-              a {prNoun} into <span className="font-mono">{base || "…"}</span>{" "}
-              on {targetSlug ?? remoteLabel}.
+              {tx(
+                "Pushes {{head}} and opens a {{noun}} into {{base}} on {{remote}}.",
+                {
+                  head: head || "…",
+                  noun: tx(prNoun),
+                  base: base || "…",
+                  remote: targetSlug ?? remoteLabel,
+                },
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -1133,7 +1169,7 @@ export function CreatePrDialog({
                 this is a GitHub fork with an upstream remote. Default = parent. */}
             {lensGate && (
               <div className="space-y-1.5">
-                <Label id={createInGroupId}>Create in</Label>
+                <Label id={createInGroupId}>{tx("Create in")}</Label>
                 <div
                   className="flex items-center gap-1"
                   role="group"
@@ -1143,10 +1179,10 @@ export function CreatePrDialog({
                     [
                       {
                         value: "upstream",
-                        label: "Parent",
+                        label: tx("Parent"),
                         slug: upstreamSlug,
                       },
-                      { value: "origin", label: "Fork", slug: forkSlug },
+                      { value: "origin", label: tx("Fork"), slug: forkSlug },
                     ] as const
                   ).map((b) => (
                     <DisabledReasonButton
@@ -1181,11 +1217,11 @@ export function CreatePrDialog({
             {canOfferUpstream && (
               <div className="space-y-1.5 rounded-none bg-muted/40 p-2.5 ring-1 ring-foreground/10">
                 <p className="text-xs text-muted-foreground">
-                  This repository is a fork of{" "}
+                  {tx("This repository is a fork of")}{" "}
                   <span className="font-mono text-foreground/80">
                     {forkParent}
                   </span>
-                  . Add an upstream remote to open pull requests against{" "}
+                  {tx(". Add an upstream remote to open pull requests against")}{" "}
                   <span className="font-mono text-foreground/80">
                     {forkParent}
                   </span>
@@ -1199,8 +1235,8 @@ export function CreatePrDialog({
                   onClick={() => void addUpstreamRemote()}
                 >
                   {addRemote.isPending
-                    ? "Adding upstream remote…"
-                    : "Add upstream remote"}
+                    ? tx("Adding upstream remote…")
+                    : tx("Add upstream remote")}
                 </Button>
               </div>
             )}
@@ -1210,7 +1246,7 @@ export function CreatePrDialog({
                 <form.AppField name="head">
                   {(field) => (
                     <field.SelectField
-                      label="Merge"
+                      label={tx("Merge")}
                       items={items}
                       annotations={annotations}
                       // Frozen while a submit runs — see the "Create in" picker.
@@ -1221,13 +1257,13 @@ export function CreatePrDialog({
                 </form.AppField>
               </div>
               <span className="shrink-0 pb-2 text-xs text-muted-foreground">
-                into
+                {tx("into")}
               </span>
               <div className="min-w-0 flex-initial">
                 <form.AppField name="base">
                   {(field) => (
                     <field.SelectField
-                      label="Base"
+                      label={tx("Base")}
                       items={baseLoading ? {} : baseItems}
                       annotations={baseAnnotations}
                       disabled={baseLoading}
@@ -1244,27 +1280,34 @@ export function CreatePrDialog({
               </p>
               {baseLoading ? (
                 <p className="text-xs text-muted-foreground">
-                  Fetching upstream branches…
+                  {tx("Fetching upstream branches…")}
                 </p>
               ) : parentFetchError ? (
                 // Fetch failed but local upstream refs (if any) still populate the
                 // picker — surface the error inline, keep the control usable.
                 <p className="text-xs text-warning">
-                  Couldn't fetch upstream: {parentFetchError}
+                  {tx("Couldn't fetch upstream:")} {parentFetchError}
                 </p>
               ) : sameBranch ? (
                 <p className="text-xs text-warning">
-                  Pick two different branches.
+                  {tx("Pick two different branches.")}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {ahead.length} commit{ahead.length === 1 ? "" : "s"} to merge.
+                  {tx(
+                    ahead.length === 1
+                      ? "{{count}} commit to merge."
+                      : "{{count}} commits to merge.",
+                    { count: ahead.length },
+                  )}
                 </p>
               )}
               {targetIsParent && (
                 <p className="text-xs text-muted-foreground">
-                  Labels and assignees can be added on{" "}
-                  {upstreamSlug ?? remoteLabel} after opening.
+                  {tx(
+                    "Labels and assignees can be added on {{remote}} after opening.",
+                    { remote: upstreamSlug ?? remoteLabel },
+                  )}
                 </p>
               )}
             </div>
@@ -1281,8 +1324,11 @@ export function CreatePrDialog({
                 title={existingPr.title}
               >
                 <ArrowSquareOutIcon data-icon="inline-start" />
-                View {prNoun} #{existingPr.number}
-                {existingPr.isDraft ? " (draft)" : ""}
+                {tx("View {{noun}} #{{number}}", {
+                  noun: tx(prNoun),
+                  number: existingPr.number,
+                })}
+                {existingPr.isDraft ? tx(" (draft)") : ""}
               </Button>
             )}
 
@@ -1292,7 +1338,7 @@ export function CreatePrDialog({
                 role="group"
                 aria-labelledby={reviewersGroupId}
               >
-                <Label id={reviewersGroupId}>Reviewers</Label>
+                <Label id={reviewersGroupId}>{tx("Reviewers")}</Label>
                 <ReviewersPopover
                   repoPath={repoPath}
                   number={null}
@@ -1313,12 +1359,12 @@ export function CreatePrDialog({
                         <Button
                           variant="outline"
                           size="xs"
-                          aria-label="Add labels"
+                          aria-label={tx("Add labels")}
                         />
                       }
                     >
                       <TagIcon data-icon="inline-start" />
-                      Labels
+                      {tx("Labels")}
                     </Popover.Trigger>
                     {/* Bare on purpose: this component's body renders above
                         DialogContent's PanelPortalReset, so a
@@ -1334,7 +1380,7 @@ export function CreatePrDialog({
                       >
                         <Popover.Popup className="w-60 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                           <p className="px-1 pb-1.5 text-xs font-medium">
-                            Labels
+                            {tx("Labels")}
                           </p>
                           {(repoLabels.data ?? []).length === 0 && (
                             <p className="px-1 py-1 text-xs text-muted-foreground">
@@ -1388,7 +1434,7 @@ export function CreatePrDialog({
                       case pickingLabels:
                         return "Choosing labels…";
                       case shownDroppedLabels.length > 0:
-                        return droppedLabelsHint(shownDroppedLabels);
+                        return droppedLabelsHint(shownDroppedLabels, tx);
                       default:
                         return "";
                     }
@@ -1403,7 +1449,7 @@ export function CreatePrDialog({
                 role="group"
                 aria-labelledby={assigneesGroupId}
               >
-                <Label id={assigneesGroupId}>Assignees</Label>
+                <Label id={assigneesGroupId}>{tx("Assignees")}</Label>
                 <AssigneesPopover
                   repoPath={repoPath}
                   enabled={open}
@@ -1420,16 +1466,16 @@ export function CreatePrDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Title"
-                  placeholder="Summarize the change"
+                  label={tx("Title")}
+                  placeholder={tx("Summarize the change")}
                 />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Description"
-                  placeholder="Describe what changed and why"
+                  label={tx("Description")}
+                  placeholder={tx("Describe what changed and why")}
                   rows={7}
                   textareaClassName="ph-no-capture max-h-72 min-h-24 resize-y font-mono"
                   actions={
@@ -1441,7 +1487,7 @@ export function CreatePrDialog({
                         onClick={cancel}
                       >
                         <XIcon data-icon="inline-start" />
-                        Cancel
+                        {tx("Cancel")}
                       </Button>
                     ) : (
                       // Nothing to merge stays a plain disable; a running create
@@ -1466,7 +1512,7 @@ export function CreatePrDialog({
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Generate
+                        {tx("Generate")}
                       </DisabledReasonButton>
                     )
                   }
@@ -1530,7 +1576,7 @@ export function CreatePrDialog({
             <form.AppField name="draft">
               {(field) => (
                 <field.CheckboxField
-                  label="Create as draft"
+                  label={tx("Create as draft")}
                   className="mr-auto flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
                 />
               )}
@@ -1540,7 +1586,7 @@ export function CreatePrDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               <form.Subscribe selector={(s) => s.values.draft}>
@@ -1559,7 +1605,9 @@ export function CreatePrDialog({
                       title={SUBMIT_HINT}
                       className={ARIA_DISABLED_CLASS}
                     >
-                      {draft ? "Create draft" : `Create ${prNoun}`}
+                      {draft
+                        ? tx("Create draft")
+                        : tx("Create {{noun}}", { noun: tx(prNoun) })}
                     </form.SubmitButton>
                     {offlineSubmit.blockedReason ? (
                       <span id={offlineSubmit.reasonId} className="sr-only">

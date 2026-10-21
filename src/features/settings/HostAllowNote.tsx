@@ -2,6 +2,7 @@ import { WarningIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { isHostAllowed, normalizeHost } from "@/lib/ai/allowed-hosts";
+import { useSettingsText } from "./use-settings-text";
 
 /**
  * The note under a custom provider URL. When the URL points at a host that isn't
@@ -27,16 +28,17 @@ export function HostAllowNote({
   defaultNote: ReactNode;
   consequence?: ReactNode;
 }) {
+  const tx = useSettingsText();
   const host = normalizeHost(url);
   if (!host || isHostAllowed(url, allowedHosts)) {
-    return <p className="text-xs text-muted-foreground">{defaultNote}</p>;
+    return <p className="text-xs text-muted-foreground">{typeof defaultNote === "string" ? tx(defaultNote) : defaultNote}</p>;
   }
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-warning">
       <WarningIcon className="size-4 shrink-0" />
       <span>
-        <code className="font-mono">{host}</code> isn't an allowed host yet —{" "}
-        {consequence}
+        <code className="font-mono">{host}</code> {tx("isn't an allowed host yet —")}{" "}
+        {typeof consequence === "string" ? tx(consequence) : consequence}
       </span>
       <Button
         type="button"
@@ -44,7 +46,7 @@ export function HostAllowNote({
         size="xs"
         onClick={() => onAllowHost(url)}
       >
-        Allow host
+        {tx("Allow host")}
       </Button>
     </p>
   );

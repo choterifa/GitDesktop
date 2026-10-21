@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -52,12 +53,6 @@ import {
 type SortOption = "best" | "stars" | "updated";
 type ZeroMode = "yours" | "popular";
 
-const SORT_ITEMS: Record<SortOption, string> = {
-  best: "Best match",
-  stars: "Most stars",
-  updated: "Recently updated",
-};
-
 /**
  * The Explore repositories surface — a full-page master/detail view for
  * searching, browsing, cloning, forking, and starring repositories on a provider
@@ -65,6 +60,7 @@ const SORT_ITEMS: Record<SortOption, string> = {
  * screen; Back / Esc return to the previous view.
  */
 export function ExploreScreen() {
+  const { t } = useTranslation("explore");
   const closeExplore = useUiStore((s) => s.closeExplore);
   const [provider, setProvider] = useState<ForgeProvider>("github");
   const [rawQuery, setRawQuery] = useState("");
@@ -96,6 +92,11 @@ export function ExploreScreen() {
   // "Popular" is the star-sorted empty-query feed (GitHub/GitLab only).
   const showingPopular = !searching && effectiveZeroMode === "popular";
   const showingYours = !searching && effectiveZeroMode === "yours";
+  const sortItems: Record<SortOption, string> = {
+    best: t("sort.best"),
+    stars: t("sort.stars"),
+    updated: t("sort.updated"),
+  };
 
   const features = useForgeProviderFeatures(provider);
   // One observer for the signed-in user's repos, shared by the Yours list and the
@@ -154,12 +155,12 @@ export function ExploreScreen() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Back"
+          aria-label={t("back")}
           onClick={closeExplore}
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="text-sm font-medium">Explore repositories</span>
+        <span className="text-sm font-medium">{t("title")}</span>
       </header>
 
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
@@ -180,8 +181,8 @@ export function ExploreScreen() {
           value={rawQuery}
           onChange={(e) => setRawQuery(e.target.value)}
           onKeyDown={onInputKeyDown}
-          placeholder="Search repositories"
-          aria-label="Search repositories"
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchLabel")}
           role="combobox"
           aria-expanded={flatRepos.length > 0}
           // Same predicate as aria-expanded: the listbox only mounts in the
@@ -203,15 +204,15 @@ export function ExploreScreen() {
             need more explanation than its absence, so hide it there. */}
         {!isBitbucket && searching && (
           <Select
-            items={SORT_ITEMS}
+            items={sortItems}
             value={sort}
             onValueChange={(v) => v && setSort(v as SortOption)}
           >
-            <SelectTrigger size="sm" aria-label="Sort results">
+            <SelectTrigger size="sm" aria-label={t("sort.label")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(SORT_ITEMS).map(([value, display]) => (
+              {Object.entries(sortItems).map(([value, display]) => (
                 <SelectItem key={value} value={value}>
                   {display}
                 </SelectItem>
@@ -223,7 +224,7 @@ export function ExploreScreen() {
 
       {isBitbucket && (
         <p className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">
-          Search covers your Bitbucket workspaces.
+          {t("bitbucketSearchHint")}
         </p>
       )}
 
@@ -236,8 +237,8 @@ export function ExploreScreen() {
             onValueChange={(v) => setZeroMode(v as ZeroMode)}
           >
             <TabsList variant="line">
-              <TabsTrigger value="yours">Your repositories</TabsTrigger>
-              <TabsTrigger value="popular">Popular</TabsTrigger>
+              <TabsTrigger value="yours">{t("tabs.yours")}</TabsTrigger>
+              <TabsTrigger value="popular">{t("tabs.popular")}</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -305,6 +306,7 @@ function YoursResults({
   onSelect: (repo: ForgeSearchRepo | null) => void;
   onRowsChange: (repos: ForgeSearchRepo[]) => void;
 }) {
+  const { t } = useTranslation("explore");
   const rows = useMemo<ExploreRow[]>(() => {
     const data = repos.data;
     if (!data) return [];
@@ -319,7 +321,7 @@ function YoursResults({
     return <ResultsError provider={provider} error={repos.error} />;
   }
   if (rows.length === 0) {
-    return <QuietLine>No repositories yet.</QuietLine>;
+    return <QuietLine>{t("empty.yours")}</QuietLine>;
   }
   return (
     <ResultsList
@@ -352,6 +354,7 @@ function SearchResults({
   onSelect: (repo: ForgeSearchRepo | null) => void;
   onRowsChange: (repos: ForgeSearchRepo[]) => void;
 }) {
+  const { t } = useTranslation("explore");
   const search = useForgeSearchRepos(provider, query, sort, true);
 
   // Dedupe by full name: the forge's index can shift between page fetches and
@@ -382,7 +385,7 @@ function SearchResults({
     return <ResultsError provider={provider} error={search.error} />;
   }
   if (rows.length === 0) {
-    return <QuietLine>No repositories match.</QuietLine>;
+    return <QuietLine>{t("empty.search")}</QuietLine>;
   }
   return (
     <ResultsList
@@ -406,16 +409,16 @@ function SearchResults({
               {search.isFetchingNextPage ? (
                 <>
                   <Spinner />
-                  Loading…
+                  {t("loading")}
                 </>
               ) : (
-                "Load more"
+                t("loadMore")
               )}
             </button>
           )}
           {capped && (
             <p className="px-3 py-2 text-center text-[11px] text-muted-foreground">
-              GitHub returns at most 1,000 search results — refine your search.
+              {t("searchCap")}
             </p>
           )}
         </>
@@ -439,6 +442,7 @@ function ResultsList({
   onRowsChange: (repos: ForgeSearchRepo[]) => void;
   footer?: React.ReactNode;
 }) {
+  const { t } = useTranslation("explore");
   const parentRef = useRef<HTMLDivElement>(null);
   // The virtualizer keys its measurement projection on `getItemKey`'s IDENTITY,
   // so this is re-minted per row sequence rather than per render — `rows` is
@@ -501,7 +505,7 @@ function ResultsList({
         className="min-h-0 flex-1 overflow-y-auto"
         role="listbox"
         id={EXPLORE_LISTBOX_ID}
-        aria-label="Search results"
+        aria-label={t("searchResults")}
       >
         <div
           className="relative w-full"
@@ -568,6 +572,7 @@ function ResultsError({
   provider: ForgeProvider;
   error: unknown;
 }) {
+  const { t } = useTranslation("explore");
   const openSettings = useUiStore((s) => s.openSettings);
   const kind = isAppError(error) ? error.kind : "";
   const cliMissing = kind === "ghNotFound" || kind === "glabNotFound";
@@ -578,10 +583,9 @@ function ResultsError({
   if (bbUnconfigured) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-        <p className="text-xs font-medium">Connect your Bitbucket account</p>
+        <p className="text-xs font-medium">{t("errors.bitbucketTitle")}</p>
         <p className="max-w-xs text-xs text-muted-foreground">
-          Add an Atlassian API token in Settings → Accounts to search your
-          Bitbucket workspaces.
+          {t("errors.bitbucketBody")}
         </p>
         <Button
           type="button"
@@ -589,7 +593,7 @@ function ResultsError({
           size="sm"
           onClick={() => openSettings("accounts")}
         >
-          Open Settings → Accounts
+          {t("errors.openAccounts")}
         </Button>
       </div>
     );
@@ -597,16 +601,18 @@ function ResultsError({
   if (cliMissing) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-        <p className="text-xs font-medium">{cli} not found</p>
+        <p className="text-xs font-medium">
+          {t("errors.cliMissingTitle", { cli })}
+        </p>
         <p className="max-w-xs text-xs text-muted-foreground">
-          Install the {cli} and run {authCmd} to search repositories.
+          {t("errors.cliMissingBody", { cli, authCmd })}
         </p>
       </div>
     );
   }
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-      <p className="text-xs font-medium">Couldn't load repositories</p>
+      <p className="text-xs font-medium">{t("errors.loadTitle")}</p>
       <p className="max-w-xs text-xs text-muted-foreground">
         {presentError(error).summary}
       </p>

@@ -32,6 +32,7 @@ import {
 import { errorMessage } from "@/lib/tauri/invoke";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /**
  * One verdict option. An unavailable verdict stays VISIBLE and disabled, its reason
@@ -52,6 +53,7 @@ function VerdictOption({
   /** Why it isn't available; absent when it is. */
   reason?: string;
 }) {
+  const tx = usePullsText();
   const hintId = useId();
   return (
     <label
@@ -66,9 +68,9 @@ function VerdictOption({
         disabled={Boolean(reason)}
         aria-describedby={hintId}
       />
-      {label}
+      {tx(label)}
       <span id={hintId} className="text-muted-foreground">
-        — {reason ?? hint}
+        — {reason ?? tx(hint)}
       </span>
     </label>
   );
@@ -101,6 +103,7 @@ export function SubmitReviewDialog({
   /** The origin|upstream lens the parent PR view resolved. */
   lens: RemoteLens;
 }) {
+  const tx = usePullsText();
   const drafts = useReviewDrafts(repoPath, lens, number);
   const submitReview = useSubmitReview(repoPath, lens);
   // Silent: the post already landed by the time this runs, so a clear failure is
@@ -169,7 +172,9 @@ export function SubmitReviewDialog({
   // reachable state: GitLab and Bitbucket both implement the verdicts
   // (forge/model.rs `for_provider`), so a false cap on them means disconnected,
   // and GitHub never reaches the disabled arm (`canWrite ||` at the call site).
-  const unavailable = `available once GitDesktop connects to ${remoteLabel}`;
+  const unavailable = tx("available once GitDesktop connects to {{remote}}", {
+    remote: remoteLabel,
+  });
 
   // Reset transient state whenever the dialog closes (for ANY reason — Cancel,
   // Esc, backdrop, or a successful submit), so a reopen never shows a stale
@@ -219,7 +224,12 @@ export function SubmitReviewDialog({
     // clearing the local drafts does next.
     handleOpenChange(false);
     toast.success(
-      `Review submitted — ${result.posted} comment${result.posted === 1 ? "" : "s"} posted on ${remoteLabel}`,
+      tx(
+        result.posted === 1
+          ? "Review submitted — {{count}} comment posted on {{remote}}"
+          : "Review submitted — {{count}} comments posted on {{remote}}",
+        { count: result.posted, remote: remoteLabel },
+      ),
     );
     // Clearing the (client-only) drafts is a best-effort cleanup AFTER the post
     // landed; a failure here can't un-post, so surface it as a non-blocking
@@ -228,7 +238,9 @@ export function SubmitReviewDialog({
       .mutateAsync({ number })
       .catch(() =>
         toast.warning(
-          "Review posted, but clearing the pending comments failed — discard them from the pending review bar so they aren't submitted again.",
+          tx(
+            "Review posted, but clearing the pending comments failed — discard them from the pending review bar so they aren't submitted again.",
+          ),
         ),
       );
   }
@@ -237,11 +249,19 @@ export function SubmitReviewDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="grid max-h-[85vh] sm:max-w-md">
         <DialogHeader className="min-w-0">
-          <DialogTitle>Submit review</DialogTitle>
+          <DialogTitle>{tx("Submit review")}</DialogTitle>
           <DialogDescription>
             {count > 0
-              ? `Submits your verdict and summary with ${count} pending comment${count === 1 ? "" : "s"} on ${remoteLabel}.`
-              : `No pending comments — this submits your verdict and summary only on ${remoteLabel}.`}
+              ? tx(
+                  count === 1
+                    ? "Submits your verdict and summary with {{count}} pending comment on {{remote}}."
+                    : "Submits your verdict and summary with {{count}} pending comments on {{remote}}.",
+                  { count, remote: remoteLabel },
+                )
+              : tx(
+                  "No pending comments — this submits your verdict and summary only on {{remote}}.",
+                  { remote: remoteLabel },
+                )}
           </DialogDescription>
         </DialogHeader>
 
@@ -271,11 +291,11 @@ export function SubmitReviewDialog({
           </RadioGroup>
 
           <MarkdownEditor
-            aria-label="Review summary"
+            aria-label={tx("Review summary")}
             placeholder={
               summaryRequired
-                ? "Explain what changes you're requesting…"
-                : "Add an optional summary…"
+                ? tx("Explain what changes you're requesting…")
+                : tx("Add an optional summary…")
             }
             value={summary}
             onChange={setSummary}
@@ -302,7 +322,7 @@ export function SubmitReviewDialog({
             }
             onClick={() => handleOpenChange(false)}
           >
-            Cancel
+            {tx("Cancel")}
           </DisabledReasonButton>
           <DisabledReasonButton
             disabled={summaryMissing || submitHeld || !!offlineHold}
@@ -311,7 +331,7 @@ export function SubmitReviewDialog({
             reason={(() => {
               switch (true) {
                 case summaryMissing:
-                  return "A summary is required to request changes.";
+                  return tx("A summary is required to request changes.");
                 case submitInFlight:
                   return pendingWriteReason(submitPaused, ACT_PENDING_REASON);
                 case pending:
@@ -322,7 +342,7 @@ export function SubmitReviewDialog({
             })()}
             onClick={submit}
           >
-            Submit review
+            {tx("Submit review")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

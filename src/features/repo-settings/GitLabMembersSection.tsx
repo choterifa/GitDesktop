@@ -35,6 +35,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 /** The roles the app offers (the classic five — Planner is newer and not
  *  accepted by older self-managed instances; it still DISPLAYS if present). */
@@ -53,8 +54,10 @@ const ROLE_OPTIONS = ROLES.map((r) => ({
 }));
 
 function roleLabel(level: number): string {
-  if (level === 15) return "Planner";
-  return ROLES.find((r) => r.value === level)?.label ?? `Level ${level}`;
+  if (level === 15) return tr("Planner");
+  return tr(ROLES.find((r) => r.value === level)?.label ?? "Level {{level}}", {
+    level,
+  });
 }
 
 function validUsername(u: string): boolean {
@@ -115,7 +118,7 @@ export function GitLabMembersSection({
   async function addMember() {
     try {
       await add.mutateAsync({ username: username.trim(), accessLevel: level });
-      toast.success("Member added");
+      toast.success(tr("Member added"));
       setUsername("");
     } catch (e) {
       toastError(e);
@@ -125,7 +128,12 @@ export function GitLabMembersSection({
   async function handleRole(member: GitLabMember, accessLevel: number) {
     try {
       await update.mutateAsync({ userId: member.id, accessLevel });
-      toast.success(`${member.username} is now ${roleLabel(accessLevel)}`);
+      toast.success(
+        tr("{{username}} is now {{role}}", {
+          username: member.username,
+          role: roleLabel(accessLevel),
+        }),
+      );
     } catch (e) {
       toastError(e);
     }
@@ -134,7 +142,7 @@ export function GitLabMembersSection({
   async function handleRemove(member: GitLabMember) {
     try {
       await remove.mutateAsync(member.id);
-      toast.success(`Removed ${member.username}`);
+      toast.success(tr("Removed {{username}}", { username: member.username }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -149,7 +157,7 @@ export function GitLabMembersSection({
             data-confirm-fallback
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="GitLab username"
+            placeholder={tr("GitLab username")}
             autoComplete="off"
             spellCheck={false}
             onKeyDown={(e) => {
@@ -161,13 +169,13 @@ export function GitLabMembersSection({
             onValueChange={(v) => v && setLevel(Number(v))}
             itemToStringLabel={(v) => roleLabel(Number(v))}
           >
-            <SelectTrigger size="sm" className="w-28" aria-label="Role">
+            <SelectTrigger size="sm" className="w-28" aria-label={tr("Role")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {ROLES.map((r) => (
                 <SelectItem key={r.value} value={String(r.value)}>
-                  {r.label}
+                  {tr(r.label)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -183,28 +191,31 @@ export function GitLabMembersSection({
             ) : (
               <UserPlusIcon data-icon="inline-start" />
             )}
-            Add
+            {tr("Add")}
           </DisabledReasonButton>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          GitLab grants access immediately — there's no pending-invitation step
-          for existing users.
+          {tr(
+            "GitLab grants access immediately — there's no pending-invitation step\r\n          for existing users.",
+          )}
         </p>
       </div>
 
       <RemoteListSection
         query={members}
         rowCount={memberRows.length}
-        noun="members"
-        loadFailed="Couldn't load members."
-        emptyLabel="No members yet."
+        noun={tr("members")}
+        loadFailed={tr("Couldn't load members.")}
+        emptyLabel={tr("No members yet.")}
         skeletonClassName="h-11 w-full"
-        errorTitle="Couldn't load members."
-        errorHint="If this is a permissions error, managing members needs the Maintainer role."
+        errorTitle={tr("Couldn't load members.")}
+        errorHint={tr(
+          "If this is a permissions error, managing members needs the Maintainer role.",
+        )}
       >
         <div
           role="listbox"
-          aria-label="Members"
+          aria-label={tr("Members")}
           tabIndex={0}
           className="space-y-2 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-ring"
           onKeyDown={listKeyboardNav({
@@ -223,10 +234,12 @@ export function GitLabMembersSection({
               <MemberRow
                 key={m.id}
                 member={m}
-                meta={owner ? "Owner" : undefined}
+                meta={owner ? tr("Owner") : undefined}
                 removeHeld={
                   owner
-                    ? `${m.username} owns this project and can't be removed`
+                    ? tr("{{name}} owns this project and can't be removed", {
+                        name: m.username,
+                      })
                     : undefined
                 }
                 active={i === activeIndex}
@@ -246,7 +259,9 @@ export function GitLabMembersSection({
       </RemoteListSection>
 
       <p className="text-[11px] text-muted-foreground">
-        Members inherited from a group are managed on the group, not here.
+        {tr(
+          "Members inherited from a group are managed on the group, not here.",
+        )}
       </p>
     </div>
   );
@@ -314,13 +329,15 @@ function MemberRow({
       {!member.direct ? (
         <StatusDetailChip
           variant="secondary"
-          label={`${roleLabel(member.accessLevel)} · inherited`}
+          label={tr("{{role}} · inherited", {
+            role: roleLabel(member.accessLevel),
+          })}
           detail="Managed on the group"
         />
       ) : showConfirm ? (
         <InlineConfirm
-          prompt="Remove?"
-          actLabel="Remove"
+          prompt={tr("Remove?")}
+          actLabel={tr("Remove")}
           pending={pending}
           heldReason={confirmHeld}
           swapFocusRef={swapFocus()}
@@ -337,7 +354,7 @@ function MemberRow({
             onRole={(v) => onRole(Number(v))}
             options={ROLE_OPTIONS}
             valueLabel={roleLabel(member.accessLevel)}
-            label={`Role for ${member.username}`}
+            label={tr("Role for {{username}}", { username: member.username })}
           />
           {removeHeld !== undefined ? (
             <DisabledReasonButton
@@ -347,7 +364,9 @@ function MemberRow({
               className="text-muted-foreground"
               disabled
               reason={removeHeld}
-              aria-label={`Remove ${member.username}`}
+              aria-label={tr("Remove {{username}}", {
+                username: member.username,
+              })}
             >
               <XIcon />
             </DisabledReasonButton>
@@ -358,8 +377,10 @@ function MemberRow({
               variant="ghost"
               className="text-muted-foreground hover:text-destructive"
               onClick={onConfirm}
-              title="Remove"
-              aria-label={`Remove ${member.username}`}
+              title={tr("Remove")}
+              aria-label={tr("Remove {{username}}", {
+                username: member.username,
+              })}
             >
               <XIcon />
             </Button>

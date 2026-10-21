@@ -1,5 +1,6 @@
 import { ArrowLeftIcon } from "@phosphor-icons/react";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { NavRail } from "@/components/NavRail";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,8 @@ function resolveBody(
   md: string,
   aiEnabled: boolean,
   bindings: Map<ActionId, string | null>,
+  paletteLabel: string,
+  unboundLabel: string,
 ): string {
   const gated = aiEnabled
     ? md.replace(AI_MARKER, "")
@@ -54,11 +57,12 @@ function resolveBody(
     // No live binding: distinguish a deliberately palette-only action from one
     // the user cleared. A palette-only action never had a key to lose, so
     // "unbound from the palette" reads wrong — say "palette" (the chip idiom).
-    return PALETTE_ONLY.has(ref) ? "palette" : "unbound";
+    return PALETTE_ONLY.has(ref) ? paletteLabel : unboundLabel;
   });
 }
 
 export function HelpScreen() {
+  const { t, i18n } = useTranslation("help");
   const closeHelp = useUiStore((s) => s.closeHelp);
   const aiEnabled = useAiEnabled();
   const bindings = useEffectiveBindings();
@@ -71,13 +75,21 @@ export function HelpScreen() {
   );
   // Keep a valid selection if the current section just got hidden.
   const active = sections.find((s) => s.id === sectionId) ?? sections[0];
-  const body = useMemo(
-    () => resolveBody(active.body, aiEnabled, bindings),
-    [active.body, aiEnabled, bindings],
-  );
+  const language = i18n.resolvedLanguage ?? i18n.language;
   const railGroups = useMemo(
-    () => [{ items: sections.map((s) => ({ id: s.id, label: s.label })) }],
-    [sections],
+    () => [
+      {
+        items: sections.map((s) => {
+          const label = i18n.getResource(
+            language,
+            "help",
+            `sections.${s.id}.label`,
+          );
+          return { id: s.id, label: typeof label === "string" ? label : s.label };
+        }),
+      },
+    ],
+    [sections, i18n, language],
   );
 
   // Esc closes the guide. Guarded so Base UI popups (which mark the event
@@ -97,17 +109,17 @@ export function HelpScreen() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Back"
+          aria-label={t("ui.back")}
           onClick={closeHelp}
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="text-sm font-medium">User guide</span>
+        <span className="text-sm font-medium">{t("ui.title")}</span>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <NavRail
-          ariaLabel="Guide sections"
+          ariaLabel={t("ui.sections")}
           groups={railGroups}
           activeId={active.id}
           onSelect={setSectionId}
@@ -118,10 +130,51 @@ export function HelpScreen() {
             is `relative`-only) so a long guide page can't leak a window scrollbar. */}
         <ScrollArea key={active.id} className="min-h-0 flex-1 overflow-hidden">
           <main className="mx-auto w-full max-w-2xl p-6">
-            <Markdown>{body}</Markdown>
+            <GuideArticle
+              section={active}
+              aiEnabled={aiEnabled}
+              bindings={bindings}
+              paletteLabel={t("bindings.palette")}
+              unboundLabel={t("bindings.unbound")}
+            />
           </main>
         </ScrollArea>
       </div>
     </div>
   );
+}
+
+function GuideArticle({
+  section,
+  aiEnabled,
+  bindings,
+  paletteLabel,
+  unboundLabel,
+}: {
+  section: (typeof GUIDE_SECTIONS)[number];
+  aiEnabled: boolean;
+  bindings: Map<ActionId, string | null>;
+  paletteLabel: string;
+  unboundLabel: string;
+}) {
+  const { i18n } = useTranslation(section.namespace);
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  const articleValue = i18n.getResource(
+    language,
+    section.namespace,
+    `sections.${section.id}.body`,
+  );
+  const markdown = typeof articleValue === "string" ? articleValue : section.body;
+  const body = useMemo(
+    () =>
+      resolveBody(
+        markdown,
+        aiEnabled,
+        bindings,
+        paletteLabel,
+        unboundLabel,
+      ),
+    [markdown, aiEnabled, bindings, paletteLabel, unboundLabel],
+  );
+  return <Markdown>{body}</Markdown>;
 }

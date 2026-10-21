@@ -1,0 +1,17 @@
+{
+  "title": "Appearance",
+  "description": "How GitDesktop looks. Changes apply immediately.",
+  "themeLabel": "Theme",
+  "themeDescription": "System follows your operating system's light/dark setting. Slate is a softer dark theme with a lifted, cool blue-gray canvas for long sessions. You can also cycle themes from the command palette.",
+  "themes": {
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "slate": "Slate"
+  },
+  "language": {
+    "heading": "Application language",
+    "label": "Language",
+    "description": "Changes apply immediately and are saved on this device."
+  }
+}

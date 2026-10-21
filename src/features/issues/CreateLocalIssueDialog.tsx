@@ -1,6 +1,7 @@
 import { SparkleIcon, XIcon } from "@phosphor-icons/react";
 import { useSelector } from "@tanstack/react-store";
 import { useEffectEvent, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -40,6 +41,7 @@ export function CreateLocalIssueDialog({
   /** Seed the form when opened (e.g. from a generated plan). */
   initialDraft?: { title: string; body: string };
 }) {
+  const { t } = useTranslation("issues");
   const createIssue = useCreateLocalIssue(repoPath);
   const selectIssue = useUiStore((s) => s.selectIssue);
   const repoName = useUiStore((s) => s.repoName) ?? "";
@@ -51,8 +53,8 @@ export function CreateLocalIssueDialog({
     cancel,
     generating,
     close: () => onOpenChange(false),
-    readyTitle: "Issue draft ready",
-    readyDescription: "It's waiting in the dialog.",
+    readyTitle: t("localCreate.issueDraftReady"),
+    readyDescription: t("localCreate.waitingInDialog"),
     reopen: () => onOpenChange(true),
   });
   /** The serialized explicit draft the current form state was seeded from. */
@@ -80,7 +82,7 @@ export function CreateLocalIssueDialog({
         // draft's. The toast fires either way, naming where it came from.
         const originNote = originNoteFor(repoPath);
         const stillHere = originNote === undefined;
-        toast.success(`Created local issue: ${issue.title}`, {
+        toast.success(t("localCreate.createdToast", { title: issue.title }), {
           description: originNote,
         });
         // Both axes of "still THIS submit's draft": the repo, since a seed under
@@ -189,10 +191,9 @@ export function CreateLocalIssueDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New local issue</DialogTitle>
+            <DialogTitle>{t("localCreate.title")}</DialogTitle>
             <DialogDescription>
-              A private to-do for this repository, kept on your machine. Publish
-              it later if it's worth sharing.
+              {t("localCreate.description")}
             </DialogDescription>
           </DialogHeader>
 
@@ -204,16 +205,16 @@ export function CreateLocalIssueDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Title"
-                  placeholder="Summarize the issue"
+                  label={t("localCreate.titleLabel")}
+                  placeholder={t("localCreate.summarize")}
                 />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Description"
-                  placeholder="Jot down rough notes, then draft with AI"
+                  label={t("localCreate.bodyLabel")}
+                  placeholder={t("localCreate.draftPlaceholder")}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                   actions={
@@ -225,7 +226,7 @@ export function CreateLocalIssueDialog({
                         onClick={cancel}
                       >
                         <XIcon data-icon="inline-start" />
-                        Cancel
+                        {t("localCreate.cancel")}
                       </Button>
                     ) : (
                       // Empty notes stay a plain disable; a running create says why.
@@ -244,12 +245,14 @@ export function CreateLocalIssueDialog({
                         // a disabled Generate's shortcut is dead too.
                         title={
                           notes.trim() && !isSubmitting
-                            ? `Expand your notes into a structured issue with AI${generateChord.hint}`
-                            : "Expand your notes into a structured issue with AI"
+                            ? t("localCreate.expandNotesWithHint", {
+                                hint: generateChord.hint,
+                              })
+                            : t("localCreate.expandNotes")
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Draft with AI
+                        {t("localCreate.draftWithAi")}
                       </DisabledReasonButton>
                     )
                   }
@@ -264,11 +267,11 @@ export function CreateLocalIssueDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("localCreate.cancel")}
             </Button>
             <form.AppForm>
               <form.SubmitButton disabled={submitBlocked}>
-                Create local issue
+                {t("localCreate.create")}
               </form.SubmitButton>
             </form.AppForm>
           </DialogFooter>

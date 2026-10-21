@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CommitAuthorAvatar } from "@/components/commit-author-avatar";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
@@ -40,7 +41,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { AmendForcePushDialog } from "@/features/commit/AmendForcePushDialog";
 import { useCommitCommentsGate } from "@/features/pulls/CommitComments";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { branchNamePlaceholder } from "@/lib/ai/branch-prefixes";
 import { copyText } from "@/lib/clipboard";
 import { suppressContextMenu } from "@/lib/context-menu";
@@ -75,8 +76,6 @@ import type {
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import {
-  OFFLINE_ITEM_REASON,
-  pendingItemReason,
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
@@ -94,8 +93,6 @@ import {
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
-  HISTORY_REFRESHING_HINT,
-  RANGE_MERGE_ITEM_REASON,
   revertCommitConfirm,
   UNDO_ROOT_COMMIT_CONFIRM,
 } from "./commit-confirms";
@@ -122,16 +119,7 @@ import {
 import { SquashDialog } from "./RewriteDialogs";
 import { useAmendWithConfirm } from "./useAmendCommit";
 
-const FILTER_PLACEHOLDER = "Filter loaded commits, or search all history";
-
-/** Why undo is withheld on a detached HEAD at the first commit: there is no
- *  branch ref to delete, and the backend refuses. KEEP IN STEP: commit.rs's
- *  `UNDO_DETACHED_ROOT` is the backend's copy of this exact sentence. */
-const UNDO_DETACHED_ROOT =
-  "HEAD is detached at the repository's first commit — nothing to undo onto.";
 /** The menu item's short form of {@link UNDO_DETACHED_ROOT}. */
-const UNDO_DETACHED_ROOT_HINT =
-  " (detached at the first commit — nothing to undo onto)";
 
 // Keeps the log and its side reads in step with status's HEAD: refetches the
 // log when status saw a new HEAD first, refreshes the side reads once per
@@ -204,6 +192,7 @@ export function StatusLogSync({ repoPath }: { repoPath: string }) {
 }
 
 export function HistoryPanel({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("history");
   const log = useLog(repoPath);
   // Batch-resolve commit-author avatars for the log's authors (GitHub-only,
   // deduped by react-query across the History surfaces).
@@ -228,7 +217,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   // A tag push holds offline rather than park: a parked one lands on origin
   // whenever the connection returns.
   const offlineHold = useOfflineHold();
-  const offlineSuffix = offlineHold ? ` (${OFFLINE_ITEM_REASON})` : "";
+  const offlineSuffix = offlineHold
+    ? ` (${t("menu.offlineReason")})`
+    : "";
   // This repo's tag pushes in flight, read from the mutation cache: the panel
   // survives repo switches and a remount, and neither may release a hold.
   const pendingTagPushes = usePendingTagPushes(repoPath);
@@ -332,7 +323,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       if (!branchHash) return;
       // This create always checks the branch out, so it moves HEAD.
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(promotionBlocksCheckoutCopy());
         return;
       }
       const name = sanitizeRefName(value.name);
@@ -343,7 +334,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           checkout: true,
           startPoint: branchHash,
         });
-        toast.success(`Created branch ${name}`);
+        toast.success(t("toast.branchCreated", { name }));
         if (branchSessionRef.current === session) {
           branchSessionRef.current = null;
           setBranchHash(null);
@@ -362,7 +353,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       const session = tagSessionRef.current;
       try {
         await createTag.mutateAsync({ name, hash: tagHash });
-        toast.success(`Created tag ${name}`);
+        toast.success(t("toast.tagCreated", { name }));
         if (tagSessionRef.current === session) {
           tagSessionRef.current = null;
           setTagHash(null);
@@ -395,7 +386,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   async function undoLast() {
     if (!lastCommit || !head) return;
     if (detachedRoot) {
-      toast.info(UNDO_DETACHED_ROOT);
+      toast.info(t("toast.detachedRoot"));
       return;
     }
     const undoIn = repoPath;
@@ -408,7 +399,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       if (refuseIfSwitched(undoIn, "nothing was undone")) return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     let details: CommitDetails;
@@ -444,20 +435,18 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       setCommitDraft(details.subject, details.body);
       setRepoTab("changes");
     }
-    toast.success(
-      `Undid ${lastCommit.hash.slice(0, 7)} — changes are staged again`,
-    );
+    toast.success(t("toast.undone", { hash: lastCommit.hash.slice(0, 7) }));
   }
 
   // The confirm sits here rather than on the menu items, so the search menu and
   // the single-commit menu can't diverge on whether they ask.
   async function doCheckoutCommit(hash: string) {
     const checkoutIn = repoPath;
-    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash, t)))) return;
     if (refuseIfSwitched(checkoutIn, "nothing was checked out")) return;
     // Below the confirm: a promote can start while the prompt is open.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -466,7 +455,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       onError(e);
       return;
     }
-    toast.success(checkoutCommitSuccessToast(hash));
+    toast.success(checkoutCommitSuccessToast(hash, t));
   }
 
   // A merge commit routes to the mainline-parent dialog instead of the confirm.
@@ -476,10 +465,10 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       return;
     }
     const revertIn = repoPath;
-    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash, t)))) return;
     if (refuseIfSwitched(revertIn, "nothing was reverted")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     void revertCommit.mutateAsync({ hash }).catch(onError);
@@ -498,10 +487,10 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
-      .ask(cherryPickCommitConfirm(hash, currentBranch));
+      .ask(cherryPickCommitConfirm(hash, currentBranch, t));
     if (!ok || refuseIfSwitched(pickIn, "nothing was cherry-picked")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     let applied: boolean;
@@ -512,9 +501,13 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       return;
     }
     if (applied) {
-      toast.success(`Cherry-picked ${hash.slice(0, 7)}`);
+      toast.success(t("toast.cherryPicked", { hash: hash.slice(0, 7) }));
     } else {
-      toast.info(alreadyApplied);
+      toast.info(
+        alreadyApplied === CHERRY_PICK_ALREADY_APPLIED_SHORT
+          ? t("toast.nothingToCherryPickShort")
+          : t("toast.nothingToCherryPick"),
+      );
     }
   }
 
@@ -526,7 +519,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
       onError(e);
       return;
     }
-    toast.success(`Pushed tag ${tag} to origin`);
+    toast.success(t("toast.pushedTag", { tag }));
   }
 
   // The log can trail an outside commit (and push): undo only the HEAD status
@@ -652,7 +645,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           <Input
             disabled
             value={filterText}
-            placeholder={FILTER_PLACEHOLDER}
+            placeholder={t("panel.filterPlaceholder")}
             className="h-7"
             autoComplete="off"
           />
@@ -671,10 +664,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           <EmptyMedia variant="icon">
             <GitCommitIcon />
           </EmptyMedia>
-          <EmptyTitle>No commits yet</EmptyTitle>
+          <EmptyTitle>{t("panel.emptyTitle")}</EmptyTitle>
           <EmptyDescription>
-            Your project's history shows up here. Make a change, then stage and
-            commit it to record your first commit.
+            {t("panel.emptyDescription")}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -684,7 +676,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             onClick={() => setRepoTab("changes")}
           >
             <ArrowLeftIcon data-icon="inline-start" />
-            Go to Changes
+            {t("panel.goToChanges")}
           </Button>
         </EmptyContent>
       </Empty>
@@ -788,11 +780,11 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   // log either way; only the unpushed set is unknown while the reads disagree.
   const squashDisabledHint = (() => {
     if (query && !contiguousInHistory)
-      return " (clear the filter — a squash range must be adjacent in history)";
-    if (!contiguousInHistory) return " (must be adjacent and unpushed)";
-    if (!agreed) return HISTORY_REFRESHING_HINT;
+      return ` (${t("menu.squashClearFilter")})`;
+    if (!contiguousInHistory) return ` (${t("menu.squashAdjacentUnpushed")})`;
+    if (!agreed) return t("menu.historyRefreshing");
     if (squashAllowed) return "";
-    return " (must be adjacent and unpushed)";
+    return ` (${t("menu.squashAdjacentUnpushed")})`;
   })();
 
   function openSquash() {
@@ -841,9 +833,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   const editHistoryHint = (() => {
     switch (true) {
       case opInProgress:
-        return " (finish the operation in Changes first)";
+        return ` (${t("menu.finishOperationInChanges")})`;
       case !agreed:
-        return HISTORY_REFRESHING_HINT;
+        return t("menu.historyRefreshing");
       default:
         return "";
     }
@@ -852,11 +844,11 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
   // in-flight operation (the pick's own conflict path pauses one), then a repo
   // whose every other branch is archived — offerable-looking, but not offered.
   const pickOntoDisabledHint = (() => {
-    if (opInProgress) return " (finish the operation in Changes first)";
+    if (opInProgress) return ` (${t("menu.finishOperationInChanges")})`;
     if (targetBranches.length > 0) return "";
     if (pickOntoCandidates.length > 0)
-      return " (all other branches are archived — unarchive one first)";
-    return " (no other branches)";
+      return ` (${t("menu.unarchiveBranchFirst")})`;
+    return ` (${t("menu.noOtherBranches")})`;
   })();
   const canPickOnto = pickOntoDisabledHint === "";
 
@@ -939,9 +931,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             disabled={!canPickOnto || selectionHasMerge}
             onClick={() => openCherryPickOnto(commit)}
           >
-            Cherry-pick {selected.size} commits to branch…
+            {t("menu.cherryPickMany", { count: selected.size })}
             {canPickOnto && selectionHasMerge
-              ? ` (${RANGE_MERGE_ITEM_REASON})`
+              ? ` (${t("menu.rangeMergeReason")})`
               : pickOntoDisabledHint}
           </ContextMenuItem>
           <ContextMenuItem
@@ -949,7 +941,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             disabled={!canSquash}
             onClick={openSquash}
           >
-            Squash {selected.size} commits…
+            {t("menu.squashMany", { count: selected.size })}
             {!canSquash && squashDisabledHint}
           </ContextMenuItem>
           <ContextMenuItem
@@ -957,7 +949,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             disabled={!canEditHistory}
             onClick={() => setEditHistoryOpen(true)}
           >
-            Edit history…
+            {t("menu.editHistory")}
             {editHistoryHint}
           </ContextMenuItem>
           <ContextMenuSeparator />
@@ -965,11 +957,11 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             onClick={() =>
               copyText(
                 effectiveSelection(commit.hash).reverse().join("\n"),
-                `${selected.size} SHAs copied`,
+                t("toast.shasCopied", { count: selected.size }),
               )
             }
           >
-            Copy {selected.size} SHAs
+            {t("menu.copyShas", { count: selected.size })}
           </ContextMenuItem>
         </>
       );
@@ -981,32 +973,32 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           disabled={!isHead}
           onClick={() => requestAmend(commit.hash)}
         >
-          Amend commit…
-          {menuIndex === 0 && !isHead && HISTORY_REFRESHING_HINT}
+          {t("menu.amendCommit")}
+          {menuIndex === 0 && !isHead && t("menu.historyRefreshing")}
         </ContextMenuItem>
         <ContextMenuItem
           className={MENU_HELD_ROW_CLASS}
           disabled={!isHead || !canUndo || undoCommit.isPending || detachedRoot}
           onClick={undoLast}
         >
-          Undo commit (keep changes)
-          {menuIndex === 0 && !isHead && HISTORY_REFRESHING_HINT}
-          {isHead && detachedRoot && UNDO_DETACHED_ROOT_HINT}
+          {t("menu.undoKeepChanges")}
+          {menuIndex === 0 && !isHead && t("menu.historyRefreshing")}
+          {isHead && detachedRoot && ` (${t("menu.detachedRootHint")})`}
         </ContextMenuItem>
         <ContextMenuItem
           className={MENU_HELD_ROW_CLASS}
           disabled={menuIndex <= 0}
           onClick={() => setReset({ hash: commit.hash, repo: repoPath })}
         >
-          Reset to commit…
+          {t("menu.resetToCommit")}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => doCheckoutCommit(commit.hash)}>
-          Checkout commit
+          {t("menu.checkoutCommit")}
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() => doRevertCommit(commit.hash, commit.isMerge)}
         >
-          Revert changes in commit
+          {t("menu.revertCommit")}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -1016,7 +1008,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             setBranchHash(commit.hash);
           }}
         >
-          Create branch from commit…
+          {t("menu.createBranchFromCommit")}
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() => {
@@ -1025,7 +1017,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             setTagHash(commit.hash);
           }}
         >
-          Create tag…
+          {t("menu.createTag")}
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() =>
@@ -1036,14 +1028,14 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             )
           }
         >
-          Cherry-pick commit
+          {t("menu.cherryPickCommit")}
         </ContextMenuItem>
         <ContextMenuItem
           className={MENU_HELD_ROW_CLASS}
           disabled={!canPickOnto}
           onClick={() => openCherryPickOnto(commit)}
         >
-          Cherry-pick to branch…
+          {t("menu.cherryPickToBranch")}
           {pickOntoDisabledHint}
         </ContextMenuItem>
         <ContextMenuItem
@@ -1051,7 +1043,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           disabled={!canEditHistory}
           onClick={() => setEditHistoryOpen(true)}
         >
-          Edit history…
+          {t("menu.editHistory")}
           {editHistoryHint}
         </ContextMenuItem>
         {commit.tags.length > 0 && <ContextMenuSeparator />}
@@ -1064,9 +1056,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
               disabled={!!offlineHold || !!pushing}
               onClick={() => void pushTagToOrigin(tag)}
             >
-              Push tag {tag} to origin
+              {t("menu.pushTag", { tag })}
               {pushing
-                ? ` (${pendingItemReason(pushing.paused, "pushing…")})`
+                ? ` (${pushing.paused ? t("menu.offlineReason") : t("menu.pushing")})`
                 : offlineSuffix}
             </ContextMenuItem>
           );
@@ -1079,12 +1071,12 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
               setDeleteTag({ name: tag, repo: repoPath });
             }}
           >
-            Delete tag {tag}…
+            {t("menu.deleteTag", { tag })}
           </ContextMenuItem>
         ))}
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => copyText(commit.hash, "SHA copied")}>
-          Copy SHA
+        <ContextMenuItem onClick={() => copyText(commit.hash, t("toast.shaCopied"))}>
+          {t("menu.copySha")}
         </ContextMenuItem>
       </>
     );
@@ -1101,7 +1093,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
             // Clearing the box returns to filtering the loaded pages.
             if (!e.target.value.trim()) setSearchMode(false);
           }}
-          placeholder={FILTER_PLACEHOLDER}
+              placeholder={t("panel.filterPlaceholder")}
           className="h-7"
           autoComplete="off"
         />
@@ -1126,9 +1118,9 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
               <p className="text-xs text-muted-foreground">
                 {searchActive
                   ? search.isFetching
-                    ? "Searching all history…"
-                    : `No commits match "${filterText.trim()}"`
-                  : `No loaded commits match "${filterText.trim()}"`}
+                    ? t("panel.searching")
+                    : t("panel.noSearchMatches", { query: filterText.trim() })
+                  : t("panel.noLoadedMatches", { query: filterText.trim() })}
               </p>
               {!(searchActive && search.isFetching) && (
                 <Button
@@ -1141,7 +1133,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
                     filterRef.current?.focus();
                   }}
                 >
-                  Clear filter
+                  {t("panel.clearFilter")}
                 </Button>
               )}
             </div>
@@ -1177,7 +1169,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
                   {search.isFetchingNextPage && (
                     <Spinner data-icon="inline-start" />
                   )}
-                  Load more results
+                  {t("panel.loadMoreResults")}
                 </Button>
               )}
               <div>
@@ -1187,7 +1179,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
                   className="text-muted-foreground"
                   onClick={() => setSearchMode(false)}
                 >
-                  Back to recent history
+                  {t("panel.backToRecent")}
                 </Button>
               </div>
             </div>
@@ -1202,7 +1194,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
                     onClick={() => setSearchMode(true)}
                   >
                     <MagnifyingGlassIcon data-icon="inline-start" />
-                    Search all history for "{filterText.trim()}"
+                    {t("panel.searchAll", { query: filterText.trim() })}
                   </Button>
                 </div>
               )}
@@ -1218,7 +1210,7 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
                     {log.isFetchingNextPage && (
                       <Spinner data-icon="inline-start" />
                     )}
-                    Load more ({commits.length} loaded)
+                    {t("panel.loadMore", { count: commits.length })}
                   </Button>
                 </div>
               )}
@@ -1281,11 +1273,11 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           branchSessionRef.current = null;
           setBranchHash(null);
         }}
-        title="Create branch from commit"
-        description={`Creates a branch starting at ${shownBranchHash?.slice(0, 7) ?? ""} and switches to it.`}
-        fieldLabel="Branch name"
+        title={t("createBranch.title")}
+        description={t("createBranch.description", { hash: shownBranchHash?.slice(0, 7) ?? "" })}
+        fieldLabel={t("createBranch.name")}
         placeholder={fromCommitPlaceholder}
-        submitLabel="Create branch"
+        submitLabel={t("createBranch.submit")}
       />
 
       <CreateRefFromCommitDialog
@@ -1295,11 +1287,11 @@ export function HistoryPanel({ repoPath }: { repoPath: string }) {
           tagSessionRef.current = null;
           setTagHash(null);
         }}
-        title="Create tag"
-        description={`Tags commit ${shownTagHash?.slice(0, 7) ?? ""}.`}
-        fieldLabel="Tag name"
+        title={t("createTag.title")}
+        description={t("createTag.description", { hash: shownTagHash?.slice(0, 7) ?? "" })}
+        fieldLabel={t("createTag.name")}
         placeholder="v1.0.0"
-        submitLabel="Create tag"
+        submitLabel={t("createTag.submit")}
       />
 
       <CherryPickOntoDialog
@@ -1350,6 +1342,7 @@ function CommitList({
   onRowClick: (e: React.MouseEvent, index: number, hash: string) => void;
   onHoverPrefetch: (hash: string) => void;
 }) {
+  const { t } = useTranslation("history");
   const virtualizer = useVirtualizer({
     count: commits.length,
     getScrollElement: () => scrollEl,
@@ -1432,7 +1425,7 @@ function CommitList({
                   <span
                     key={tag}
                     className="flex max-w-24 shrink-0 items-center gap-0.5 border px-1 py-px text-[10px] font-normal text-muted-foreground"
-                    title={`tag: ${tag}`}
+                    title={t("panel.tagTitle", { tag })}
                   >
                     <TagIcon className="size-2.5 shrink-0" />
                     <span className="truncate">{tag}</span>
@@ -1451,10 +1444,10 @@ function CommitList({
                     className="ml-auto flex shrink-0 items-center text-muted-foreground"
                     title={
                       upstream
-                        ? `Not pushed yet — ahead of ${upstream}`
-                        : "Not pushed yet"
+                    ? t("panel.notPushedAhead", { upstream })
+                        : t("panel.notPushed")
                     }
-                    aria-label="Not pushed yet"
+                    aria-label={t("panel.notPushed")}
                   >
                     <ArrowUpIcon className="size-3" weight="bold" />
                   </span>

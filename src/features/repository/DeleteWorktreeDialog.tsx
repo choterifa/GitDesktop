@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ export function DeleteWorktreeDialog({
   worktree: UserWorktree | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const startRemoval = useWorktreeRemovalStore((s) => s.startRemoval);
   const removing = useIsRemovingWorktree(repoPath, worktree?.path);
   // Both reset per target only because every mount site keys this dialog by the
@@ -125,17 +127,18 @@ export function DeleteWorktreeDialog({
     <Dialog open={worktree !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete this worktree?</DialogTitle>
+          <DialogTitle>{t("deleteWorktree.title")}</DialogTitle>
           <DialogDescription>
-            Removes the worktree folder. Its branch{" "}
+            {t("deleteWorktree.descriptionStart")}{" "}
             {worktree?.branch ? (
               <>
-                <span className="font-mono">{worktree.branch}</span> stays
+                <span className="font-mono">{worktree.branch}</span>{" "}
+                {t("deleteWorktree.branchStays")}
               </>
             ) : (
-              "and commits stay"
+              t("deleteWorktree.commitsStay")
             )}{" "}
-            — you can check it out again later.
+            — {t("deleteWorktree.descriptionEnd")}
           </DialogDescription>
         </DialogHeader>
 
@@ -151,8 +154,8 @@ export function DeleteWorktreeDialog({
         {archivableBranch &&
           (alreadyArchived && (!removing || !inFlightArchive) ? (
             <p className="text-xs text-muted-foreground">
-              <span className="font-mono break-all">{archivableBranch}</span> is
-              already archived.
+              <span className="font-mono break-all">{archivableBranch}</span>{" "}
+              {t("deleteWorktree.alreadyArchived")}
             </p>
           ) : (
             <label
@@ -167,30 +170,26 @@ export function DeleteWorktreeDialog({
                 onCheckedChange={(checked) => setArchiveAfter(checked === true)}
               />
               <span className="min-w-0">
-                Archive{" "}
+                {t("deleteWorktree.archiveStart")}{" "}
                 <span className="font-mono break-all">{archivableBranch}</span>{" "}
-                after the worktree is removed
+                {t("deleteWorktree.archiveEnd")}
               </span>
             </label>
           ))}
 
         {worktree?.isLocked && (
           <p className="text-xs text-warning">
-            This worktree is locked
+            {t("deleteWorktree.locked")}
             {worktree.lockReason ? ` (${worktree.lockReason})` : ""}. Removing
-            it forces it.
+            {t("deleteWorktree.lockedEnd")}
           </p>
         )}
         {forceNeeded && !worktree?.isLocked && (
-          <p className="text-xs text-warning">
-            This worktree has uncommitted changes. Force-removing discards them.
-          </p>
+          <p className="text-xs text-warning">{t("deleteWorktree.dirty")}</p>
         )}
         {removing && (
           <p className="text-xs text-muted-foreground">
-            Removing a worktree can take a few minutes. You can close this and
-            keep working; it stays visible at the top of the repository until it
-            finishes.
+            {t("deleteWorktree.removalInProgress")}
           </p>
         )}
 
@@ -198,7 +197,7 @@ export function DeleteWorktreeDialog({
           <Button variant="outline" onClick={onClose}>
             {/* Never "Cancel" while a removal runs: closing this dialog is all
                 it does — the removal itself can't be called off. */}
-            {removing ? "Close" : "Cancel"}
+            {removing ? t("deleteWorktree.close") : t("deleteWorktree.cancel")}
           </Button>
           <Button
             variant="destructive"
@@ -206,7 +205,9 @@ export function DeleteWorktreeDialog({
             onClick={() => doRemove(forceNeeded)}
           >
             {removing && <Spinner data-icon="inline-start" />}
-            {forceNeeded ? "Force remove" : "Remove"}
+            {forceNeeded
+              ? t("deleteWorktree.forceRemove")
+              : t("deleteWorktree.remove")}
           </Button>
         </DialogFooter>
       </DialogContent>

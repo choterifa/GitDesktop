@@ -50,6 +50,7 @@ import {
   RemoteFormSection,
 } from "./parts";
 import { GITLAB_TOPIC_RULES, TopicsField } from "./TopicsField";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 import { useGenerateRepoDescription } from "./useGenerateRepoDescription";
 
 /** The GitLab counterpart of {@link GeneralSettingsSection}: GitLab's settings
@@ -69,7 +70,7 @@ export function GitLabGeneralSection({
   return (
     <RemoteFormSection
       query={settings}
-      noun="project settings"
+      noun={tr("project settings")}
       skeleton={
         <div className="min-w-0 space-y-3">
           <Skeleton className="h-9 w-full" />
@@ -77,7 +78,7 @@ export function GitLabGeneralSection({
           <Skeleton className="h-20 w-full" />
         </div>
       }
-      errorTitle="Couldn't load settings."
+      errorTitle={tr("Couldn't load settings.")}
     >
       {(data) => (
         <GitLabGeneralForm
@@ -149,16 +150,6 @@ const SQUASH_OPTIONS = [
 /** Base UI's <Select> resolves the selected value → its display label from an
  *  `items` map; without it a closed select falls back to the raw value (so the
  *  trigger reads "enabled" / "merge" / "default_off" until the popup is opened). */
-const ACCESS_LEVEL_ITEMS: Record<string, string> = Object.fromEntries(
-  ACCESS_LEVELS.map((o) => [o.value, o.label]),
-);
-const MERGE_METHOD_ITEMS: Record<string, string> = Object.fromEntries(
-  MERGE_METHODS.map((o) => [o.value, o.label]),
-);
-const SQUASH_OPTION_ITEMS: Record<string, string> = Object.fromEntries(
-  SQUASH_OPTIONS.map((o) => [o.value, o.label]),
-);
-
 /** Normalize AI-suggested topics per GitLab's rules (trim only, case + spaces
  *  preserved), deduped and with no cap — used when the Generate result seeds topics. */
 function normalizeGlTopics(raw: string[]): string[] {
@@ -178,6 +169,15 @@ function GitLabGeneralForm({
 }) {
   const update = useUpdateGlRepoSettings(repoPath);
   const online = useOnline();
+  const accessLevelItems = Object.fromEntries(
+    ACCESS_LEVELS.map((o) => [o.value, tr(o.label)]),
+  );
+  const mergeMethodItems = Object.fromEntries(
+    MERGE_METHODS.map((o) => [o.value, tr(o.label)]),
+  );
+  const squashOptionItems = Object.fromEntries(
+    SQUASH_OPTIONS.map((o) => [o.value, tr(o.label)]),
+  );
   const base = toInput(settings);
   const [form, setForm] = useState<GitLabRepoSettingsInput>(base);
 
@@ -263,7 +263,7 @@ function GitLabGeneralForm({
   async function handleSave() {
     try {
       await update.mutateAsync(form);
-      toast.success("Settings saved");
+      toast.success(tr("Settings saved"));
     } catch (e) {
       toastError(e);
     }
@@ -285,7 +285,7 @@ function GitLabGeneralForm({
         id="gl-repo-description"
         value={form.description}
         onChange={(v) => set("description", v)}
-        placeholder="Short description of this project"
+        placeholder={tr("Short description of this project")}
         generate={
           aiEnabled &&
           (!aiConfigured ? (
@@ -297,7 +297,7 @@ function GitLabGeneralForm({
               onClick={() => openSettings("ai")}
             >
               <SparkleIcon data-icon="inline-start" />
-              Set up AI
+              {tr("Set up AI")}
             </Button>
           ) : busy ? (
             <Button
@@ -311,18 +311,18 @@ function GitLabGeneralForm({
               }}
             >
               <Spinner data-icon="inline-start" />
-              Cancel
+              {tr("Cancel")}
             </Button>
           ) : (
             <Button
               type="button"
               variant="ghost"
               size="xs"
-              title={`Suggest a description + topics from the README with AI${generateHint}`}
+              title={`${tr("Suggest a description + topics from the README with AI")}${generateHint}`}
               onClick={runGenerate}
             >
               <SparkleIcon data-icon="inline-start" />
-              Generate
+              {tr("Generate")}
             </Button>
           ))
         }
@@ -330,7 +330,7 @@ function GitLabGeneralForm({
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor="gl-repo-topics">Topics</Label>
+          <Label htmlFor="gl-repo-topics">{tr("Topics")}</Label>
           <span className="text-[11px] text-muted-foreground tabular-nums">
             {form.topics.length}
           </span>
@@ -344,7 +344,7 @@ function GitLabGeneralForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="gl-repo-default-branch">Default branch</Label>
+        <Label htmlFor="gl-repo-default-branch">{tr("Default branch")}</Label>
         <Select
           items={Object.fromEntries(branchOptions.map((b) => [b, b]))}
           value={form.defaultBranch ?? ""}
@@ -354,7 +354,7 @@ function GitLabGeneralForm({
         >
           <SelectTrigger id="gl-repo-default-branch" className="w-full">
             <SelectValue
-              placeholder="No default branch yet"
+              placeholder={tr("No default branch yet")}
               onMouseEnter={clipTitleFromText}
             />
           </SelectTrigger>
@@ -369,18 +369,20 @@ function GitLabGeneralForm({
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium">Features</p>
+        <p className="text-xs font-medium">{tr("Features")}</p>
         <p className="text-[11px] text-muted-foreground">
-          “Members only” limits a feature to people with access to the project.
+          {tr(
+            "“Members only” limits a feature to people with access to the project.",
+          )}
         </p>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {FEATURES.map(({ key, label }) => (
             <div key={key} className="space-y-1.5">
               <Label htmlFor={`gl-feature-${key}`} className="text-xs">
-                {label}
+                {tr(label)}
               </Label>
               <Select
-                items={ACCESS_LEVEL_ITEMS}
+                items={accessLevelItems}
                 value={form[key]}
                 onValueChange={(v) => {
                   if (v) set(key, v);
@@ -392,7 +394,7 @@ function GitLabGeneralForm({
                 <SelectContent>
                   {ACCESS_LEVELS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
-                      {o.label}
+                      {tr(o.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -403,12 +405,12 @@ function GitLabGeneralForm({
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium">Merge requests</p>
+        <p className="text-xs font-medium">{tr("Merge requests")}</p>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="gl-merge-method">Merge method</Label>
+            <Label htmlFor="gl-merge-method">{tr("Merge method")}</Label>
             <Select
-              items={MERGE_METHOD_ITEMS}
+              items={mergeMethodItems}
               value={form.mergeMethod}
               onValueChange={(v) => {
                 if (v) set("mergeMethod", v);
@@ -420,16 +422,16 @@ function GitLabGeneralForm({
               <SelectContent>
                 {MERGE_METHODS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
-                    {o.label}
+                    {tr(o.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="gl-squash-option">Squash commits</Label>
+            <Label htmlFor="gl-squash-option">{tr("Squash commits")}</Label>
             <Select
-              items={SQUASH_OPTION_ITEMS}
+              items={squashOptionItems}
               value={form.squashOption}
               onValueChange={(v) => {
                 if (v) set("squashOption", v);
@@ -441,7 +443,7 @@ function GitLabGeneralForm({
               <SelectContent>
                 {SQUASH_OPTIONS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
-                    {o.label}
+                    {tr(o.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -451,7 +453,7 @@ function GitLabGeneralForm({
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="gl-remove-source" className="text-xs">
-              Delete source branch by default
+              {tr("Delete source branch by default")}
             </Label>
             <Switch
               id="gl-remove-source"
@@ -461,7 +463,7 @@ function GitLabGeneralForm({
           </div>
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="gl-pipeline-succeeds" className="text-xs">
-              Pipelines must succeed before merging
+              {tr("Pipelines must succeed before merging")}
             </Label>
             <Switch
               id="gl-pipeline-succeeds"
@@ -473,7 +475,7 @@ function GitLabGeneralForm({
           </div>
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="gl-discussions-resolved" className="text-xs">
-              All threads must be resolved before merging
+              {tr("All threads must be resolved before merging")}
             </Label>
             <Switch
               id="gl-discussions-resolved"
@@ -493,7 +495,7 @@ function GitLabGeneralForm({
           onClick={handleSave}
         >
           {update.isPending && <Spinner data-icon="inline-start" />}
-          Save changes
+          {tr("Save changes")}
         </DisabledReasonButton>
       </div>
     </div>

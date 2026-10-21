@@ -6,6 +6,7 @@ import {
   extractRepoDetails,
 } from "@/lib/ai/prompt";
 import { readRepoInstructions, readTextFile } from "@/lib/git/api";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 // READMEs the AI description is most usefully grounded in, in priority order.
 const README_CANDIDATES = [
@@ -35,6 +36,7 @@ async function readReadme(repoPath: string): Promise<string> {
  * README (falling back to the name alone). Mirrors useGenerateBranchName.
  */
 export function useGenerateRepoDescription(repoPath: string) {
+  const tr = useRepoSettingsText();
   const { generating, cancel, run } = useAiStream(repoPath);
 
   const generate = useCallback(
@@ -59,9 +61,9 @@ export function useGenerateRepoDescription(repoPath: string) {
       if (buffer === null) return;
       const details = extractRepoDetails(buffer);
       if (details.description || details.topics.length) opts.onResult(details);
-      else toast.error("Couldn't generate a description — try again.");
+      else toast.error(tr("Couldn't generate a description — try again."));
     },
-    [repoPath, run],
+    [repoPath, run, tr],
   );
 
   return { generate, cancel, generating };

@@ -5,6 +5,7 @@ import {
   WarningIcon,
 } from "@phosphor-icons/react";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
@@ -34,55 +35,13 @@ import { useStashReapplyMarker } from "@/lib/stores/stash-reapply-marker";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import {
-  activeRepoOp,
-  deriveStashBannerState,
-  opPhrase,
-} from "./conflict-banner-state";
-
-const OP_LABELS: Record<
-  RepoOp,
-  { banner: string; cont: string; verb: string }
-> = {
-  merge: { banner: "Merge in progress", cont: "Finish merge", verb: "Merging" },
-  rebase: {
-    banner: "Rebase in progress",
-    cont: "Continue rebase",
-    verb: "Rebasing",
-  },
-  "cherry-pick": {
-    banner: "Cherry-pick in progress",
-    cont: "Continue cherry-pick",
-    verb: "Cherry-picking",
-  },
-  revert: {
-    banner: "Revert in progress",
-    cont: "Continue revert",
-    verb: "Reverting",
-  },
-};
-
-/** What Abort undoes, per op. A cherry-pick can be reached from "Cherry-pick to
- *  branch…", which switched branches to get here and whose abort does NOT switch
- *  back — so its copy promises this branch back, never the whole repository. */
-const ABORT_DESCRIPTIONS: Record<RepoOp, string> = {
-  merge:
-    "Abandons the in-progress merge and restores the repository to the state before it started. Any conflict resolutions you've made will be lost.",
-  rebase:
-    "Abandons the in-progress rebase and restores the repository to the state before it started. Any conflict resolutions you've made will be lost.",
-  "cherry-pick":
-    "Abandons the in-progress cherry-pick and restores this branch to the state before the pick started. You stay on this branch, and any conflict resolutions you've made will be lost.",
-  revert:
-    "Abandons the in-progress revert and restores the repository to the state before it started. Any conflict resolutions you've made will be lost.",
-};
+import { activeRepoOp, deriveStashBannerState } from "./conflict-banner-state";
 
 /** The AI button drops to its icon below a 505px banner content box, where the
  *  full-label cluster (396.8px measured with "Continue cherry-pick") can't share
  *  a row with any status. Both classes carry the one cutoff. */
 const AI_ICON_ONLY =
   "@max-[505px]/conflict-banner:pr-1.5 @max-[505px]/conflict-banner:*:data-[slot=ai-label]:hidden";
-
-const BUSY_REASON = "An operation is in progress";
 
 /** Clears the reapply marker only while it still names `stashSha`: a compound
  *  that ran meanwhile may have recorded a newer one. */
@@ -116,10 +75,10 @@ const dialogClosed = () =>
     afterDialogCloses(resolve);
   });
 
-function toastStashMoved() {
-  toast.info("The stash list changed — nothing was dropped.", {
+function toastStashMoved(t: (key: string) => string) {
+  toast.info(t("conflicts.stashListChanged"), {
     action: {
-      label: "View stashes",
+      label: t("conflicts.viewStashes"),
       onClick: (event) => {
         // Blur first so sonner's focus restore runs before the dialog opens,
         // not after (it would pull focus back out of it).
@@ -130,15 +89,38 @@ function toastStashMoved() {
   });
 }
 
-function toastStashGone() {
-  toast.info("The backup stash is already gone, so there was nothing to drop.");
+function toastStashGone(t: (key: string) => string) {
+  toast.info(t("conflicts.backupStashGone"));
+}
+
+function localizedOperationPhrase(
+  phrase: string,
+  t: (key: string) => string,
+) {
+  const match = /^(switch|merge|rebase|update|pull)(?: (from|onto|to) (.+))?$/.exec(
+    phrase,
+  );
+  if (!match) return phrase;
+  const [, operation, preposition, detail] = match;
+  const label = t(`conflicts.stashOperations.${operation}`);
+  return preposition && detail
+    ? `${label} ${t(`conflicts.prepositions.${preposition}`)} ${detail}`
+    : label;
 }
 
 /** The conflicted tail with its branch name in mono, wrapping anywhere: a long
  *  base name must never truncate the sentence. Branch names hold no spaces, so
  *  the detail is exactly what precedes the first " finished.". */
-function ReapplyTail({ text, detail }: { text: string; detail?: string }) {
-  const end = text.indexOf(" finished.");
+function ReapplyTail({
+  text,
+  detail,
+  suffix,
+}: {
+  text: string;
+  detail?: string;
+  suffix: string;
+}) {
+  const end = text.indexOf(suffix);
   const start = detail ? end - detail.length : -1;
   if (!detail || start < 0 || text.slice(start, end) !== detail) return text;
   return (
@@ -171,6 +153,7 @@ export function ConflictBanner({
   /** Where focus lands when an action here unmounts the strip under it. */
   landingRef: RefObject<HTMLElement | null>;
 }) {
+  const { t } = useTranslation("repository");
   const opState = useOpState(repoPath);
   const abortOp = useOpAbort(repoPath);
   const continueOp = useOpContinue(repoPath);
@@ -199,6 +182,11 @@ export function ConflictBanner({
     statusUpdatedAt,
     stashCount: stashCount.data,
     stashCountUpdatedAt: stashCount.dataUpdatedAt,
+    message: (key, args) =>
+      t(`conflicts.stashReapply.${key}`, {
+        ...args,
+        operation: localizedOperationPhrase(args.operation, t),
+      }),
   });
   const resolvedShown = op === null && state.kind === "resolved";
   const markerRows = op === null && state.kind !== "none";
@@ -237,15 +225,17 @@ export function ConflictBanner({
 
   const canResolveWithAi = aiEnabled && reviewConfigured && conflictedCount > 0;
   const aiLabel =
-    conflictedCount === 1 ? "Resolve with AI" : "Resolve all with AI";
+    conflictedCount === 1
+      ? t("conflicts.resolveWithAi")
+      : t("conflicts.resolveAllWithAi");
 
   const busy = abortOp.isPending || continueOp.isPending;
   const onError = (e: unknown) => toastError(e);
-  const opVerb = op ? OP_LABELS[op].verb : null;
+  const opVerb = op ? t(`conflicts.ops.${op}.verb`) : null;
   const conflictText =
     conflictedCount > 0
-      ? `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`
-      : "all conflicts resolved";
+      ? t("conflicts.conflictCount", { count: conflictedCount })
+      : t("conflicts.allConflictsResolved");
   // A rebase deliberately paused at an `edit` (not a conflict): the user amends
   // the commit via the Changes tab, then continues.
   const editPaused = Boolean(opState.data?.editPaused) && conflictedCount === 0;
@@ -264,11 +254,13 @@ export function ConflictBanner({
       // one pick — a longer sequence may still have applied its remaining
       // commits.
       if (!recorded) {
-        toast.info("Commit skipped — your resolution left nothing to commit.");
+        toast.info(t("conflicts.commitSkipped"));
         return;
       }
       toast.success(
-        target === "merge" ? "Merge completed" : `${opVerb} continued`,
+        target === "merge"
+          ? t("conflicts.mergeCompleted")
+          : t("conflicts.operationContinued", { operation: opVerb }),
       );
     } catch (e) {
       onError(e);
@@ -279,7 +271,11 @@ export function ConflictBanner({
     try {
       await abortOp.mutateAsync(target);
       setConfirmAbort(false);
-      toast.success(`Aborted the ${target}`);
+      toast.success(
+        t("conflicts.operationAborted", {
+          operation: t(`conflicts.ops.${target}.noun`),
+        }),
+      );
     } catch (e) {
       setConfirmAbort(false);
       onError(e);
@@ -303,16 +299,20 @@ export function ConflictBanner({
     const recorded = useStashReapplyMarker.getState().marker;
     if (!recorded || recorded.repoPath !== repoPath) return;
     const ok = await useConfirm.getState().ask({
-      title: "Drop the backup stash?",
+      title: t("conflicts.dropBackupTitle"),
       body: (
         <>
-          Permanently deletes the backup stash (
+          {t("conflicts.dropBackupBeforeSha")} (
           <span className="font-mono">{recorded.stashSha.slice(0, 7)}</span>)
-          saved before the {opPhrase(recorded)}, along with the changes it
-          holds. Your working tree stays as it is now. This cannot be undone.
+          {t("conflicts.dropBackupAfterSha", {
+            operation: localizedOperationPhrase(
+              `${recorded.operationLabel}${recorded.detail ? ` ${recorded.detailPreposition ?? "from"} ${recorded.detail}` : ""}`,
+              t,
+            ),
+          })}
         </>
       ),
-      confirmLabel: "Drop stash",
+      confirmLabel: t("conflicts.dropStash"),
       confirmVariant: "destructive",
     });
     if (!ok) {
@@ -326,7 +326,7 @@ export function ConflictBanner({
     if (live?.repoPath !== repoPath || live.stashSha !== recorded.stashSha) {
       // A cleared marker needn't mean the backup is gone (a newer stash or a
       // settling compound retires it too), so both causes read as a change.
-      toastStashMoved();
+      toastStashMoved(t);
       await dialogClosed();
       // The strip that hosted Drop is gone or replaced, so wherever Base UI's
       // fallback put focus, it was never the user's choice: place it outright.
@@ -344,22 +344,24 @@ export function ConflictBanner({
     }
     switch (outcome.kind) {
       case "dropped":
-        toast.success("Backup stash dropped");
+        toast.success(t("conflicts.backupStashDropped"));
         break;
       case "moved":
-        toastStashMoved();
+        toastStashMoved(t);
         break;
       case "gone":
-        toastStashGone();
+        toastStashGone(t);
         break;
       case "restoreFailed":
         toast.error(
-          `The stash list changed — a different stash (${outcome.droppedSha.slice(0, 7)}) was dropped and couldn't be restored. Recover it under View stashes → Recoverable.`,
+          t("conflicts.differentStashDropped", {
+            sha: outcome.droppedSha.slice(0, 7),
+          }),
           {
             // The only place the lost entry's sha appears: it stays until closed.
             duration: Infinity,
             action: {
-              label: "Recover",
+              label: t("conflicts.recover"),
               onClick: (event) => {
                 event.currentTarget.blur();
                 dispatchAction("recover-lost-work");
@@ -410,21 +412,28 @@ export function ConflictBanner({
             )}
             <span className="min-w-0 text-pretty">
               {editPaused ? (
-                "Rebase paused — amend this commit's changes in Changes, then Continue"
+                t("conflicts.rebaseEditPaused")
               ) : opVerb ? (
                 `${opVerb} · ${conflictText}`
               ) : markerRows ? (
                 <>
                   {state.lead}
                   <span id={tailId} className="block text-muted-foreground">
-                    <ReapplyTail text={state.tail} detail={marker?.detail} />
+                    <ReapplyTail
+                      text={state.tail}
+                      detail={marker?.detail}
+                      suffix={t("conflicts.finishedSuffix")}
+                    />
                   </span>
                 </>
               ) : (
                 // No operation to continue or abort (a conflicted stash pop
                 // leaves unmerged paths and nothing else), so the banner has to
                 // say where the resolution happens.
-                `${conflictText} — resolve ${conflictedCount === 1 ? "it" : "them"} in the changes list.`
+                t("conflicts.resolveInChanges", {
+                  count: conflictedCount,
+                  conflict: conflictText,
+                })
               )}
             </span>
           </span>
@@ -453,7 +462,7 @@ export function ConflictBanner({
                   size="xs"
                   className="text-destructive"
                   disabled={drop.isPending}
-                  reason={BUSY_REASON}
+                  reason={t("conflicts.operationInProgress")}
                   aria-describedby={tailId}
                   onClick={() => void doDrop()}
                 >
@@ -462,17 +471,17 @@ export function ConflictBanner({
                   ) : (
                     <TrashIcon data-icon="inline-start" />
                   )}
-                  Drop backup stash…
+                  {t("conflicts.dropBackupStash")}
                 </DisabledReasonButton>
                 <DisabledReasonButton
                   variant="outline"
                   size="xs"
                   disabled={drop.isPending}
-                  reason={BUSY_REASON}
+                  reason={t("conflicts.operationInProgress")}
                   aria-describedby={tailId}
                   onClick={doKeep}
                 >
-                  Keep it
+                  {t("conflicts.keepIt")}
                 </DisabledReasonButton>
               </>
             )}
@@ -482,23 +491,23 @@ export function ConflictBanner({
                   variant="outline"
                   size="xs"
                   disabled={busy}
-                  reason={BUSY_REASON}
+                  reason={t("conflicts.operationInProgress")}
                   onClick={() => setConfirmAbort(true)}
                 >
-                  Abort
+                  {t("conflicts.abort")}
                 </DisabledReasonButton>
                 <DisabledReasonButton
                   size="xs"
                   disabled={busy || conflictedCount > 0}
                   reason={
                     conflictedCount > 0
-                      ? "Resolve every conflict first"
+                      ? t("conflicts.resolveEveryConflictFirst")
                       : undefined
                   }
                   onClick={() => void doContinue(op)}
                 >
                   {continueOp.isPending && <Spinner data-icon="inline-start" />}
-                  {OP_LABELS[op].cont}
+                  {t(`conflicts.ops.${op}.continue`)}
                 </DisabledReasonButton>
 
                 <Dialog open={confirmAbort} onOpenChange={setConfirmAbort}>
@@ -506,13 +515,15 @@ export function ConflictBanner({
                     <DialogHeader>
                       <DialogTitle>
                         {editPaused
-                          ? "Abort editing history?"
-                          : `Abort the ${op}?`}
+                          ? t("conflicts.abortEditingHistoryTitle")
+                          : t("conflicts.abortOperationTitle", {
+                              operation: t(`conflicts.ops.${op}.noun`),
+                            })}
                       </DialogTitle>
                       <DialogDescription>
                         {editPaused
-                          ? "Abandons the rebase and restores your branch to its original history. Any changes you've amended into this commit are lost."
-                          : ABORT_DESCRIPTIONS[op]}
+                          ? t("conflicts.abortEditingHistoryDescription")
+                          : t(`conflicts.ops.${op}.abortDescription`)}
                       </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
@@ -520,7 +531,7 @@ export function ConflictBanner({
                         variant="outline"
                         onClick={() => setConfirmAbort(false)}
                       >
-                        Keep going
+                        {t("conflicts.keepGoing")}
                       </Button>
                       <Button
                         variant="destructive"
@@ -530,7 +541,9 @@ export function ConflictBanner({
                         {abortOp.isPending && (
                           <Spinner data-icon="inline-start" />
                         )}
-                        Abort {op}
+                        {t("conflicts.abortOperationButton", {
+                          operation: t(`conflicts.ops.${op}.noun`),
+                        })}
                       </Button>
                     </DialogFooter>
                   </DialogContent>

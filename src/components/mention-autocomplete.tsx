@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { usePanelPortalContainer } from "@/components/panel-portal";
 import type {
@@ -456,14 +457,6 @@ function RefGlyph({ state, isPr }: { state: string; isPr: boolean }) {
   );
 }
 
-/** The one muted row shown when there is nothing to pick. A list still loading
- *  outranks a failed one: a merged list whose halves resolve separately is worth
- *  waiting on before it is called broken. */
-function emptyMessage(loading: boolean, isError: boolean): string {
-  if (loading) return "Loading…";
-  return isError ? "Couldn't load suggestions" : "No matches";
-}
-
 /** The caret-anchored suggestion listbox. Portalled out and fixed-positioned:
  *  the composer sits inside overflow containers that would clip it. It lands in
  *  the surrounding tab panel when there is one, so hiding that panel conceals it. */
@@ -491,6 +484,7 @@ function MentionPopover({
   onPick: (candidate: MentionCandidate) => void;
   onHover: (i: number) => void;
 }) {
+  const { t } = useTranslation("components");
   const portalContainer = usePanelPortalContainer();
 
   // Keep the keyboard-highlighted row visible while arrowing through a list that
@@ -506,7 +500,7 @@ function MentionPopover({
       ref={listRef}
       id={listId}
       role="listbox"
-      aria-label="Mention suggestions"
+      aria-label={t("mentions.suggestions")}
       // Dragging the list's own scrollbar must not blur the textarea, which would
       // dismiss the popover out from under the drag.
       onMouseDown={(e) => e.preventDefault()}
@@ -521,7 +515,11 @@ function MentionPopover({
     >
       {items.length === 0 ? (
         <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
-          {emptyMessage(loading, isError)}
+          {loading
+            ? t("loadingEllipsis")
+            : isError
+              ? t("mentions.loadError")
+              : t("mentions.noMatches")}
         </p>
       ) : (
         items.map((c, i) => (

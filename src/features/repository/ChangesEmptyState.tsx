@@ -9,6 +9,7 @@ import {
   TerminalIcon,
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -50,6 +51,7 @@ export function ChangesEmptyState({
   currentName: string | null;
   defaultName: string | null;
 }) {
+  const { t } = useTranslation("repository");
   const settings = useSettings();
   const setRepoTab = useUiStore((s) => s.setRepoTab);
   const setCompareBranch = useUiStore((s) => s.setCompareBranch);
@@ -65,12 +67,14 @@ export function ChangesEmptyState({
           {isUnborn ? <GitCommitIcon /> : <CheckCircleIcon />}
         </EmptyMedia>
         <EmptyTitle>
-          {isUnborn ? "Make your first commit" : "No local changes"}
+          {isUnborn
+            ? t("empty.firstCommitTitle")
+            : t("empty.noChangesTitle")}
         </EmptyTitle>
         <EmptyDescription>
           {isUnborn
-            ? "This repository has no commits yet. Edit a file in your project, then stage it and write a message below to commit."
-            : "Your working tree is clean."}
+            ? t("empty.firstCommitDescription")
+            : t("empty.cleanDescription")}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
@@ -83,12 +87,14 @@ export function ChangesEmptyState({
                 setCompareBranch(defaultName);
                 setRepoTab("compare");
               }}
-              title={`${currentName} is ${proposeCount} commit${
-                proposeCount === 1 ? "" : "s"
-              } ahead of ${defaultName}`}
+              title={t("empty.aheadTitle", {
+                branch: currentName,
+                count: proposeCount,
+                base: defaultName,
+              })}
             >
               <GitPullRequestIcon data-icon="inline-start" />
-              Open pull request
+              {t("empty.openPullRequest")}
             </Button>
           )}
           {!isUnborn && ghReady && (
@@ -103,7 +109,7 @@ export function ChangesEmptyState({
               }
             >
               <ArrowSquareOutIcon data-icon="inline-start" />
-              View on GitHub
+              {t("empty.viewOnGitHub")}
             </Button>
           )}
           {editorPath ? (
@@ -115,7 +121,7 @@ export function ChangesEmptyState({
               }
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Open in {editorName}
+              {t("empty.openInEditor", { editor: editorName })}
             </Button>
           ) : (
             // No editor configured yet — a folder has no "default editor", so the
@@ -127,7 +133,7 @@ export function ChangesEmptyState({
               onClick={() => openWithDefault(repoPath).catch(onError)}
             >
               <FolderOpenIcon data-icon="inline-start" />
-              Show in Explorer
+              {t("empty.showInExplorer")}
             </Button>
           )}
           <Button
@@ -143,7 +149,7 @@ export function ChangesEmptyState({
             }
           >
             <TerminalIcon data-icon="inline-start" />
-            Open in terminal
+            {t("empty.openInTerminal")}
           </Button>
           {!isUnborn && (
             <Button
@@ -152,7 +158,7 @@ export function ChangesEmptyState({
               onClick={() => setRepoTab("history")}
             >
               <ClockCounterClockwiseIcon data-icon="inline-start" />
-              View history
+              {t("empty.viewHistory")}
             </Button>
           )}
         </div>

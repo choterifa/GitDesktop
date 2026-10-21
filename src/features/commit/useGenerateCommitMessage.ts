@@ -1,9 +1,9 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAiStream } from "@/features/conversations/useAiStream";
 import {
   aiExcludePatterns,
-  type HiddenCause,
   hiddenCause,
 } from "@/lib/ai/ignore";
 import { buildCommitPrompt, splitCommitMessage } from "@/lib/ai/prompt";
@@ -17,15 +17,6 @@ import { resolveDraftKey, useUiStore } from "@/lib/stores/ui";
 /** Raw diff bytes requested from the backend; prompt budgeting trims further. */
 const RAW_DIFF_MAX_BYTES = 200_000;
 
-/** Why nothing staged is left to describe, by what hid it. */
-const EMPTY_STAGED_COPY: Record<HiddenCause, string> = {
-  patterns:
-    "All staged changes match your AI ignore patterns — nothing to describe.",
-  unreadable:
-    "Nothing to describe — files whose names aren't readable text are always kept from AI.",
-  both: "Nothing to describe — files whose names aren't readable text are always kept from AI, and the rest of the staged changes match your AI ignore patterns.",
-};
-
 /**
  * Aborts the one generation that can be in flight — `generating` is a single
  * store flag every Generate affordance gates on, so there is never more than
@@ -38,6 +29,7 @@ const EMPTY_STAGED_COPY: Record<HiddenCause, string> = {
 let liveCancel: (() => void) | null = null;
 
 export function useGenerateCommitMessage(repoPath: string) {
+  const { t } = useTranslation("commit");
   const { cancel: cancelOwn, run } = useAiStream(repoPath);
   const setCommitDraft = useUiStore((s) => s.setCommitDraft);
   const setGenerating = useUiStore((s) => s.setGenerating);
@@ -85,8 +77,8 @@ export function useGenerateCommitMessage(repoPath: string) {
           );
           toast.error(
             cause
-              ? EMPTY_STAGED_COPY[cause]
-              : "Nothing is staged — stage some changes first.",
+              ? t(`ai.emptyStaged.${cause}`)
+              : t("ai.nothingStaged"),
           );
           return null;
         }
@@ -121,6 +113,7 @@ export function useGenerateCommitMessage(repoPath: string) {
     if (buffer !== null && !keyMoved()) setCommitAiGenerated(true);
     setGenerating(false);
   }, [
+    t,
     repoPath,
     run,
     cancelOwn,

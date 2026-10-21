@@ -1,0 +1,103 @@
+{
+  "detailRail": {
+    "fileList": "Changed files",
+    "expandFileList": "Expand file list",
+    "collapseFileList": "Collapse file list"
+  },
+  "diffStat": {
+    "binaryFile": "Binary file",
+    "linesAdded_one": "{{count}} line added",
+    "linesAdded_other": "{{count}} lines added",
+    "linesDeleted_one": "{{count}} line deleted",
+    "linesDeleted_other": "{{count}} lines deleted"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "retry": "Try again",
+    "reload": "Reload app"
+  },
+  "logBlock": {
+    "copy": "Copy",
+    "copyTitle": "Copy output",
+    "copied": "Output copied",
+    "empty": "No output"
+  },
+  "markdownEditor": {
+    "heading": "Heading",
+    "bold": "Bold",
+    "italic": "Italic",
+    "quote": "Quote",
+    "inlineCode": "Inline code",
+    "link": "Link",
+    "bulletedList": "Bulleted list",
+    "numberedList": "Numbered list",
+    "taskList": "Task list",
+    "boldPlaceholder": "bold text",
+    "italicPlaceholder": "italic text",
+    "codePlaceholder": "code",
+    "write": "Write",
+    "preview": "Preview",
+    "nothingToPreview": "Nothing to preview"
+  },
+  "markdownLinkCard": {
+    "emptyLink": "This link has no address.",
+    "pageSection": "Points to a section of this page.",
+    "notRepositoryFile": "Doesn't point to a file in this repository.",
+    "noForgeForFile": "GitDesktop can't open repository files from this view.",
+    "externalHost": "Points to {{host}}, outside this repository.",
+    "external": "Points outside this repository.",
+    "unsupportedScheme": "GitDesktop doesn't open {{scheme}}: links.",
+    "opensOnProvider": "Opens on {{provider}}"
+  },
+  "reference": {
+    "openProfileInBrowser": "Opens profile in browser",
+    "loadError": "Couldn't load {{reference}}",
+    "pullRequest": "pull request",
+    "mergeRequest": "merge request",
+    "openIssue": "Open issue",
+    "closedIssue": "Closed issue",
+    "unknownIssue": "{{state}} issue",
+    "draftPullRequest": "Draft {{noun}}",
+    "openPullRequest": "Open {{noun}}",
+    "mergedPullRequest": "Merged {{noun}}",
+    "closedPullRequest": "Closed {{noun}}",
+    "unknownPullRequest": "{{state}} {{noun}}",
+    "draft": "Draft",
+    "open": "Open",
+    "merged": "Merged",
+    "closed": "Closed"
+  },
+  "markdown": {
+    "imageNamed": "View image: {{name}}",
+    "viewImage": "View image"
+  },
+  "mentions": {
+    "suggestions": "Mention suggestions",
+    "noMatches": "No matches",
+    "loadError": "Couldn't load suggestions"
+  },
+  "loadingEllipsis": "Loading…",
+  "meta": {
+    "none": "None",
+    "loadingField": "Loading field…"
+  },
+  "statusDetail": {
+    "details": "{{label}}, details"
+  },
+  "close": "Close",
+  "loading": "Loading",
+  "imageLightbox": {
+    "zoom100": "Zoom to 100%",
+    "fitToWindow": "Fit to window",
+    "image": "Image",
+    "loadError": "Couldn't load this image.",
+    "openInBrowser": "Open in browser",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
+    "imageCount": "Image {{current}} of {{total}}",
+    "close": "Close"
+  },
+  "inputGroup": {
+    "button": "Button"
+  }
+}

@@ -22,6 +22,7 @@ import {
   resumeWorktree,
   squashWorktree,
 } from "@/lib/git/worktree";
+import { i18n } from "@/lib/i18n";
 import { emitNotification } from "@/lib/notifications/emit";
 import { asMcpServerArray, loadSettings } from "@/lib/settings/api";
 import {
@@ -823,7 +824,13 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       // Free the worktree dir but keep the branch (it holds the work). The
       // session lingers as a `kept` record you can resume later.
       await removeWorktree(s.repoPath, s.worktreePath, null, false);
-      toast.success(`Kept on branch ${s.branch}`);
+      toast.success(
+        i18n.t("Kept on branch {{branch}}", {
+          ns: "sessions",
+          keySeparator: false,
+          branch: s.branch,
+        }),
+      );
       persist(setKept(id, true));
       set({
         busyId: null,

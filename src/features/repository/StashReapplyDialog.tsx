@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -41,11 +42,33 @@ export function StashReapplyDialog({
   onConfirm: (always: boolean) => void;
   pending: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const open = target !== null;
   const [always, setAlways] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const operation = (() => {
+    switch (target?.operationLabel) {
+      case "pull":
+        return t("stashReapply.operations.pull");
+      case "update":
+        return t("stashReapply.operations.update");
+      case "switch":
+        return t("stashReapply.operations.switch");
+      case "merge":
+        return t("stashReapply.operations.merge");
+      case "rebase":
+        return t("stashReapply.operations.rebase");
+      default:
+        return target?.operationLabel ?? "";
+    }
+  })();
   const detailPhrase = target?.detail
-    ? ` ${target.detailPreposition ?? "from"} ${target.detail}`
+    ? t(
+        target.detailPreposition === "to" || target.detailPreposition === "onto"
+          ? "stashReapply.detailTo"
+          : "stashReapply.detailFrom",
+        { detail: target.detail },
+      )
     : "";
 
   // Reset the checkbox each time the dialog opens — it only ever shows while
@@ -62,15 +85,9 @@ export function StashReapplyDialog({
       {/* Focus the non-destructive primary so Enter completes the recovery. */}
       <DialogContent initialFocus={() => confirmRef.current}>
         <DialogHeader>
-          <DialogTitle>
-            Stash your changes and {target?.operationLabel}?
-          </DialogTitle>
+          <DialogTitle>{t("stashReapply.title", { operation })}</DialogTitle>
           <DialogDescription>
-            GitDesktop can set your uncommitted changes aside, run the{" "}
-            {target?.operationLabel}
-            {detailPhrase}, then put them back where they were — including
-            untracked files. If putting them back hits conflicts, your stash is
-            kept as a backup.
+            {t("stashReapply.description", { operation, detailPhrase })}
           </DialogDescription>
         </DialogHeader>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
@@ -78,11 +95,11 @@ export function StashReapplyDialog({
             checked={always}
             onCheckedChange={(v) => setAlways(v === true)}
           />
-          Always stash and reapply
+          {t("stashReapply.always")}
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("stashReapply.cancel")}
           </Button>
           <Button
             ref={confirmRef}
@@ -90,7 +107,7 @@ export function StashReapplyDialog({
             onClick={() => onConfirm(always)}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Stash and reapply
+            {t("stashReapply.confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -21,6 +21,7 @@ import {
 import { terminalErrorMessage } from "@/lib/ai/terminal-error";
 import { presentError } from "@/lib/error-summary";
 import { readRepoInstructions } from "@/lib/git/api";
+import { i18n } from "@/lib/i18n";
 import { emitNotification } from "@/lib/notifications/emit";
 import { norm } from "@/lib/repo-key";
 import { loadSettings } from "@/lib/settings/api";
@@ -309,8 +310,12 @@ export const useResearchStore = create<ResearchState>((set, get) => {
       if (!run) return;
       if (isWatchingAgentSurface(get().activeResearchId, id, run.repoPath))
         return;
-      const label = run.origin?.topic?.trim() || "Research";
-      const headline = failed ? "Research failed" : "Research ready";
+      const label =
+        run.origin?.topic?.trim() ||
+        i18n.t("header.defaultTitle", { ns: "research" });
+      const headline = failed
+        ? i18n.t("notification.failed", { ns: "research" })
+        : i18n.t("notification.ready", { ns: "research" });
       emitNotification({
         source: "agents",
         row: {
@@ -394,7 +399,7 @@ export const useResearchStore = create<ResearchState>((set, get) => {
                   // whose narration could pass the error-shape net as the "reason".
                   error: terminalErrorMessage(
                     ev.text,
-                    "The research agent reported an error.",
+                    i18n.t("errors.agentReported", { ns: "research" }),
                   ),
                 });
             }
@@ -434,7 +439,7 @@ export const useResearchStore = create<ResearchState>((set, get) => {
     if (!report.trim()) {
       patch(id, {
         generating: false,
-        error: "The research agent returned nothing — try again.",
+        error: i18n.t("errors.noOutput", { ns: "research" }),
       });
       notifyDone(true);
       return;
@@ -577,7 +582,8 @@ export const useResearchStore = create<ResearchState>((set, get) => {
 
     saveReport: async (id) => {
       const run = get().runs.find((r) => r.id === id);
-      if (!run?.report) throw new Error("No report to save yet.");
+      if (!run?.report)
+        throw new Error(i18n.t("errors.noReportToSave", { ns: "research" }));
       const rel = await invoke<string>("research_save_report", {
         repoPath: run.repoPath,
         dir: RESEARCH_REPORT_DIR,

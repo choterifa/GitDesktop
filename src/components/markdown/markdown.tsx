@@ -14,6 +14,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
   fileNameFromSrc,
@@ -271,14 +272,17 @@ function lightboxImagesIn(root: Element): HTMLImageElement[] {
  *  ring hang off `data-lightbox` rather than class tokens added here — the
  *  wrapper's own `[&_img[data-lightbox]]:` rules then carry them, in the same
  *  cascade layer and at a higher specificity than its `[&_img]:` block. */
-function markLightboxImage(img: HTMLImageElement) {
+function markLightboxImage(img: HTMLImageElement, t: (key: string, options?: Record<string, unknown>) => string) {
   if (!isLightboxImage(img)) return;
   // The viewer's own caption fallback, so the two name an image identically.
   // It carries its own http(s) guard, so a data: URI resolves to "" here.
   const name = img.alt || fileNameFromSrc(img.src);
   img.tabIndex = 0;
   img.setAttribute("role", "button");
-  img.setAttribute("aria-label", name ? `View image: ${name}` : "View image");
+  img.setAttribute(
+    "aria-label",
+    name ? t("markdown.imageNamed", { name }) : t("markdown.viewImage"),
+  );
   img.dataset.lightbox = "";
 }
 
@@ -319,6 +323,7 @@ export function Markdown({
    *  exactly as it did without the extension. */
   refs?: MarkdownRefs;
 }) {
+  const { t } = useTranslation("components");
   const queryClient = useQueryClient();
   // Whether this body has forge context, as a primitive: every consumer of the
   // classifier reads THIS rather than re-testing `refs`, so the card, the click,
@@ -501,23 +506,23 @@ export function Markdown({
       else delete a.dataset.inertLink;
     }
     for (const img of root.querySelectorAll("img")) {
-      const onLoad = () => markLightboxImage(img);
+      const onLoad = () => markLightboxImage(img, t);
       img.addEventListener("load", onLoad);
       offs.push(() => img.removeEventListener("load", onLoad));
-      markLightboxImage(img);
+      markLightboxImage(img, t);
     }
     // Expanding a `<details>` qualifies the images inside it, which nothing else
     // re-evaluates — a click would open one the keyboard could never reach.
     // `toggle` doesn't bubble, so the root only sees it in capture.
     const onToggle = () => {
-      for (const img of root.querySelectorAll("img")) markLightboxImage(img);
+      for (const img of root.querySelectorAll("img")) markLightboxImage(img, t);
     };
     root.addEventListener("toggle", onToggle, true);
     offs.push(() => root.removeEventListener("toggle", onToggle, true));
     return () => {
       for (const off of offs) off();
     };
-  }, [html, hasRefs]);
+  }, [html, hasRefs, t]);
 
   /** Open the viewer on `img`, with every other qualifying image in the body
    *  behind its prev/next. Any hover intent in flight is dropped: a card opening

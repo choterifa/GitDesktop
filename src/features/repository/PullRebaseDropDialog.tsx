@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -83,6 +84,7 @@ export function PullRebaseDropDialog({
   onCancel: () => void;
   onDecide: (decision: PullDecision) => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const shown = useRetained(refusal);
   const keepRef = useRef<HTMLButtonElement | null>(null);
   const count = shown?.commits.length ?? 0;
@@ -103,10 +105,12 @@ export function PullRebaseDropDialog({
         initialFocus={() => keepRef.current}
       >
         <DialogHeader>
-          <DialogTitle>Keep or drop these commits?</DialogTitle>
+          <DialogTitle>{t("dialogs.pullDrop.title")}</DialogTitle>
           <DialogDescription>
-            {shown?.upstream} was rewritten — {commitCount(count)} on your
-            branch {count === 1 ? "is" : "are"} no longer part of it.
+            {t("dialogs.pullDrop.description", {
+              upstream: shown?.upstream,
+              count,
+            })}
           </DialogDescription>
         </DialogHeader>
 
@@ -114,7 +118,7 @@ export function PullRebaseDropDialog({
           {/* Every commit, never a preview: the surrounding copy promises to
               name them, and the list scrolls rather than truncating. */}
           <ul
-            aria-label={`${commitCount(count)} at risk`}
+            aria-label={t("dialogs.pullDrop.atRisk", { count })}
             className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-muted/30 p-2"
           >
             {shown?.commits.map((c) => {
@@ -141,10 +145,12 @@ export function PullRebaseDropDialog({
             {DECISION_ORDER.map((decision) => (
               <div key={decision} className="flex gap-2">
                 <dt className="w-32 shrink-0 font-medium">
-                  {PULL_DECISION_COPY[decision].action}
+                  {t(`dialogs.pullDrop.action.${decision}`)}
                 </dt>
                 <dd className="min-w-0 text-muted-foreground">
-                  {PULL_DECISION_COPY[decision].explain(shown?.upstream ?? "")}
+                  {t(`dialogs.pullDrop.explain.${decision}`, {
+                    upstream: shown?.upstream ?? "",
+                  })}
                 </dd>
               </div>
             ))}
@@ -153,7 +159,7 @@ export function PullRebaseDropDialog({
 
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onCancel}>
-            Cancel
+            {t("dialogs.common.cancel")}
           </Button>
           <Button
             variant="destructive"
@@ -161,7 +167,7 @@ export function PullRebaseDropDialog({
             onClick={() => onDecide("drop")}
           >
             {running === "drop" && <Spinner data-icon="inline-start" />}
-            {PULL_DECISION_COPY.drop.action}
+            {t("dialogs.pullDrop.action.drop")}
           </Button>
           <Button
             ref={keepRef}
@@ -169,7 +175,7 @@ export function PullRebaseDropDialog({
             onClick={() => onDecide("keep")}
           >
             {running === "keep" && <Spinner data-icon="inline-start" />}
-            {PULL_DECISION_COPY.keep.action}
+            {t("dialogs.pullDrop.action.keep")}
           </Button>
         </DialogFooter>
       </DialogContent>

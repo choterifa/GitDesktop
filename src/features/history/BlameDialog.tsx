@@ -1,5 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { RelativeTime } from "@/components/relative-time";
@@ -65,6 +66,7 @@ export function BlameDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("history");
   const blame = useBlame(repoPath, open ? path : null, rev);
   const lines = blame.data ?? [];
   const name = path.split("/").pop() ?? path;
@@ -88,7 +90,9 @@ export function BlameDialog({
       <DialogContent className="ph-no-capture flex h-[80vh] flex-col sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle className="truncate">
-            {shortRev ? `Blame: ${name} @ ${shortRev}` : `Blame: ${name}`}
+            {shortRev
+              ? t("blame.titleAtRevision", { name, rev: shortRev })
+              : t("blame.title", { name })}
           </DialogTitle>
           <DialogDescription>
             <PathText path={path} className="font-mono" />
@@ -109,7 +113,7 @@ export function BlameDialog({
               ? "list"
               : undefined
           }
-          aria-label={`Blame for ${name}`}
+          aria-label={t("blame.forFile", { name })}
           className="min-h-0 flex-1 overflow-auto border"
         >
           {blame.isPending ? (
@@ -119,11 +123,13 @@ export function BlameDialog({
           ) : blame.isError ? (
             <p className="p-3 text-xs text-muted-foreground">
               {shortRev
-                ? `Couldn't blame this file at ${shortRev} — it may not exist at that revision, or the commit isn't available locally.`
-                : "Couldn't blame this file (it may be binary or untracked)."}
+                ? t("blame.errorAtRevision", { rev: shortRev })
+                : t("blame.error")}
             </p>
           ) : lines.length === 0 ? (
-            <p className="p-3 text-xs text-muted-foreground">Empty file.</p>
+            <p className="p-3 text-xs text-muted-foreground">
+              {t("blame.emptyFile")}
+            </p>
           ) : (
             // Data-gated child: the useVirtualizer call lives here (never in the
             // dialog host) so (a) BlameDialog keeps compiling under the React
@@ -160,6 +166,7 @@ function BlameCommitCell({
   scrollEl: HTMLDivElement | null;
   onGoToCommit: () => void;
 }) {
+  const { t } = useTranslation("history");
   const [open, setOpen] = useState(false);
   // Built once: the latch compares rows by this object's identity, so it has to
   // outlive every render.
@@ -201,7 +208,10 @@ function BlameCommitCell({
         render={
           <button
             type="button"
-            aria-label={`View commit ${short}: ${line.summary}`}
+            aria-label={t("blame.viewCommitAria", {
+              hash: short,
+              summary: line.summary,
+            })}
           />
         }
         onClick={onGoToCommit}
@@ -224,7 +234,7 @@ function BlameCommitCell({
           </p>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="xs" onClick={onGoToCommit}>
-              View commit
+              {t("blame.viewCommit")}
             </Button>
             <Button
               variant="ghost"
@@ -232,13 +242,13 @@ function BlameCommitCell({
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(line.hash);
-                  toast.success("Commit SHA copied");
+                  toast.success(t("blame.shaCopied"));
                 } catch {
-                  toast.error("Could not copy to clipboard");
+                  toast.error(t("blame.copyFailed"));
                 }
               }}
             >
-              Copy SHA
+              {t("blame.copySha")}
             </Button>
           </div>
         </div>

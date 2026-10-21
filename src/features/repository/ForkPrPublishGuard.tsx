@@ -2,6 +2,7 @@ import { WarningIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
@@ -16,17 +17,13 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { forgeEnsureForkRemote } from "@/lib/git/api";
 import {
-  branchPushHoldReason,
   refuseWhilePushRuns,
   usePendingBranchPushes,
   usePush,
 } from "@/lib/git/queries";
 import type { ForkPrMatch } from "@/lib/git/types";
-import {
-  ACT_PENDING_REASON,
-  refuseWhileOffline,
-  useOfflineHold,
-} from "@/lib/offline-writes";
+import { useCommonText } from "@/lib/i18n/use-common-text";
+import { refuseWhileOffline, useOfflineHold } from "@/lib/offline-writes";
 import { refuseIfSwitched } from "@/lib/stores/notifications";
 import { toastError } from "@/lib/toast";
 
@@ -58,6 +55,8 @@ export function ForkPrPublishGuard({
   onClose: () => void;
   onPublishAnyway: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
+  const tx = useCommonText();
   const push = usePush(repoPath);
   const queryClient = useQueryClient();
   const [ensuring, setEnsuring] = useState(false);
@@ -70,12 +69,15 @@ export function ForkPrPublishGuard({
   // would queue behind it on the network lock, so both hold until it settles.
   const pendingPushes = usePendingBranchPushes(repoPath);
   const otherPushHeld = !pending && pendingPushes.length > 0;
-  const otherPushReason = branchPushHoldReason(
-    pendingPushes.some((p) => p.paused),
+  const otherPushReason = t(
+    pendingPushes.some((p) => p.paused)
+      ? "pushWrites.holdPaused"
+      : "pushWrites.holdRunning",
   );
   // Both routes push, so both hold while offline; the dialog can be open when
   // the connection drops.
-  const offlineHold = useOfflineHold();
+  const offlineHoldSource = useOfflineHold();
+  const offlineHold = offlineHoldSource ? tx(offlineHoldSource) : undefined;
   // Unknown degrades to false by contract, so a denied-or-unknown flag offers
   // the honest fallback rather than a push GitHub would reject.
   const canPushToFork = match?.maintainerCanModify === true;
@@ -86,7 +88,7 @@ export function ForkPrPublishGuard({
   const showPushToFork = match !== null && match.aheadCount > 0;
   const slug = match ? `${match.headRepoOwner}/${match.headRepoName}` : "";
   const commits = match
-    ? `${match.aheadCount} commit${match.aheadCount === 1 ? "" : "s"}`
+    ? t("forkPrPublishGuard.commits", { count: match.aheadCount })
     : "";
 
   // The push answers to `repoPath`, so it runs only while that repo is the one on
@@ -107,7 +109,14 @@ export function ForkPrPublishGuard({
   // normal push error. The push mutation invalidates the whole repo subtree,
   // which is where the PR list and details live.
   async function pushToFork() {
-    if (!match || refuseWhileOffline() || switchedAway() || pushRunning())
+    if (
+      !match ||
+      refuseWhileOffline(
+        tx("You're offline — this will be available once you're back online."),
+      ) ||
+      switchedAway() ||
+      pushRunning()
+    )
       return;
     setEnsuring(true);
     let remote: string;
@@ -125,7 +134,14 @@ export function ForkPrPublishGuard({
     setEnsuring(false);
     // Again below the remote setup, an await the connection can drop, the user
     // can switch repositories, and another push can start during.
-    if (refuseWhileOffline() || switchedAway() || pushRunning()) return;
+    if (
+      refuseWhileOffline(
+        tx("You're offline — this will be available once you're back online."),
+      ) ||
+      switchedAway() ||
+      pushRunning()
+    )
+      return;
     try {
       await push.mutateAsync({
         setUpstream: false,
@@ -133,7 +149,13 @@ export function ForkPrPublishGuard({
         remote,
         remoteBranch: match.headRefName,
       });
-      toast.success(`Pushed ${commits} to ${slug}:${match.headRefName}.`);
+      toast.success(
+        t("forkPrPublishGuard.pushed", {
+          commits,
+          slug,
+          branch: match.headRefName,
+        }),
+      );
       onClose();
     } catch (e) {
       toastError(e);
@@ -153,38 +175,37 @@ export function ForkPrPublishGuard({
           it must cost a deliberate Tab or click, never an ambient Enter. */}
       <DialogContent initialFocus={() => cancelRef.current}>
         <DialogHeader>
-          <DialogTitle>
-            This branch belongs to a pull request from a fork
-          </DialogTitle>
+          <DialogTitle>{t("forkPrPublishGuard.title")}</DialogTitle>
           <DialogDescription>
-            Its history matches{" "}
+            {t("forkPrPublishGuard.historyMatches")}{" "}
             {/* Link-styled button, not an anchor: an <a href> would navigate the
                 webview itself. Underlined at rest, matching the anchor styling
                 DialogDescription applies to its own links. */}
             <button
               type="button"
-              title="Open the pull request in your browser"
+              title={t("forkPrPublishGuard.openPullRequest")}
               className="cursor-pointer underline underline-offset-3 hover:text-foreground"
               onClick={() => match && openUrl(match.url).catch(toastError)}
             >
               PR #{match?.number} — {match?.title}
             </button>{" "}
-            — from <span className="font-mono">{slug}</span>. Publishing to{" "}
-            <span className="font-mono">{destination}</span> creates a separate
-            copy there and won't update the pull request.
+            {t("forkPrPublishGuard.from")}{" "}
+            <span className="font-mono">{slug}</span>.{" "}
+            {t("forkPrPublishGuard.publishingTo")}{" "}
+            <span className="font-mono">{destination}</span>{" "}
+            {t("forkPrPublishGuard.separateCopy")}
           </DialogDescription>
         </DialogHeader>
         {!showPushToFork ? (
           <p className="text-xs text-muted-foreground">
-            Your branch matches the pull request head exactly, so there's
-            nothing to send to <span className="font-mono">{slug}</span> —
-            publishing here would only copy the branch.
+            {t("forkPrPublishGuard.exactMatch", { slug })}
           </p>
         ) : canPushToFork ? (
           <p id={noteId} className="text-xs text-muted-foreground">
-            Pushes {commits} to{" "}
-            <span className="font-mono">{match?.headRefName}</span> — the pull
-            request updates.
+            {t("forkPrPublishGuard.pushes", {
+              commits,
+              branch: match?.headRefName,
+            })}
           </p>
         ) : (
           <p
@@ -193,8 +214,9 @@ export function ForkPrPublishGuard({
           >
             <WarningIcon className="size-4 shrink-0" />
             <span>
-              {match?.headRepoOwner} hasn't allowed edits from maintainers on
-              this pull request.
+              {t("forkPrPublishGuard.maintainerEditsUnavailable", {
+                owner: match?.headRepoOwner,
+              })}
             </span>
           </p>
         )}
@@ -202,7 +224,7 @@ export function ForkPrPublishGuard({
           {/* Cancel stays live while a push runs: a dismissal can't unsend it,
               but the user must always be able to close the dialog. */}
           <Button ref={cancelRef} variant="ghost" onClick={onClose}>
-            Cancel
+            {t("dialogs.common.cancel")}
           </Button>
           <DisabledReasonButton
             variant="outline"
@@ -212,7 +234,7 @@ export function ForkPrPublishGuard({
             reason={(() => {
               switch (true) {
                 case pending:
-                  return "Pushing to the fork…";
+                  return t("forkPrPublishGuard.pushingToFork");
                 case otherPushHeld:
                   return otherPushReason;
                 default:
@@ -221,7 +243,7 @@ export function ForkPrPublishGuard({
             })()}
             onClick={onPublishAnyway}
           >
-            Publish to {destination} anyway
+            {t("forkPrPublishGuard.publishAnyway", { destination })}
           </DisabledReasonButton>
           {showPushToFork ? (
             <DisabledReasonButton
@@ -235,7 +257,7 @@ export function ForkPrPublishGuard({
                   case !canPushToFork:
                     return undefined;
                   case pending:
-                    return ACT_PENDING_REASON;
+                    return t("forkPrPublishGuard.pushingToFork");
                   case otherPushHeld:
                     return otherPushReason;
                   default:
@@ -246,7 +268,7 @@ export function ForkPrPublishGuard({
               onClick={() => void pushToFork()}
             >
               {pending ? <Spinner data-icon="inline-start" /> : null}
-              Push to {slug}
+              {t("forkPrPublishGuard.pushToFork", { slug })}
             </DisabledReasonButton>
           ) : null}
         </DialogFooter>

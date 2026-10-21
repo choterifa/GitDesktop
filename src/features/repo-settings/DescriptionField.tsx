@@ -1,3 +1,4 @@
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 import type { ReactNode } from "react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,7 +25,7 @@ export function DescriptionField({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label htmlFor={id}>Description</Label>
+        <Label htmlFor={id}>{tr("Description")}</Label>
         {generate}
       </div>
       <Textarea

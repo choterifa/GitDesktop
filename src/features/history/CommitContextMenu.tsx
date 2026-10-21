@@ -2,6 +2,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import { useTranslation } from "react-i18next";
 import { copyText } from "@/lib/clipboard";
 
 /** Callbacks the menu items invoke — owned by the parent panel, which holds the
@@ -29,32 +30,33 @@ export function CommitContextMenuItems({
   hash: string;
   actions: CommitMenuActions;
 }) {
+  const { t } = useTranslation("history");
   // Destructured so `revert` stays narrowed inside the item callbacks: a
   // property narrowing doesn't survive into a closure, a const binding's does.
   const { checkout, revert, cherryPick, createBranch, createTag } = actions;
   return (
     <>
       <ContextMenuItem onClick={() => checkout(hash)}>
-        Checkout commit
+        {t("menu.checkoutCommit")}
       </ContextMenuItem>
       {revert && (
         <ContextMenuItem onClick={() => revert(hash)}>
-          Revert changes in commit
+          {t("menu.revertCommit")}
         </ContextMenuItem>
       )}
       <ContextMenuItem onClick={() => cherryPick(hash)}>
-        Cherry-pick commit
+        {t("menu.cherryPickCommit")}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => createBranch(hash)}>
-        Create branch from commit…
+        {t("menu.createBranchFromCommit")}
       </ContextMenuItem>
       <ContextMenuItem onClick={() => createTag(hash)}>
-        Create tag…
+        {t("menu.createTag")}
       </ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => copyText(hash, "SHA copied")}>
-        Copy SHA
+      <ContextMenuItem onClick={() => copyText(hash, t("toast.shaCopied"))}>
+        {t("menu.copySha")}
       </ContextMenuItem>
     </>
   );

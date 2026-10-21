@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { usePanelActive } from "@/components/panel-portal";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import type { AppSettings } from "@/lib/settings/api";
@@ -28,8 +29,6 @@ const RAIL_MIN_CONTAINER_PX = 512;
 
 // Names the landmark when the caller's own label belongs to a list role nested
 // inside it — one name per element, or landmark navigation announces it twice.
-const LANDMARK_LABEL = "File list";
-
 // Width of the row the rail sits in; `null` until measured, and outside a
 // DetailRailRow. Unknown reads as "wide" so the rail never flashes collapsed.
 const RailWidthContext = createContext<number | null>(null);
@@ -69,6 +68,7 @@ export function DetailRail({
   role?: AriaRole;
   children: ReactNode;
 }) {
+  const { t } = useTranslation("components");
   const rowWidth = useContext(RailWidthContext);
   const settings = useSettings();
   const saveSettings = useSaveSettings();
@@ -162,7 +162,7 @@ export function DetailRail({
     return (
       <aside
         ref={railRef}
-        aria-label={role ? LANDMARK_LABEL : ariaLabel}
+        aria-label={role ? t("detailRail.fileList") : ariaLabel}
         className={cn(
           "flex w-7 shrink-0 flex-col items-center border-r",
           className,
@@ -177,8 +177,8 @@ export function DetailRail({
             variant="ghost"
             size="icon-xs"
             aria-expanded="false"
-            aria-label="Expand file list"
-            title="Expand file list"
+            aria-label={t("detailRail.expandFileList")}
+            title={t("detailRail.expandFileList")}
             onClick={toggle}
           >
             <CaretRightIcon />
@@ -191,7 +191,7 @@ export function DetailRail({
   return (
     <aside
       ref={railRef}
-      aria-label={role ? LANDMARK_LABEL : ariaLabel}
+      aria-label={role ? t("detailRail.fileList") : ariaLabel}
       className={cn("flex w-72 shrink-0 flex-col border-r", className)}
     >
       <div className="flex h-7 shrink-0 items-center justify-end gap-2 border-b px-0.5">
@@ -204,8 +204,8 @@ export function DetailRail({
           variant="ghost"
           size="icon-xs"
           aria-expanded="true"
-          aria-label="Collapse file list"
-          title="Collapse file list"
+          aria-label={t("detailRail.collapseFileList")}
+          title={t("detailRail.collapseFileList")}
           onClick={toggle}
         >
           <CaretLeftIcon />

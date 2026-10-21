@@ -2,6 +2,7 @@ import { WarningIcon, XIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { useForgeSessionHealth } from "@/lib/git/queries";
 import { providerLabel } from "@/lib/git/types";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { calendarDaysUntil } from "./expiry";
@@ -16,6 +17,7 @@ import { calendarDaysUntil } from "./expiry";
  * meaning is never color-only — the warning icon pairs with words.
  */
 export function SessionExpiryNotice({ repoPath }: { repoPath: string }) {
+  const tx = useCommonText();
   const health = useForgeSessionHealth(repoPath);
   const settings = useSettings();
   const openReconnect = useUiStore((s) => s.openReconnect);
@@ -48,10 +50,14 @@ export function SessionExpiryNotice({ repoPath }: { repoPath: string }) {
   const label = providerLabel(provider);
   const message =
     daysLeft < 0
-      ? `Your ${label} token has expired.`
+      ? tx("Your {{provider}} token has expired.", { provider: label })
       : daysLeft === 0
-        ? `Your ${label} token expires today.`
-        : `Your ${label} token expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`;
+        ? tx("Your {{provider}} token expires today.", { provider: label })
+        : tx("Your {{provider}} token expires in {{count}} {{unit}}.", {
+            provider: label,
+            count: daysLeft,
+            unit: tx(daysLeft === 1 ? "day" : "days"),
+          });
 
   return (
     <div
@@ -71,13 +77,13 @@ export function SessionExpiryNotice({ repoPath }: { repoPath: string }) {
           }
         }}
       >
-        Reconnect
+        {tx("Reconnect")}
       </button>
       <Button
         variant="ghost"
         size="icon-sm"
         className="ml-auto shrink-0"
-        aria-label="Dismiss"
+        aria-label={tx("Dismiss")}
         onClick={() => dismiss(key)}
       >
         <XIcon />

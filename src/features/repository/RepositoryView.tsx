@@ -1,4 +1,5 @@
 import {
+  ArrowLeftIcon,
   CaretDownIcon,
   ChatCircleIcon,
   CircleDashedIcon,
@@ -29,7 +30,9 @@ import {
   useState,
   useTransition,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { LazyPanelFallback } from "@/components/lazy-panel-fallback";
+import { Button } from "@/components/ui/button";
 import {
   PanelActivityBoundary,
   PanelPortalBoundary,
@@ -70,6 +73,7 @@ import { PullRequestsPanel } from "@/features/pulls/PullRequestsPanel";
 import { RemotePrView } from "@/features/pulls/RemotePrView";
 import { useCleanupResolveWorktrees } from "@/features/pulls/useCleanupResolveWorktrees";
 import { useWatchPrHeads } from "@/features/pulls/useWatchPrHeads";
+import { HistoryGraph } from "@/features/repository/HistoryGraph";
 import { RunTaskPicker } from "@/features/scripts/RunTaskPicker";
 import { TaskRunConfirm } from "@/features/scripts/TaskRunConfirm";
 import { TaskRunView } from "@/features/scripts/TaskRunView";
@@ -228,14 +232,14 @@ const RAIL_TABS: {
   label: string;
   icon: typeof FilesIcon;
 }[] = [
-  { id: "changes", label: "Changes", icon: FilesIcon },
   { id: "history", label: "History", icon: GitCommitIcon },
+  { id: "changes", label: "Changes", icon: FilesIcon },
   { id: "pulls", label: "PRs", icon: GitPullRequestIcon },
 ];
 
 type RailId = (typeof RAIL_TABS)[number]["id"] | "more";
 
-const RAIL_IDS: RailId[] = ["changes", "history", "pulls", "more"];
+const RAIL_IDS: RailId[] = ["history", "changes", "pulls", "more"];
 
 const RAIL_BUTTON_CLASS =
   "relative flex h-9 w-full shrink-0 items-center justify-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
@@ -272,6 +276,7 @@ function SidebarRail({
    *  not a tab: it stays out of the arrow-key order and is reached by Tab. */
   toggle: ReactNode;
 }) {
+  const { t } = useTranslation("repository");
   const activeId: RailId =
     RAIL_TABS.find((t) => t.id === repoTab)?.id ?? "more";
   // The roving target follows the active surface until an arrow key moves it:
@@ -304,12 +309,12 @@ function SidebarRail({
     railNav(e);
   }
 
-  const moreLabel = activeSecondaryLabel ?? "More tabs";
+  const moreLabel = activeSecondaryLabel ?? t("tabs.more");
   const moreRunning = taskRunning && repoTab !== "tasks";
 
   return (
     <nav
-      aria-label="Repository tabs"
+      aria-label={t("tabs.repository")}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto"
       onKeyDownCapture={onKeyDownCapture}
     >
@@ -317,7 +322,9 @@ function SidebarRail({
       {/* Separates the action from the tab icons so it doesn't read as a
           fourth tab; sitting at the head keeps it at the top in both modes. */}
       <div aria-hidden className="mx-3 my-1 h-px shrink-0 bg-border" />
-      {RAIL_TABS.map(({ id, label, icon: Icon }) => (
+      {RAIL_TABS.map(({ id, icon: Icon }) => {
+        const label = t(`tabs.primary.${id}`);
+        return (
         <button
           key={id}
           type="button"
@@ -337,10 +344,11 @@ function SidebarRail({
         >
           <Icon className="size-4" />
         </button>
-      ))}
+        );
+      })}
       <DropdownMenu>
         <DropdownMenuTrigger
-          title={moreRunning ? `${moreLabel} — a task is running` : moreLabel}
+          title={moreRunning ? t("tabs.taskRunningFor", { tab: moreLabel }) : moreLabel}
           render={
             <button
               type="button"
@@ -383,6 +391,7 @@ function SidebarRail({
 }
 
 export function RepositoryView() {
+  const { t } = useTranslation("repository");
   const repoPath = useUiStore((s) => s.repoPath);
   const closeRepo = useUiStore((s) => s.closeRepo);
   const repoName = useUiStore((s) => s.repoName);
@@ -390,6 +399,7 @@ export function RepositoryView() {
   const setRepoTab = useUiStore((s) => s.setRepoTab);
   const requestCreate = useUiStore((s) => s.requestCreate);
   const selectedCommitHash = useUiStore((s) => s.selectedCommitHash);
+  const selectCommit = useUiStore((s) => s.selectCommit);
   const compareCommitHash = useUiStore((s) => s.compareCommitHash);
   const compareBranch = useUiStore((s) => s.compareBranch);
   const selectedPr = useUiStore((s) => s.selectedPr);
@@ -742,14 +752,16 @@ export function RepositoryView() {
 
   if (!repoPath) return null;
 
-  const secondaryTabs = SECONDARY_TABS.filter((t) => aiEnabled || !t.ai);
+  const secondaryTabs = SECONDARY_TABS.filter((tab) => aiEnabled || !tab.ai).map(
+    ({ tab, ai }) => ({ tab, ai, label: t(`tabs.secondary.${tab}`) }),
+  );
   const activeSecondary = secondaryTabs.find((t) => t.tab === repoTab);
   // Tooltip = the action with its effective shortcut appended, e.g. "Collapse
   // sidebar (Ctrl+Shift+B)"; unbound leaves the bare label. `aria-keyshortcuts`
   // carries the chord on the ARIA channel so it stays out of the button's name.
   const sidebarToggleLabel = sidebarCollapsed
-    ? "Expand sidebar"
-    : "Collapse sidebar";
+    ? t("tabs.expandSidebar")
+    : t("tabs.collapseSidebar");
   const sidebarToggleTitle =
     sidebarBinding === null
       ? sidebarToggleLabel
@@ -840,26 +852,26 @@ export function RepositoryView() {
               onValueChange={(value) => changeTab(value as RepoTab)}
             >
               <TabsList className="w-full">
-                <TabsTrigger value="changes" className="min-w-0 flex-1">
-                  <span className="min-w-0 truncate">Changes</span>
-                </TabsTrigger>
                 <TabsTrigger value="history" className="min-w-0 flex-1">
-                  <span className="min-w-0 truncate">History</span>
+                  <span className="min-w-0 truncate">{t("tabs.primary.history")}</span>
+                </TabsTrigger>
+                <TabsTrigger value="changes" className="min-w-0 flex-1">
+                  <span className="min-w-0 truncate">{t("tabs.primary.changes")}</span>
                 </TabsTrigger>
                 <TabsTrigger value="pulls" className="min-w-0 flex-1">
-                  <span className="min-w-0 truncate">PRs</span>
+                  <span className="min-w-0 truncate">{t("tabs.primary.pulls")}</span>
                 </TabsTrigger>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     title={
                       taskRunning && repoTab !== "tasks"
-                        ? "A task is running"
+                        ? t("tabs.taskRunning")
                         : undefined
                     }
                     render={
                       <button
                         type="button"
-                        aria-label="More tabs"
+                        aria-label={t("tabs.more")}
                         className={cn(
                           "relative inline-flex h-[calc(100%-1px)] shrink-0 items-center justify-center gap-1 rounded-none border border-transparent px-2 text-xs font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground data-popup-open:text-foreground dark:text-muted-foreground dark:hover:text-foreground [&_svg]:size-4 [&_svg]:shrink-0",
                           activeSecondary &&
@@ -875,7 +887,7 @@ export function RepositoryView() {
                       />
                     )}
                     <span className="max-w-24 truncate">
-                      {activeSecondary?.label ?? "More"}
+                      {activeSecondary?.label ?? t("tabs.moreShort")}
                     </span>
                     <CaretDownIcon data-icon="inline-end" />
                   </DropdownMenuTrigger>
@@ -999,11 +1011,28 @@ export function RepositoryView() {
           </TabPanel>
           <TabPanel active={repoTab === "history"}>
             {deferredCommitHash ? (
-              <CommitDetailView repoPath={repoPath} hash={deferredCommitHash} />
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex h-9 shrink-0 items-center border-b px-2">
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => selectCommit(null)}
+                  >
+                    <ArrowLeftIcon data-icon="inline-start" />
+                    Back to graph
+                  </Button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <CommitDetailView
+                    repoPath={repoPath}
+                    hash={deferredCommitHash}
+                  />
+                </div>
+              </div>
             ) : (
-              <DiffPlaceholder
-                icon={GitCommitIcon}
-                message="Select a commit to see its changes"
+              <HistoryGraph
+                repoPath={repoPath}
+                active={repoTab === "history"}
               />
             )}
           </TabPanel>

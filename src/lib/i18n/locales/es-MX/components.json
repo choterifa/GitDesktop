@@ -1,0 +1,103 @@
+{
+  "detailRail": {
+    "fileList": "Archivos modificados",
+    "expandFileList": "Expandir lista de archivos",
+    "collapseFileList": "Contraer lista de archivos"
+  },
+  "diffStat": {
+    "binaryFile": "Archivo binario",
+    "linesAdded_one": "{{count}} línea agregada",
+    "linesAdded_other": "{{count}} líneas agregadas",
+    "linesDeleted_one": "{{count}} línea eliminada",
+    "linesDeleted_other": "{{count}} líneas eliminadas"
+  },
+  "errorBoundary": {
+    "title": "Ocurrió un error",
+    "retry": "Intentar de nuevo",
+    "reload": "Recargar la aplicación"
+  },
+  "logBlock": {
+    "copy": "Copiar",
+    "copyTitle": "Copiar salida",
+    "copied": "Se copió la salida",
+    "empty": "Sin salida"
+  },
+  "markdownEditor": {
+    "heading": "Encabezado",
+    "bold": "Negritas",
+    "italic": "Cursivas",
+    "quote": "Cita",
+    "inlineCode": "Código en línea",
+    "link": "Enlace",
+    "bulletedList": "Lista con viñetas",
+    "numberedList": "Lista numerada",
+    "taskList": "Lista de tareas",
+    "boldPlaceholder": "texto en negritas",
+    "italicPlaceholder": "texto en cursivas",
+    "codePlaceholder": "código",
+    "write": "Escribir",
+    "preview": "Vista previa",
+    "nothingToPreview": "No hay nada que previsualizar"
+  },
+  "markdownLinkCard": {
+    "emptyLink": "Este enlace no tiene dirección.",
+    "pageSection": "Apunta a una sección de esta página.",
+    "notRepositoryFile": "No apunta a un archivo de este repositorio.",
+    "noForgeForFile": "GitDesktop no puede abrir archivos del repositorio desde esta vista.",
+    "externalHost": "Apunta a {{host}}, fuera de este repositorio.",
+    "external": "Apunta fuera de este repositorio.",
+    "unsupportedScheme": "GitDesktop no abre enlaces {{scheme}}:.",
+    "opensOnProvider": "Se abre en {{provider}}"
+  },
+  "reference": {
+    "openProfileInBrowser": "Abre el perfil en el navegador",
+    "loadError": "No se pudo cargar {{reference}}",
+    "pullRequest": "solicitud de cambios",
+    "mergeRequest": "solicitud de fusión",
+    "openIssue": "Incidencia abierta",
+    "closedIssue": "Incidencia cerrada",
+    "unknownIssue": "Incidencia: {{state}}",
+    "draftPullRequest": "{{noun}} en borrador",
+    "openPullRequest": "{{noun}} abierta",
+    "mergedPullRequest": "{{noun}} integrada",
+    "closedPullRequest": "{{noun}} cerrada",
+    "unknownPullRequest": "{{noun}}: {{state}}",
+    "draft": "Borrador",
+    "open": "Abierta",
+    "merged": "Integrada",
+    "closed": "Cerrada"
+  },
+  "markdown": {
+    "imageNamed": "Ver imagen: {{name}}",
+    "viewImage": "Ver imagen"
+  },
+  "mentions": {
+    "suggestions": "Sugerencias de menciones",
+    "noMatches": "No hay coincidencias",
+    "loadError": "No se pudieron cargar las sugerencias"
+  },
+  "loadingEllipsis": "Cargando…",
+  "meta": {
+    "none": "Ninguno",
+    "loadingField": "Cargando campo…"
+  },
+  "statusDetail": {
+    "details": "Detalles de {{label}}"
+  },
+  "close": "Cerrar",
+  "loading": "Cargando",
+  "imageLightbox": {
+    "zoom100": "Ampliar al 100 %",
+    "fitToWindow": "Ajustar a la ventana",
+    "image": "Imagen",
+    "loadError": "No se pudo cargar esta imagen.",
+    "openInBrowser": "Abrir en el navegador",
+    "previousImage": "Imagen anterior",
+    "nextImage": "Imagen siguiente",
+    "imageCount": "Imagen {{current}} de {{total}}",
+    "close": "Cerrar"
+  },
+  "inputGroup": {
+    "button": "Botón"
+  }
+}

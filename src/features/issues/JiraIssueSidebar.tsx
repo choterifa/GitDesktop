@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { DueDateRow } from "@/features/issues/RemoteIssueViewParts";
 import { pendingWriteMatching } from "@/lib/git/queries";
@@ -74,6 +75,7 @@ export function JiraIssueSidebar({
    *  since it holds the query whose data these rows render. */
   className?: string;
 }) {
+  const { t } = useTranslation("issues");
   const setDueDate = useJiraSetDueDate(repoPath, link);
   const selectIssue = useUiStore((s) => s.selectIssue);
   // From the cache, not the observer: this rail remounts per issue, and a due
@@ -103,7 +105,9 @@ export function JiraIssueSidebar({
         issue.priorityName ||
         (canEditIssue && link)) && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Details</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("jiraSidebar.details")}
+          </p>
           {issue.issueTypeName && (
             <div className="text-xs">
               <IssueTypeMeta
@@ -123,7 +127,9 @@ export function JiraIssueSidebar({
             </div>
           ) : (
             issue.priorityName && (
-              <p className="text-xs">Priority: {issue.priorityName}</p>
+              <p className="text-xs">
+                {t("jiraSidebar.priority")} {issue.priorityName}
+              </p>
             )
           )}
         </div>
@@ -132,7 +138,9 @@ export function JiraIssueSidebar({
       {/* Assignee — editable picker when permitted, else the read-only avatar. */}
       {(canAssign && link) || issue.assignee ? (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Assignee</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("jiraSidebar.assignee")}
+          </p>
           {canAssign && link ? (
             <JiraAssigneePicker
               repoPath={repoPath}
@@ -154,7 +162,9 @@ export function JiraIssueSidebar({
       {/* Reporter — always read-only (avatar + name). */}
       {issue.reporter && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Reporter</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("jiraSidebar.reporter")}
+          </p>
           <span className="inline-flex items-center gap-1.5 text-xs">
             <ForgeUserAvatar user={issue.reporter} ghHost={null} />
             <span>{issue.reporter.label}</span>
@@ -186,7 +196,7 @@ export function JiraIssueSidebar({
         issue.dueDate && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">
-              Due date
+              {t("jiraSidebar.dueDate")}
             </p>
             <p className="text-xs">{issue.dueDate}</p>
           </div>
@@ -196,9 +206,9 @@ export function JiraIssueSidebar({
       {/* Story points — render only when present (IssueSidebar precedent). */}
       {issue.storyPoints != null && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">
-            Story points
-          </p>
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("jiraSidebar.storyPoints")}
+            </p>
           <p className="text-xs">{formatStoryPoints(issue.storyPoints)}</p>
         </div>
       )}
@@ -207,7 +217,7 @@ export function JiraIssueSidebar({
       {issue.resolutionName && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">
-            Resolution
+            {t("jiraSidebar.resolution")}
           </p>
           <p className="text-xs">{issue.resolutionName}</p>
         </div>
@@ -216,7 +226,9 @@ export function JiraIssueSidebar({
       {/* Sprint — render only when present. */}
       {issue.sprintName && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Sprint</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("jiraSidebar.sprint")}
+          </p>
           <p className="text-xs">
             {issue.sprintName}
             {issue.sprintState ? ` (${issue.sprintState})` : ""}
@@ -227,7 +239,9 @@ export function JiraIssueSidebar({
       {/* Parent — clickable, navigates in-app exactly as before. */}
       {issue.parent && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Parent</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("jiraSidebar.parent")}
+          </p>
           <button
             type="button"
             // Navigate to the parent in-app. This view already lives inside the
@@ -240,7 +254,9 @@ export function JiraIssueSidebar({
               selectIssue({ kind: "jira", id: issue.parent.key })
             }
             title={`${issue.parent.key} ${issue.parent.summary}`}
-            aria-label={`Open parent issue ${issue.parent.key}`}
+            aria-label={t("jiraSidebar.openParent", {
+              key: issue.parent.key,
+            })}
             className="flex w-full cursor-pointer items-center gap-1 border px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-accent"
           >
             <span className="shrink-0 font-mono">{issue.parent.key}</span>
@@ -267,7 +283,9 @@ export function JiraIssueSidebar({
       ) : (
         issue.labels.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Labels</p>
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("jiraSidebar.labels")}
+            </p>
             <div className="flex flex-wrap items-center gap-1.5">
               {issue.labels.map((label) => (
                 <span
@@ -286,7 +304,7 @@ export function JiraIssueSidebar({
       {issue.components.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">
-            Components
+            {t("jiraSidebar.components")}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
             {issue.components.map((component) => (
@@ -305,7 +323,7 @@ export function JiraIssueSidebar({
       {issue.fixVersions.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">
-            Fix versions
+            {t("jiraSidebar.fixVersions")}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
             {issue.fixVersions.map((version) => (

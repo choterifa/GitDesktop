@@ -1,4 +1,5 @@
 import { KanbanIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { useRepoStatus } from "@/lib/git/queries";
 import { extractJiraKeys } from "@/lib/jira/keys";
 import { useJiraLink } from "@/lib/jira/queries";
@@ -12,6 +13,7 @@ import { useUiStore } from "@/lib/stores/ui";
  * tab with that issue selected. Mirrors `BranchCiBadge` exactly.
  */
 export function BranchJiraBadge({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("actions");
   const link = useJiraLink(repoPath).data;
   const status = useRepoStatus(repoPath);
   const branch = status.data?.branch.name ?? null;
@@ -32,11 +34,9 @@ export function BranchJiraBadge({ repoPath }: { repoPath: string }) {
       // this badge shrinks at five times the branch label's rate, weighted by
       // width, until it is icon-wide; in a compact one the key hides.
       className="flex shrink-20 items-center @4xl/repo-header:min-w-6.5 gap-1.5 rounded-none px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-      title={
-        extra > 0
-          ? `${keys.join(", ")} — referenced in the branch name, view in Issues`
-          : `${first} — referenced in the branch name, view in Issues`
-      }
+      title={t("badge.jiraTitle", {
+        keys: extra > 0 ? keys.join(", ") : first,
+      })}
       onClick={() => {
         selectIssue({ kind: "jira", id: first });
         setRepoTab("issues");

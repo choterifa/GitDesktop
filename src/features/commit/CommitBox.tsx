@@ -5,6 +5,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { AnimatePresence, m } from "motion/react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBinding } from "@/lib/hotkeys/binding";
 import { useEffectiveBindings } from "@/lib/hotkeys/hotkeys";
-import { ACTIONS } from "@/lib/hotkeys/registry";
 import { useGenerateChordHint } from "@/lib/hotkeys/useGenerateChord";
 import { quickTransition } from "@/lib/motion";
 import { useUiStore } from "@/lib/stores/ui";
@@ -21,13 +21,8 @@ import { AmendHoldSentence } from "./AmendHoldSentence";
 import { CoAuthorPicker } from "./CoAuthorPicker";
 import { useCommitSubmit } from "./useCommitSubmit";
 
-// The registry entry owns this action's wording; deriving it keeps the trigger's
-// accessible name identical to the palette row that opens the same dialog.
-const POP_OUT_LABEL =
-  ACTIONS.find((a) => a.id === "open-commit-dialog")?.label ??
-  "Open commit dialog";
-
 export function CommitBox({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("commit");
   const {
     title,
     body,
@@ -62,6 +57,7 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
   const commitBinding = bindings.get("commit") ?? null;
   const popOutBinding = bindings.get("open-commit-dialog") ?? null;
   const generateHint = useGenerateChordHint();
+  const popOutLabel = t("actions.openCommitDialog");
 
   return (
     <div className="space-y-2 border-t p-3">
@@ -70,8 +66,8 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
           <p className="flex items-start gap-2">
             <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
             <span className="flex-1">
-              <span className="font-medium">{branchName}</span> requires changes
-              via a pull request — direct commits are blocked by a branch rule.
+              <span className="font-medium">{branchName}</span>{" "}
+              {t("blocked.directCommit")}
             </span>
           </p>
         </div>
@@ -87,16 +83,16 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
                 className="font-medium underline underline-offset-2 hover:no-underline"
                 onClick={stopAmending}
               >
-                Stop amending
+                {t("amend.stop")}
               </button>{" "}
-              to commit them separately instead.
+              {t("amend.separate")}
             </span>
           </p>
         </div>
       )}
       <div className="relative">
         <Input
-          placeholder="Commit title"
+          placeholder={t("fields.title")}
           value={title}
           onChange={(e) => setCommitTitle(e.target.value)}
           disabled={generating}
@@ -113,7 +109,7 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
         </span>
       </div>
       <Textarea
-        placeholder="Description (optional)"
+        placeholder={t("fields.descriptionOptional")}
         value={body}
         onChange={(e) => setCommitBody(e.target.value)}
         disabled={generating}
@@ -136,11 +132,11 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label={POP_OUT_LABEL}
+          aria-label={popOutLabel}
           title={
             popOutBinding
-              ? `${POP_OUT_LABEL} (${formatBinding(popOutBinding)})`
-              : `${POP_OUT_LABEL} (also in the command palette)`
+              ? `${popOutLabel} (${formatBinding(popOutBinding)})`
+              : `${popOutLabel} (${t("actions.alsoInCommandPalette")})`
           }
           onClick={openCommitDialog}
         >
@@ -160,7 +156,7 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
               >
                 <Button variant="outline" size="sm" onClick={cancel}>
                   <XIcon data-icon="inline-start" />
-                  Cancel
+                  {t("actions.cancel")}
                 </Button>
               </m.div>
             ) : (
@@ -176,18 +172,18 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
                     variant="outline"
                     size="sm"
                     disabled={stagedCount === 0}
-                    reason="Stage changes to generate a commit message"
+                    reason={t("ai.stageToGenerate")}
                     // The chord is only offered while it would do something — a
                     // disabled Generate's shortcut is dead too.
                     title={
                       stagedCount > 0
-                        ? `Generate commit message with AI${generateHint}`
-                        : "Generate commit message with AI"
+                        ? `${t("ai.generateCommitMessage")}${generateHint}`
+                        : t("ai.generateCommitMessage")
                     }
                     onClick={generate}
                   >
                     <SparkleIcon data-icon="inline-start" />
-                    Generate
+                    {t("ai.generate")}
                   </DisabledReasonButton>
                 ) : (
                   // AI is on but no provider is set up yet — turn the dead-end
@@ -196,10 +192,10 @@ export function CommitBox({ repoPath }: { repoPath: string }) {
                     variant="outline"
                     size="sm"
                     onClick={() => openSettings("ai")}
-                    title="Connect an AI provider to generate commit messages"
+                    title={t("ai.connectProvider")}
                   >
                     <SparkleIcon data-icon="inline-start" />
-                    Set up AI
+                    {t("ai.setup")}
                   </Button>
                 )}
               </m.div>

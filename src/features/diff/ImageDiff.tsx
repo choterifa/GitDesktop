@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import {
   ImageLightbox,
@@ -64,6 +65,7 @@ function ImageSide({
   /** The image failed to decode: it will never measure. */
   onFail: () => void;
 }) {
+  const { t } = useTranslation("diff");
   return (
     <figure className="min-w-0 max-w-[45%] space-y-1.5 text-center">
       <figcaption className="text-xs font-medium text-muted-foreground">
@@ -79,7 +81,7 @@ function ImageSide({
         }}
       >
         <button
-          aria-label={`View ${label} image fullscreen`}
+          aria-label={t("image.fullscreen", { label })}
           className="block cursor-zoom-in outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
           onClick={onOpen}
           type="button"
@@ -111,13 +113,14 @@ function ImageSide({
  *  header declares more than the webview's decoder should be handed. Visible, so a
  *  refusal never reads as a blank pane. */
 function RefusedSide({ label }: { label: string }) {
+  const { t } = useTranslation("diff");
   return (
     <figure className="min-w-0 max-w-[45%] space-y-1.5 text-center">
       <figcaption className="text-xs font-medium text-muted-foreground">
         {label}
       </figcaption>
       <div className="flex h-40 w-56 max-w-full items-center justify-center border px-4">
-        <p className="text-xs text-muted-foreground">Too large to preview</p>
+        <p className="text-xs text-muted-foreground">{t("image.tooLarge")}</p>
       </div>
     </figure>
   );
@@ -146,6 +149,7 @@ export function ImagePanes({
   filePath: string;
   revs: ImageRevs;
 }) {
+  const { t } = useTranslation("diff");
   const oldFile = useFileAtRev(repoPath, revs.old, filePath, true);
   const newFile = useFileAtRev(repoPath, revs.new, filePath, true);
   // Keyed by the pair being shown, so a switch to another file drops the
@@ -180,14 +184,14 @@ export function ImagePanes({
   if (oldSide !== null) {
     panes.push({
       key: "old",
-      label: newSide === null ? "Deleted" : "Old",
+      label: newSide === null ? t("image.deleted") : t("image.old"),
       src: paneSrc(oldSide),
     });
   }
   if (newSide !== null) {
     panes.push({
       key: "new",
-      label: oldSide === null ? "Added" : "New",
+      label: oldSide === null ? t("image.added") : t("image.new"),
       src: paneSrc(newSide),
     });
   }

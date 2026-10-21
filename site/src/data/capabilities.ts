@@ -123,6 +123,11 @@ export const capabilities: Capability[] = [
     group: "Branches & history",
     label: "Paged, filterable commit history with rich detail",
   },
+  {
+    group: "Branches & history",
+    label:
+      "Paged commit graph across HEAD, local and remote branches, and tags",
+  },
   { group: "Branches & history", label: "File history & line blame" },
   { group: "Branches & history", label: "Commit-author avatars in history" },
   { group: "Branches & history", label: "Unpushed commits flagged in history" },

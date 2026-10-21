@@ -21,6 +21,7 @@ import {
 } from "@/lib/settings/mcp-import";
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
+import { useSettingsText } from "../use-settings-text";
 
 /**
  * Reviewed import of servers the user already configured for Claude — the open
@@ -47,6 +48,7 @@ export function ImportMcpDialog({
   onImport: (servers: McpServer[]) => void;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   const [loading, setLoading] = useState(true);
   const [candidates, setCandidates] = useState<ImportCandidate[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -121,7 +123,12 @@ export function ImportMcpDialog({
       }
       onImport(chosen.map((c) => c.server));
       toast.success(
-        `Imported ${chosen.length} server${chosen.length === 1 ? "" : "s"} — review and enable them`,
+        tx(
+          chosen.length === 1
+            ? "Imported one server — review and enable it"
+            : "Imported {{count}} servers — review and enable them",
+          { count: chosen.length },
+        ),
       );
     } catch (e) {
       setImporting(false);
@@ -145,26 +152,34 @@ export function ImportMcpDialog({
     >
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Import MCP servers</DialogTitle>
+          <DialogTitle>{tx("Import MCP servers")}</DialogTitle>
           <DialogDescription>
-            Servers already configured for Claude — the open repo's{" "}
-            <code className="font-mono">.mcp.json</code> and your global config.
-            Imported servers start{" "}
-            <strong className="font-medium">disabled</strong> and secret-looking
-            values move to your OS keychain; the source files aren't changed.
+            {tx(
+              "Import servers already configured for Claude in the open repository's",
+            )}{" "}
+            <code className="font-mono">.mcp.json</code>{" "}
+            {tx(
+              "or in your global config. Imported servers start disabled and secret-looking values move to your OS keychain; the source files aren't changed.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[55vh] space-y-2 overflow-y-auto px-1">
           {loading ? (
             <p className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-              <Spinner /> Looking for configured servers…
+              <Spinner /> {tx("Looking for configured servers…")}
             </p>
           ) : candidates.length === 0 ? (
             <p className="py-6 text-xs text-muted-foreground">
-              No MCP servers found in {repoPath ? "this repo's " : ""}
-              <code className="font-mono">.mcp.json</code>
-              {repoPath ? " or " : ""}your global Claude config.
+              {repoPath ? (
+                <>
+                  {tx("No MCP servers found in the open repository's")}{" "}
+                  <code className="font-mono">.mcp.json</code>{" "}
+                  {tx("or your global Claude config.")}
+                </>
+              ) : (
+                tx("No MCP servers found in your global Claude config.")
+              )}
             </p>
           ) : (
             candidates.map((c) => {
@@ -206,7 +221,7 @@ export function ImportMcpDialog({
                           {c.server.transport}
                         </span>
                         <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {c.origin === "repo" ? ".mcp.json" : "global"}
+                          {c.origin === "repo" ? ".mcp.json" : tx("global")}
                         </span>
                       </div>
                       <p className="truncate text-muted-foreground">
@@ -216,16 +231,22 @@ export function ImportMcpDialog({
                       </p>
                       {c.duplicate ? (
                         <p className="text-[10px] text-muted-foreground">
-                          Already in your registry.
+                          {tx("Already in your registry.")}
                         </p>
                       ) : (
                         (c.renamed || c.server.secretKeys.length > 0) && (
                           <p className="text-[10px] text-muted-foreground">
-                            {c.renamed && `Renamed from “${c.sourceName}”. `}
+                            {c.renamed &&
+                              tx("Renamed from “{{name}}”. ", {
+                                name: c.sourceName,
+                              })}
                             {c.server.secretKeys.length > 0 &&
-                              `${c.server.secretKeys.length} secret value${
-                                c.server.secretKeys.length === 1 ? "" : "s"
-                              } → keychain.`}
+                              tx(
+                                c.server.secretKeys.length === 1
+                                  ? "One secret value moved to the keychain."
+                                  : "{{count}} secret values moved to the keychain.",
+                                { count: c.server.secretKeys.length },
+                              )}
                           </p>
                         )
                       )}
@@ -233,7 +254,7 @@ export function ImportMcpDialog({
                         <p className="text-[10px] text-warning">
                           {gateReason}
                           {allowFixable &&
-                            " The agent CLI connects outside GitDesktop's AI allowlist, so allow it before importing."}
+                            ` ${tx("The agent CLI connects outside GitDesktop's AI allowlist, so allow it before importing.")}`}
                         </p>
                       )}
                     </div>
@@ -246,7 +267,7 @@ export function ImportMcpDialog({
                         size="xs"
                         onClick={() => onAllowHost(c.server.url)}
                       >
-                        Allow host
+                        {tx("Allow host")}
                       </Button>
                     </div>
                   ) : null}
@@ -258,14 +279,15 @@ export function ImportMcpDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={importing}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <Button
             onClick={runImport}
             disabled={pickedCount === 0 || importing || loading}
           >
             {importing && <Spinner data-icon="inline-start" />}
-            Import{pickedCount > 0 ? ` ${pickedCount}` : ""}
+            {tx("Import")}
+            {pickedCount > 0 ? ` ${pickedCount}` : ""}
           </Button>
         </DialogFooter>
       </DialogContent>

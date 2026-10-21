@@ -1,3 +1,5 @@
+import { getAppLanguage } from "@/lib/i18n";
+
 // Largest-first. `rollupAt` is the whole count of this unit that equals one of
 // the next-larger unit — the human conversion (60 min = 1 hour, 24 h = 1 day,
 // 7 d = 1 week, 12 mo = 1 year). It's the intended conversion, NOT derived from
@@ -22,7 +24,17 @@ const UNITS: {
   { unit: "minute", seconds: 60, rollupAt: 60 },
 ];
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "always" });
+const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+function relativeFormatter(locale?: string): Intl.RelativeTimeFormat {
+  const key = locale ?? "__system__";
+  let formatter = relativeFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+    relativeFormatters.set(key, formatter);
+  }
+  return formatter;
+}
 
 /** A duration as a compact human string: `< 60s` → `"42s"` (seconds floored,
  *  minimum `"0s"`); `< 1h` → `"3m 12s"` (seconds unpadded); `>= 1h` → `"1h 2m"`.
@@ -80,7 +92,12 @@ export function formatDurationBetween(start?: string, end?: string): string {
  *  disagree about the same date, and so the React Compiler's memo key sees the
  *  clock (a bare `Date.now()` read is invisible to it, freezing the output).
  *  A default here would let a caller silently take the frozen path. */
-export function formatRelativeTime(isoDate: string, now: number): string {
+export function formatRelativeTime(
+  isoDate: string,
+  now: number,
+  locale: string = getAppLanguage(),
+): string {
+  const rtf = relativeFormatter(locale);
   const seconds = (now - new Date(isoDate).getTime()) / 1000;
   // Largest-first: pick the first unit the elapsed time reaches.
   for (let i = 0; i < UNITS.length; i++) {
@@ -96,5 +113,5 @@ export function formatRelativeTime(isoDate: string, now: number): string {
     }
     return rtf.format(-count, unit);
   }
-  return "just now";
+  return new Intl.RelativeTimeFormat(locale).format(0, "second");
 }

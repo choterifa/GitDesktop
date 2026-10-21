@@ -1,0 +1,15 @@
+{
+  "title": "Terminal",
+  "container": "· container",
+  "worktree": "· worktree",
+  "publishedPorts": "Published ports",
+  "restartReconnect": "Restart / reconnect the shell",
+  "restartShell": "Restart the shell",
+  "stopContainer": "Stop the container (frees its ports)",
+  "stop": "Stop",
+  "hideWithHotkey": "Hide the terminal (toggle with the terminal hotkey)",
+  "hide": "Hide terminal",
+  "loading": "the terminal",
+  "processExited": "process exited",
+  "exitCodeSuffix": "(code {{code}})"
+}

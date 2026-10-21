@@ -1,4 +1,5 @@
 import { KanbanIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { extractJiraKeys } from "@/lib/jira/keys";
 import { useJiraIssues, useJiraLink } from "@/lib/jira/queries";
 import { useUiStore } from "@/lib/stores/ui";
@@ -33,6 +34,7 @@ export function JiraRefRow({
   repoPath: string;
   sources: JiraRefSource[];
 }) {
+  const { t } = useTranslation("issues");
   const link = useJiraLink(repoPath).data;
   // Extract per source in order (reusing extractJiraKeys); first source wins a
   // key, and overall first-occurrence order is preserved. `attribution` maps each
@@ -74,7 +76,7 @@ export function JiraRefRow({
   return (
     <div className="space-y-1">
       <p className="text-[11px] font-medium text-muted-foreground">
-        Jira issues
+        {t("jiraReferences.heading")}
       </p>
       {keys.map((key) => {
         const title = titleFor(key);
@@ -82,7 +84,7 @@ export function JiraRefRow({
         // One title per element: fold the (optional) issue title AND the source
         // attribution into a single tooltip so neither is lost.
         const attributionSuffix = source
-          ? ` — referenced in the ${source}`
+          ? t("jiraReferences.attribution", { source })
           : "";
         const tooltip = (title ? `${key} ${title}` : key) + attributionSuffix;
         return (

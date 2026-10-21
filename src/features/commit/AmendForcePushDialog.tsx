@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -33,6 +34,7 @@ export function AmendForcePushDialog({
   onConfirm: () => Promise<boolean>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("commit");
   const saveSettings = useSaveSettings();
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
@@ -67,14 +69,11 @@ export function AmendForcePushDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Amending will require a force push</DialogTitle>
+          <DialogTitle>{t("forcePush.title")}</DialogTitle>
           <DialogDescription>
-            This commit is already on {upstream ?? "the remote"}. Amending
-            rewrites it, so your branch and the remote will diverge and you'll
-            need to force push to update it. GitDesktop force pushes with
-            --force-with-lease and, where your Git can check it,
-            --force-if-includes (the pair won't overwrite others' work your
-            branch doesn't include), but it still rewrites the branch's history.
+            {t("forcePush.description", {
+              upstream: upstream ?? t("forcePush.remote"),
+            })}
           </DialogDescription>
         </DialogHeader>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
@@ -82,13 +81,13 @@ export function AmendForcePushDialog({
             checked={dontShowAgain}
             onCheckedChange={(v) => setDontShowAgain(v === true)}
           />
-          Don't show this again
+          {t("forcePush.dontShowAgain")}
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("actions.cancel")}
           </Button>
-          <Button onClick={confirm}>Begin amend</Button>
+          <Button onClick={confirm}>{t("forcePush.beginAmend")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

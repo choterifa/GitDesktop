@@ -1,22 +1,36 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import type { TFunction } from "i18next";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PunchCard as PunchCardData } from "@/lib/git/types";
 import { cn } from "@/lib/utils";
 import { fmt } from "./primitives";
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const HOUR_TICKS = [0, 6, 12, 18];
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const DAY_INDICES = Array.from({ length: 7 }, (_, day) => day);
 
-function hourLabel(h: number): string {
-  if (h === 0) return "12am";
-  if (h === 12) return "12pm";
-  return h < 12 ? `${h}am` : `${h - 12}pm`;
-}
-
-function describe(grid: PunchCardData, day: number, hour: number): string {
+function describe(
+  grid: PunchCardData,
+  day: number,
+  hour: number,
+  days: string[],
+  hours: string[],
+  t: TFunction<"repository">,
+): string {
   const n = grid[day]?.[hour] ?? 0;
-  return `${DAYS[day]} ${hourLabel(hour)} — ${fmt(n)} commit${n === 1 ? "" : "s"}`;
+  return t("insights.punchCard.description", {
+    count: n,
+    day: days[day],
+    hour: hours[hour],
+    formatted: fmt(n),
+  });
 }
 
 /** The loading shape of {@link PunchCard}: the same row, cell, tick and caption
@@ -26,7 +40,7 @@ export function PunchCardSkeleton() {
   return (
     <div aria-hidden className="space-y-2">
       <div className="space-y-px text-[10px]">
-        {DAYS.map((day) => (
+        {DAY_INDICES.map((day) => (
           <div key={day} className="flex items-center gap-1">
             {/* The day label's line height sets the row at narrow widths. */}
             <span className="w-7 shrink-0">&nbsp;</span>
@@ -57,6 +71,29 @@ export function PunchCardSkeleton() {
  * alone.
  */
 export function PunchCard({ grid }: { grid: PunchCardData }) {
+  const { t, i18n } = useTranslation("repository");
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const days = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, day) =>
+        new Intl.DateTimeFormat(locale, {
+          weekday: "short",
+          timeZone: "UTC",
+        }).format(new Date(Date.UTC(2024, 0, 7 + day))),
+      ),
+    [locale],
+  );
+  const hours = useMemo(
+    () =>
+      HOURS.map((hour) =>
+        new Intl.DateTimeFormat(locale, {
+          hour: "numeric",
+          hour12: true,
+          timeZone: "UTC",
+        }).format(new Date(Date.UTC(2024, 0, 7, hour))),
+      ),
+    [locale],
+  );
   const flat = grid.flat();
   const max = Math.max(1, ...flat);
   const total = flat.reduce((a, b) => a + b, 0);
@@ -106,7 +143,7 @@ export function PunchCard({ grid }: { grid: PunchCardData }) {
   if (total === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No commits in this window to chart.
+        {t("insights.noCommitTimesToChart")}
       </p>
     );
   }
@@ -116,13 +153,13 @@ export function PunchCard({ grid }: { grid: PunchCardData }) {
       <div
         ref={gridRef}
         role="grid"
-        aria-label="Commits by day of week and hour"
+        aria-label={t("insights.commitsByDayHour")}
         onKeyDown={onKeyDown}
         className="space-y-px text-[10px] text-muted-foreground"
       >
         {grid.map((row, day) => (
-          <div key={DAYS[day]} role="row" className="flex items-center gap-1">
-            <span className="w-7 shrink-0 text-right">{DAYS[day]}</span>
+          <div key={days[day]} role="row" className="flex items-center gap-1">
+            <span className="w-7 shrink-0 text-right">{days[day]}</span>
             <div className="flex flex-1 gap-px">
               {row.map((n, hour) => {
                 const isActive = day === day0 && hour === hour0;
@@ -131,8 +168,8 @@ export function PunchCard({ grid }: { grid: PunchCardData }) {
                     key={hour}
                     data-cell={`${day}-${hour}`}
                     role="gridcell"
-                    aria-label={describe(grid, day, hour)}
-                    title={describe(grid, day, hour)}
+                    aria-label={describe(grid, day, hour, days, hours, t)}
+                    title={describe(grid, day, hour, days, hours, t)}
                     tabIndex={
                       isActive || (!active && day === 0 && hour === 0) ? 0 : -1
                     }
@@ -155,7 +192,7 @@ export function PunchCard({ grid }: { grid: PunchCardData }) {
           <div className="relative flex flex-1 gap-px">
             {Array.from({ length: 24 }, (_, h) => (
               <span key={h} className="min-w-0 flex-1 text-center">
-                {HOUR_TICKS.includes(h) ? hourLabel(h) : ""}
+                {HOUR_TICKS.includes(h) ? hours[h] : ""}
               </span>
             ))}
           </div>
@@ -166,8 +203,10 @@ export function PunchCard({ grid }: { grid: PunchCardData }) {
         aria-live="polite"
       >
         {active
-          ? describe(grid, day0, hour0)
-          : `Busiest: ${describe(grid, peak.day, peak.hour)}.`}
+          ? describe(grid, day0, hour0, days, hours, t)
+          : t("insights.punchCard.busiest", {
+              description: describe(grid, peak.day, peak.hour, days, hours, t),
+            })}
       </figcaption>
     </figure>
   );

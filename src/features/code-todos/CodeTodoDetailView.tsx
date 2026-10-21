@@ -4,6 +4,7 @@ import {
   NotePencilIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { RelativeTime } from "@/components/relative-time";
@@ -43,6 +44,7 @@ export function CodeTodoDetailView({
   /** The scan's authoritative comment text after the marker (may be `""`). */
   text: string;
 }) {
+  const { t } = useTranslation("codeTodos");
   const blame = useBlame(repoPath, path);
   // Fallback content source: `git blame` refuses untracked files, but we scan
   // `--untracked`, so a brand-new file's content is read straight off disk.
@@ -83,9 +85,10 @@ export function CodeTodoDetailView({
   // The pre-filled promote-to-issue draft, built from the authoritative pair so
   // it works even when blame fails (e.g. an untracked file). Title = the comment
   // text capped ~80 chars, with a fallback when the text is empty.
-  const draftTitle = text || `${marker} in ${basename(path)}:${line}`;
+  const draftTitle =
+    text || t("detail.fallbackTitle", { marker, file: basename(path), line });
   const draftBody = [
-    `From \`${path}:${line}\`:`,
+    t("detail.generatedFrom", { path: `\`${path}:${line}\`` }),
     "",
     `> ${marker}${text ? `: ${text}` : ""}`,
   ].join("\n");
@@ -93,9 +96,9 @@ export function CodeTodoDetailView({
   async function copyPathLine() {
     try {
       await navigator.clipboard.writeText(`${path}:${line}`);
-      toast.success("Path copied");
+      toast.success(t("detail.pathCopied"));
     } catch {
-      toast.error("Could not copy to clipboard");
+      toast.error(t("detail.copyFailed"));
     }
   }
 
@@ -126,7 +129,9 @@ export function CodeTodoDetailView({
           <MarkerChip marker={marker} className="mt-0.5 shrink-0" />
           <p className="min-w-0 flex-1 break-words text-sm">
             {text || (
-              <span className="text-muted-foreground">(no description)</span>
+              <span className="text-muted-foreground">
+                ({t("detail.noDescription")})
+              </span>
             )}
           </p>
         </div>
@@ -138,7 +143,7 @@ export function CodeTodoDetailView({
         {/* Attribution line for the TODO's blame — hidden while stale/absent. */}
         {todoLine && isRealCommit(todoLine.hash) && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Added by {todoLine.author}
+            {t("detail.addedBy", { author: todoLine.author })}
             {todoLine.time && validEpochMs(todoLine.time * 1000) ? (
               <>
                 {" · "}
@@ -151,7 +156,7 @@ export function CodeTodoDetailView({
         )}
         {blame.isError && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Not tracked yet — no history.
+            {t("detail.notTracked")}
           </p>
         )}
 
@@ -162,7 +167,7 @@ export function CodeTodoDetailView({
             onClick={() => openFile(repoPath, path)}
           >
             <FolderOpenIcon data-icon="inline-start" />
-            Open in editor
+            {t("detail.openInEditor")}
           </Button>
           <Button
             variant="outline"
@@ -170,11 +175,11 @@ export function CodeTodoDetailView({
             onClick={() => setPromoteOpen(true)}
           >
             <NotePencilIcon data-icon="inline-start" />
-            Promote to issue
+            {t("detail.promoteToIssue")}
           </Button>
           <Button variant="outline" size="xs" onClick={copyPathLine}>
             <ClipboardTextIcon data-icon="inline-start" />
-            Copy path:line
+            {t("detail.copyPathLine")}
           </Button>
         </div>
       </div>
@@ -189,7 +194,7 @@ export function CodeTodoDetailView({
         ) : stale ? (
           <div className="p-4 text-xs">
             <p className="text-muted-foreground">
-              This line is no longer in the file — the scan may be stale.
+              {t("detail.staleLine")}
             </p>
             <Button
               variant="outline"
@@ -197,14 +202,14 @@ export function CodeTodoDetailView({
               className="mt-3"
               onClick={() => rescan()}
             >
-              Rescan
+              {t("rescan")}
             </Button>
           </div>
         ) : previewUnavailable || excerpt.length === 0 ? (
           // Both blame and the file read failed (e.g. deleted mid-session), or
           // there's simply nothing to show. Header + actions still work.
           <p className="p-4 text-xs text-muted-foreground">
-            No file preview available.
+            {t("detail.noPreview")}
           </p>
         ) : (
           <div className="font-mono text-[11px] leading-relaxed">

@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { isUserDismissal } from "@/components/panel-portal";
 import { Button } from "@/components/ui/button";
 import {
@@ -93,6 +94,7 @@ const { claim: claimCard, release: releaseCard } =
 /** One dependency row: clickable name (opens its registry/repo) + a hovercard
  *  that lazily fetches the package's description. */
 function DependencyRow({ p }: { p: DependencyPackage }) {
+  const { t } = useTranslation("repository");
   const [open, setOpen] = useState(false);
   // Kept through the close fade so the exit animation plays where the card was.
   const [rect, setRect] = useState<AnchorRect | null>(null);
@@ -273,7 +275,7 @@ function DependencyRow({ p }: { p: DependencyPackage }) {
         )}
         {p.direct && (
           <span className="shrink-0 rounded-none bg-accent px-1 text-[10px] text-accent-foreground">
-            direct
+            {t("dependencyCard.direct")}
           </span>
         )}
         <span className="shrink-0 rounded-none bg-muted px-1 text-[10px] text-muted-foreground">
@@ -354,13 +356,15 @@ function DependencyRow({ p }: { p: DependencyPackage }) {
                 {p.name}
               </span>
               <span className="shrink-0 text-[10px] text-muted-foreground">
-                {p.direct ? "direct" : "transitive"}
+                {p.direct
+                  ? t("dependencyCard.direct")
+                  : t("dependencyCard.transitive")}
               </span>
             </div>
             {fetchable &&
               (info.isFetching ? (
                 <p className="text-[11px] text-muted-foreground italic">
-                  Loading…
+                  {t("dependencyCard.loading")}
                 </p>
               ) : info.data?.description ? (
                 <p className="text-[11px] text-muted-foreground">
@@ -368,7 +372,7 @@ function DependencyRow({ p }: { p: DependencyPackage }) {
                 </p>
               ) : (
                 <p className="text-[11px] text-muted-foreground italic">
-                  No description available.
+                  {t("dependencyCard.noDescription")}
                 </p>
               ))}
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
@@ -382,7 +386,8 @@ function DependencyRow({ p }: { p: DependencyPackage }) {
                   className="shrink-0 cursor-pointer hover:text-foreground hover:underline"
                   onClick={() => openPackageUrl(url)}
                 >
-                  Open ↗
+                  {t("dependencyCard.open")}
+                  {" ↗"}
                 </button>
               )}
             </div>
@@ -395,6 +400,7 @@ function DependencyRow({ p }: { p: DependencyPackage }) {
 }
 
 export function DependenciesCard({ data }: { data: RepoDependencies }) {
+  const { t } = useTranslation("repository");
   const [filter, setFilter] = useState("");
   const [directOnly, setDirectOnly] = useState(false);
   // State-backed so the virtualizer observes the scroll element when it mounts.
@@ -427,15 +433,14 @@ export function DependenciesCard({ data }: { data: RepoDependencies }) {
   if (!data.available) {
     return (
       <p className="text-xs text-muted-foreground">
-        No dependency graph for this repository — it may be turned off in
-        Settings → Security.
+        {t("dependencyCard.noGraph")}
       </p>
     );
   }
   if (data.total === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No dependencies detected by the dependency graph.
+        {t("dependencyCard.noneDetected")}
       </p>
     );
   }
@@ -444,17 +449,16 @@ export function DependenciesCard({ data }: { data: RepoDependencies }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground tabular-nums">
-            {fmt(data.total)}
-          </span>{" "}
-          total · <span className="tabular-nums">{fmt(directCount)}</span>{" "}
-          direct
-          {(q || directOnly) && (
-            <>
-              {" · "}
-              <span className="tabular-nums">{fmt(filtered.length)}</span> shown
-            </>
-          )}
+          {q || directOnly
+            ? t("dependencyCard.summaryFiltered", {
+                total: fmt(data.total),
+                direct: fmt(directCount),
+                shown: fmt(filtered.length),
+              })
+            : t("dependencyCard.summary", {
+                total: fmt(data.total),
+                direct: fmt(directCount),
+              })}
         </p>
         <Button
           type="button"
@@ -463,21 +467,21 @@ export function DependenciesCard({ data }: { data: RepoDependencies }) {
           aria-pressed={directOnly}
           onClick={() => setDirectOnly((v) => !v)}
         >
-          Direct only
+          {t("dependencyCard.directOnly")}
         </Button>
       </div>
       <Input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter dependencies"
-        aria-label="Filter dependencies"
+        placeholder={t("dependencyCard.filter")}
+        aria-label={t("dependencyCard.filter")}
         className="h-7"
         autoComplete="off"
       />
       <div ref={setScrollEl} className="h-56 overflow-y-auto border">
         {filtered.length === 0 ? (
           <p className="p-3 text-xs text-muted-foreground">
-            No dependencies match.
+            {t("dependencyCard.noMatches")}
           </p>
         ) : (
           <div

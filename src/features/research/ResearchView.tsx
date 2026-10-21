@@ -9,6 +9,7 @@ import {
   WarningIcon,
 } from "@phosphor-icons/react";
 import { useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
@@ -48,13 +49,6 @@ import {
   useResearchStore,
 } from "./store";
 
-/** Labels for the research intent — the Select's trigger and popup and the
- *  switched-to notice all read this one map, so they can never drift. */
-const INTENT_LABEL: Record<ResearchDepth, string> = {
-  brainstorm: "Brainstorm",
-  deep: "Deep research",
-};
-
 /** Compact agent labels for the header / follow-up composer (which provider ran
  *  the research — surfaced so a failure can be traced to its CLI). */
 const AGENT_LABEL: Record<AgentKind, string> = {
@@ -62,25 +56,6 @@ const AGENT_LABEL: Record<AgentKind, string> = {
   codex: "Codex",
   copilot: "Copilot",
   opencode: "opencode",
-};
-
-/** Per-intent copy: heading + textarea placeholder + a one-line read-only note. */
-const INTENT_COPY: Record<
-  ResearchDepth,
-  { heading: string; placeholder: string; note: string }
-> = {
-  brainstorm: {
-    heading: "Brainstorm directions, grounded in the web and your code",
-    placeholder:
-      "What do you want to explore? (e.g. “ways to add a LAN companion mode”)…",
-    note: "Surveys the web and your repo for several directions with prior art. Read-only — nothing is changed.",
-  },
-  deep: {
-    heading: "Investigate one direction, in depth and cited",
-    placeholder:
-      "What should I investigate? (e.g. “embedding an axum server in the Tauri process”)…",
-    note: "Reads primary sources and your repo, then writes a cited report. Read-only — it can run longer and cost more than a plan.",
-  },
 };
 
 /**
@@ -107,10 +82,11 @@ export function ResearchView() {
 /** The canvas header: topic + intent, plus Back (deselect, keep the run) and
  *  Dismiss (drop it). */
 function ResearchHeader({ run }: { run: ResearchRun }) {
+  const { t } = useTranslation("research");
   const setActiveResearch = useResearchStore((s) => s.setActiveResearch);
   const remove = useResearchStore((s) => s.remove);
-  const label = run.origin?.topic?.trim() || "Research";
-  const intent = run.depth === "deep" ? "Deep research" : "Brainstorm";
+  const label = run.origin?.topic?.trim() || t("header.defaultTitle");
+  const intent = t(`intent.${run.depth}`);
   // Which CLI + model ran this research — surfaced so a failure or odd behavior is
   // traceable to its provider (you can't otherwise tell which agent did what).
   const provider = `${AGENT_LABEL[run.agent]}${run.model ? ` · ${run.model}` : ""}`;
@@ -125,7 +101,7 @@ function ResearchHeader({ run }: { run: ResearchRun }) {
       </span>
       <span
         className="shrink-0 font-mono text-[11px] text-muted-foreground"
-        title="Agent and model running this research"
+        title={t("header.agentTitle")}
       >
         {provider}
       </span>
@@ -137,17 +113,17 @@ function ResearchHeader({ run }: { run: ResearchRun }) {
         size="sm"
         className="shrink-0 gap-1.5 text-muted-foreground"
         onClick={() => setActiveResearch(null)}
-        title="Back to the agent surface (keeps this research)"
+        title={t("header.backTitle")}
       >
         <ArrowLeftIcon className="size-3.5" />
-        Back
+        {t("header.back")}
       </Button>
       <Button
         variant="ghost"
         size="icon-xs"
         className="shrink-0 text-muted-foreground"
-        aria-label="Dismiss this research"
-        title="Dismiss this research"
+        aria-label={t("header.dismiss")}
+        title={t("header.dismiss")}
         onClick={() => remove(run.id)}
       >
         <TrashIcon className="size-4" />
@@ -166,30 +142,35 @@ function IntentPicker({
   value: ResearchDepth;
   onChange: (v: ResearchDepth) => void;
 }) {
+  const { t } = useTranslation("research");
+  const intentLabels: Record<ResearchDepth, string> = {
+    brainstorm: t("intent.brainstorm"),
+    deep: t("intent.deep"),
+  };
   return (
     <Select
-      items={INTENT_LABEL}
+      items={intentLabels}
       value={value}
-      // The popup publishes every INTENT_LABEL key, so accept only keys that are
+      // The popup publishes every intent label key, so accept only keys that are
       // still in it — collapsing an unknown value to "brainstorm" would let a
       // future depth render an option that silently selects a different one.
       onValueChange={(v) => {
-        if (typeof v === "string" && v in INTENT_LABEL)
+        if (typeof v === "string" && v in intentLabels)
           onChange(v as ResearchDepth);
       }}
     >
       <SelectTrigger
         size="sm"
-        aria-label="Research intent"
+        aria-label={t("picker.intent")}
         className="w-auto gap-1 border-0 text-muted-foreground shadow-none hover:bg-muted dark:bg-transparent"
       >
         <BinocularsIcon className="size-3.5" />
         <SelectValue />
       </SelectTrigger>
-      {/* Size to content so "Deep research" isn't clipped at the narrow trigger
-          width when "Brainstorm" is the selected (shorter) value. */}
+      {/* Size to content so the longer option isn't clipped at the narrow trigger
+          width when the shorter option is selected. */}
       <SelectContent className="w-fit">
-        {Object.entries(INTENT_LABEL).map(([depth, label]) => (
+        {Object.entries(intentLabels).map(([depth, label]) => (
           <SelectItem key={depth} value={depth}>
             {label}
           </SelectItem>
@@ -214,6 +195,7 @@ export function ResearchComposer({
   repoPath: string;
   seed: ResearchSeed | null;
 }) {
+  const { t } = useTranslation("research");
   const start = useResearchStore((s) => s.start);
   const settings = useSettings();
   const [topic, setTopic] = useState(seed?.topic ?? "");
@@ -238,7 +220,11 @@ export function ResearchComposer({
   // milliseconds; a load that FAILED is deliberately NOT pending.
   const settingsPending = !settings.data && !settings.isError;
   const canRun = topic.trim().length > 0 && !settingsPending;
-  const copy = INTENT_COPY[depth];
+  const copy = {
+    heading: t(`composer.${depth}.heading`),
+    placeholder: t(`composer.${depth}.placeholder`),
+    note: t(`composer.${depth}.note`),
+  };
 
   const submit = () => {
     if (!canRun) return;
@@ -253,9 +239,7 @@ export function ResearchComposer({
         <div className="flex max-w-md flex-col gap-2">
           <h2 className="text-base font-medium text-balance">{copy.heading}</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            A read-only agent searches the web and reads your repo, then streams
-            a cited report here. Nothing is changed; turn it into a plan or save
-            it when you're happy. Start several — they run side by side.
+            {t("composer.intro")}
           </p>
         </div>
       </div>
@@ -274,7 +258,7 @@ export function ResearchComposer({
               }
             }}
             placeholder={copy.placeholder}
-            aria-label="Describe a topic to research"
+            aria-label={t("composer.topicLabel")}
             className="max-h-48 min-h-16 w-full resize-none bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
           />
           <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -301,7 +285,7 @@ export function ResearchComposer({
             <ComposerOptions effort={effort} onEffort={setEffort} />
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden truncate text-[11px] text-muted-foreground sm:inline">
-                {formatBinding("mod+enter")} to research
+                {formatBinding("mod+enter")} {t("composer.shortcutHint")}
               </span>
               <Button
                 size="sm"
@@ -309,7 +293,7 @@ export function ResearchComposer({
                 disabled={!canRun}
                 onClick={submit}
               >
-                Research
+                {t("composer.submit")}
               </Button>
             </div>
           </div>
@@ -329,14 +313,19 @@ function UserMessage({
   text: string;
   switchedTo?: ResearchDepth;
 }) {
+  const { t } = useTranslation("research");
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
-        <span className="text-[11px] font-medium text-foreground/70">You</span>
+        <span className="text-[11px] font-medium text-foreground/70">
+          {t("conversation.you")}
+        </span>
         {switchedTo && (
           <span className="inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
             <BinocularsIcon className="size-3" />
-            Switched to {INTENT_LABEL[switchedTo]}
+            {t("conversation.switchedTo", {
+              intent: t(`intent.${switchedTo}`),
+            })}
           </span>
         )}
       </div>
@@ -378,6 +367,7 @@ function ResearchHistoryTurnView({
 }
 
 function ResearchResult({ run }: { run: ResearchRun }) {
+  const { t } = useTranslation("research");
   const cancel = useResearchStore((s) => s.cancel);
   const restart = useResearchStore((s) => s.restart);
   const saveReport = useResearchStore((s) => s.saveReport);
@@ -463,10 +453,10 @@ function ResearchResult({ run }: { run: ResearchRun }) {
             {status ||
               (generating
                 ? run.depth === "deep"
-                  ? "Researching the web…"
-                  : "Exploring the web and your repo…"
+                  ? t("status.researching")
+                  : t("status.exploring")
                 : stopped
-                  ? "Stopped"
+                  ? t("status.stopped")
                   : "")}
           </span>
           {generating ? (
@@ -477,7 +467,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
               onClick={() => cancel(run.id)}
             >
               <StopIcon weight="fill" />
-              Stop
+              {t("actions.stop")}
             </Button>
           ) : stopped ? (
             <Button
@@ -487,7 +477,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
               onClick={() => restart(run.id)}
             >
               <ArrowClockwiseIcon className="size-3.5" />
-              Restart
+              {t("actions.restart")}
             </Button>
           ) : null}
         </div>
@@ -537,7 +527,9 @@ function ResearchResult({ run }: { run: ResearchRun }) {
               // Reloaded run (segments are in-memory) — render the saved report.
               <Markdown>{text}</Markdown>
             ) : (
-              <p className="text-xs text-muted-foreground">Starting…</p>
+              <p className="text-xs text-muted-foreground">
+                {t("status.starting")}
+              </p>
             )}
           </div>
         </div>
@@ -549,7 +541,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
             {costUsd != null && (
               <span
                 className="text-[11px] text-muted-foreground tabular-nums"
-                title="Estimated cost of this research run"
+                title={t("result.estimatedCost")}
               >
                 {formatUsd(costUsd)}
               </span>
@@ -557,7 +549,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
             {reportPath && (
               // gap-1, not a trailing label space — flex line boxes trim those.
               <span className="flex min-w-0 gap-1 text-[11px] text-muted-foreground">
-                <span className="shrink-0">Saved to</span>
+                <span className="shrink-0">{t("result.savedTo")}</span>
                 <PathText path={reportPath} className="font-mono" />
               </span>
             )}
@@ -567,12 +559,15 @@ function ResearchResult({ run }: { run: ResearchRun }) {
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    copyText(assembleSessionReport(run), "Report copied")
+                    copyText(
+                      assembleSessionReport(run),
+                      t("toast.reportCopied"),
+                    )
                   }
-                  title="Copy the report (with the session history) to the clipboard"
+                  title={t("result.copyTitle")}
                 >
                   <CopyIcon className="size-3.5" />
-                  Copy
+                  {t("actions.copy")}
                 </Button>
                 <Button
                   variant="outline"
@@ -581,7 +576,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
                   disabled={saving}
                 >
                   <FloppyDiskIcon className="size-3.5" />
-                  {reportPath ? "Re-save" : "Save report"}
+                  {reportPath ? t("actions.resave") : t("actions.saveReport")}
                 </Button>
                 {/* Always rendered to reserve its slot so the row doesn't reflow
                     when distillation starts/ends. When idle: `invisible`
@@ -600,14 +595,16 @@ function ResearchResult({ run }: { run: ResearchRun }) {
                   }
                 >
                   <StopIcon weight="fill" />
-                  Stop
+                  {t("actions.stop")}
                 </Button>
                 <Button
                   size="sm"
                   onClick={() => void turnIntoPlan()}
                   disabled={distilling}
                 >
-                  {distilling ? "Distilling…" : "Turn into a Plan"}
+                  {distilling
+                    ? t("actions.distilling")
+                    : t("actions.turnIntoPlan")}
                 </Button>
               </div>
             )}
@@ -631,6 +628,7 @@ function ResearchResult({ run }: { run: ResearchRun }) {
  * in context. Styled to match the session/plan composers.
  */
 function ResearchFollowUp({ run }: { run: ResearchRun }) {
+  const { t } = useTranslation("research");
   const sendFollowUp = useResearchStore((s) => s.sendFollowUp);
   const [text, setText] = useState("");
   // Seeded from the run's current persona + model; changing either applies to the
@@ -670,8 +668,8 @@ function ResearchFollowUp({ run }: { run: ResearchRun }) {
         }}
         rows={1}
         disabled={run.generating}
-        placeholder="Dig deeper, or steer the research…"
-        aria-label="Continue the research"
+        placeholder={t("followUp.placeholder")}
+        aria-label={t("followUp.label")}
         className="max-h-32 min-h-9 w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-60"
       />
       <div className="flex items-center gap-2 border-t pt-2">
@@ -679,13 +677,13 @@ function ResearchFollowUp({ run }: { run: ResearchRun }) {
         {/* The agent is fixed for the conversation — a quiet label, not a picker. */}
         <span
           className="shrink-0 text-[11px] text-muted-foreground"
-          title="The agent can't change mid-conversation"
+          title={t("followUp.agentLocked")}
         >
           {AGENT_LABEL[run.agent]}
         </span>
         <ModelPicker value={model} onChange={setModel} agent={run.agent} />
         <span className="hidden truncate text-[11px] text-muted-foreground sm:inline">
-          ↵ send · ⇧↵ newline
+          {t("followUp.keyboardHint")}
         </span>
         <Button
           size="sm"
@@ -693,7 +691,7 @@ function ResearchFollowUp({ run }: { run: ResearchRun }) {
           disabled={!text.trim() || run.generating}
           onClick={submit}
         >
-          Send
+          {t("actions.send")}
         </Button>
       </div>
     </div>

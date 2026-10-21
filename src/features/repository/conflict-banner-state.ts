@@ -23,6 +23,17 @@ export type StashBannerState =
   | { kind: "conflicted"; lead: string; tail: string }
   | { kind: "resolved"; lead: string; tail: string; announcement: string };
 
+type StashBannerMessageKey =
+  | "conflictedLead"
+  | "conflictedTail"
+  | "resolvedLead"
+  | "resolvedTail"
+  | "resolvedAnnouncement";
+type StashBannerMessage = (
+  key: StashBannerMessageKey,
+  args: { count: number; operation: string },
+) => string;
+
 /** The `RepoOpState` flags that name an operation. Derived, so a renamed field
  *  breaks here; `editPaused` is excluded because it modifies `rebasing` rather
  *  than naming an op of its own. */
@@ -63,6 +74,8 @@ export function deriveStashBannerState(args: {
   statusUpdatedAt: number;
   stashCount: number | undefined;
   stashCountUpdatedAt: number;
+  /** Optional UI copy; omitted by the pure state tests and non-React callers. */
+  message?: StashBannerMessage;
 }): { state: StashBannerState; clearMarker: boolean } {
   const { marker, conflictedCount: n } = args;
   // The store's own repoPath subscription clears a foreign marker.
@@ -76,11 +89,16 @@ export function deriveStashBannerState(args: {
   const statusFresh = args.statusUpdatedAt > marker.recordedAt;
   if (!statusFresh) return NONE;
   if (n > 0) {
+    const messageArgs = { count: n, operation: opPhrase(marker) };
     return {
       state: {
         kind: "conflicted",
-        lead: `Reapplying your stashed changes · ${n} conflict${n === 1 ? "" : "s"}`,
-        tail: `The ${opPhrase(marker)} finished. Resolve ${n === 1 ? "it" : "them"} in the changes list; your changes are also kept in a backup stash.`,
+        lead: args.message
+          ? args.message("conflictedLead", messageArgs)
+          : `Reapplying your stashed changes · ${n} conflict${n === 1 ? "" : "s"}`,
+        tail: args.message
+          ? args.message("conflictedTail", messageArgs)
+          : `The ${opPhrase(marker)} finished. Resolve ${n === 1 ? "it" : "them"} in the changes list; your changes are also kept in a backup stash.`,
       },
       clearMarker: false,
     };
@@ -88,12 +106,19 @@ export function deriveStashBannerState(args: {
   if (!countFresh || args.stashCount === undefined || args.stashCount <= 0) {
     return NONE;
   }
+  const messageArgs = { count: 0, operation: opPhrase(marker) };
   return {
     state: {
       kind: "resolved",
-      lead: "Reapplying your stashed changes · all conflicts resolved",
-      tail: RESOLVED_TAIL,
-      announcement: `All conflicts resolved. ${RESOLVED_TAIL}`,
+      lead: args.message
+        ? args.message("resolvedLead", messageArgs)
+        : "Reapplying your stashed changes · all conflicts resolved",
+      tail: args.message
+        ? args.message("resolvedTail", messageArgs)
+        : RESOLVED_TAIL,
+      announcement: args.message
+        ? args.message("resolvedAnnouncement", messageArgs)
+        : `All conflicts resolved. ${RESOLVED_TAIL}`,
     },
     clearMarker: false,
   };

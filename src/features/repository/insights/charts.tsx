@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   Area,
   AreaChart,
@@ -17,10 +18,10 @@ import {
 import type { CodeFreqPoint, TrafficPoint, WeekCount } from "@/lib/git/types";
 import { ChartFigure, fmt } from "./primitives";
 
-/** "2025-07" → "W7"; the year still shows in the tooltip/table. */
-function weekTick(week: string): string {
+/** "2025-07" → the localized week tick; the year remains in the data table. */
+function weekTick(week: string, prefix: string): string {
   const w = week.split("-")[1] ?? week;
-  return `W${Number(w)}`;
+  return `${prefix}${Number(w)}`;
 }
 
 /** Compact axis labels so large churn ("219,364") fits a narrow Y axis ("219K"). */
@@ -65,18 +66,21 @@ function DataTable({
   );
 }
 
-const commitConfig = {
-  commits: { label: "Commits", color: "var(--primary)" },
-} satisfies ChartConfig;
-
 export function CommitActivityChart({ data }: { data: WeekCount[] }) {
+  const { t } = useTranslation("repository");
+  const commitConfig = {
+    commits: { label: t("insights.commits"), color: "var(--primary)" },
+  } satisfies ChartConfig;
   const total = data.reduce((n, d) => n + d.commits, 0);
   return (
     <ChartFigure
-      caption={`${fmt(total)} commit${total === 1 ? "" : "s"} across ${data.length} active week${data.length === 1 ? "" : "s"}.`}
+      caption={t("insights.charts.commitCaption", {
+        commits: t("insights.commitCount", { count: total }),
+        weeks: t("insights.weeks", { count: data.length }),
+      })}
       table={
         <DataTable
-          headers={["Week", "Commits"]}
+          headers={[t("insights.charts.week"), t("insights.commits")]}
           rows={data.map((d) => [d.week, fmt(d.commits)])}
         />
       }
@@ -90,7 +94,9 @@ export function CommitActivityChart({ data }: { data: WeekCount[] }) {
             axisLine={false}
             tickMargin={6}
             minTickGap={20}
-            tickFormatter={weekTick}
+            tickFormatter={(week) =>
+              weekTick(String(week), t("insights.charts.weekAbbreviation"))
+            }
           />
           <YAxis
             width={38}
@@ -107,12 +113,18 @@ export function CommitActivityChart({ data }: { data: WeekCount[] }) {
   );
 }
 
-const codeFreqConfig = {
-  additions: { label: "Additions", color: "var(--primary)" },
-  deletions: { label: "Deletions", color: "var(--chart-2)" },
-} satisfies ChartConfig;
-
 export function CodeFrequencyChart({ data }: { data: CodeFreqPoint[] }) {
+  const { t } = useTranslation("repository");
+  const codeFreqConfig = {
+    additions: {
+      label: t("insights.charts.additions"),
+      color: "var(--primary)",
+    },
+    deletions: {
+      label: t("insights.charts.deletions"),
+      color: "var(--chart-2)",
+    },
+  } satisfies ChartConfig;
   // Deletions plotted negative so they mirror below the zero line — the meaning
   // is carried by position + labels, not by color alone.
   const chartData = data.map((d) => ({
@@ -124,10 +136,18 @@ export function CodeFrequencyChart({ data }: { data: CodeFreqPoint[] }) {
   const dels = data.reduce((n, d) => n + d.deletions, 0);
   return (
     <ChartFigure
-      caption={`+${fmt(adds)} / -${fmt(dels)} lines across ${data.length} active week${data.length === 1 ? "" : "s"} (deletions shown below the line).`}
+      caption={t("insights.charts.codeFrequencyCaption", {
+        additions: fmt(adds),
+        deletions: fmt(dels),
+        weeks: t("insights.weeks", { count: data.length }),
+      })}
       table={
         <DataTable
-          headers={["Week", "Additions", "Deletions"]}
+          headers={[
+            t("insights.charts.week"),
+            t("insights.charts.additions"),
+            t("insights.charts.deletions"),
+          ]}
           rows={data.map((d) => [d.week, fmt(d.additions), fmt(d.deletions)])}
         />
       }
@@ -144,7 +164,9 @@ export function CodeFrequencyChart({ data }: { data: CodeFreqPoint[] }) {
             axisLine={false}
             tickMargin={6}
             minTickGap={20}
-            tickFormatter={weekTick}
+            tickFormatter={(week) =>
+              weekTick(String(week), t("insights.charts.weekAbbreviation"))
+            }
           />
           <YAxis
             width={46}
@@ -159,7 +181,9 @@ export function CodeFrequencyChart({ data }: { data: CodeFreqPoint[] }) {
                 formatter={(value, name) => (
                   <span className="flex w-full justify-between gap-3">
                     <span className="text-muted-foreground">
-                      {name === "additions" ? "Additions" : "Deletions"}
+                      {name === "additions"
+                        ? t("insights.charts.additions")
+                        : t("insights.charts.deletions")}
                     </span>
                     <span className="font-mono font-medium tabular-nums">
                       {fmt(Math.abs(Number(value)))}
@@ -189,10 +213,6 @@ export function CodeFrequencyChart({ data }: { data: CodeFreqPoint[] }) {
   );
 }
 
-const actionsConfig = {
-  minutes: { label: "Minutes", color: "var(--primary)" },
-} satisfies ChartConfig;
-
 export interface RunDurationPoint {
   run: string;
   minutes: number;
@@ -200,12 +220,20 @@ export interface RunDurationPoint {
 }
 
 export function ActionsDurationChart({ data }: { data: RunDurationPoint[] }) {
+  const { t } = useTranslation("repository");
+  const actionsConfig = {
+    minutes: { label: t("insights.charts.minutes"), color: "var(--primary)" },
+  } satisfies ChartConfig;
   return (
     <ChartFigure
-      caption="Run duration (start → finish) for the most recent runs, oldest first."
+      caption={t("insights.charts.runDurationCaption")}
       table={
         <DataTable
-          headers={["Run", "Minutes", "Result"]}
+          headers={[
+            t("insights.charts.run"),
+            t("insights.charts.minutes"),
+            t("insights.charts.result"),
+          ]}
           rows={data.map((d) => [d.run, d.minutes.toFixed(1), d.conclusion])}
         />
       }
@@ -237,15 +265,16 @@ export function ActionsDurationChart({ data }: { data: RunDurationPoint[] }) {
   );
 }
 
-const trafficConfig = {
-  views: { label: "Views", color: "var(--primary)" },
-  clones: { label: "Clones", color: "var(--chart-2)" },
-} satisfies ChartConfig;
-
-/** "2025-06-21T00:00:00Z" → "6/21". */
-function dayTick(ts: string): string {
+/** "2025-06-21T00:00:00Z" → a locale-formatted short date. */
+function dayTick(ts: string, locale: string): string {
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? ts : `${d.getMonth() + 1}/${d.getDate()}`;
+  return Number.isNaN(d.getTime())
+    ? ts
+    : new Intl.DateTimeFormat(locale, {
+        month: "numeric",
+        day: "numeric",
+        timeZone: "UTC",
+      }).format(d);
 }
 
 interface TrafficDay {
@@ -295,15 +324,27 @@ export function TrafficChart({
   views: TrafficPoint[];
   clones: TrafficPoint[];
 }) {
+  const { t, i18n } = useTranslation("repository");
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const trafficConfig = {
+    views: { label: t("insights.charts.views"), color: "var(--primary)" },
+    clones: { label: t("insights.charts.clones"), color: "var(--chart-2)" },
+  } satisfies ChartConfig;
   const data = mergeTraffic(views, clones);
   return (
     <ChartFigure
-      caption="Daily views and git clones over the last 14 days (hover for unique counts)."
+      caption={t("insights.charts.trafficCaption")}
       table={
         <DataTable
-          headers={["Day", "Views", "Unique", "Clones", "Unique"]}
+          headers={[
+            t("insights.charts.day"),
+            t("insights.charts.views"),
+            t("insights.charts.unique"),
+            t("insights.charts.clones"),
+            t("insights.charts.unique"),
+          ]}
           rows={data.map((d) => [
-            dayTick(d.timestamp),
+            dayTick(d.timestamp, locale),
             fmt(d.views),
             fmt(d.viewsUniques),
             fmt(d.clones),
@@ -324,7 +365,7 @@ export function TrafficChart({
             axisLine={false}
             tickMargin={6}
             minTickGap={24}
-            tickFormatter={dayTick}
+            tickFormatter={(timestamp) => dayTick(String(timestamp), locale)}
           />
           <YAxis
             width={32}
@@ -336,7 +377,7 @@ export function TrafficChart({
           <ChartTooltip
             content={
               <ChartTooltipContent
-                labelFormatter={(value) => dayTick(String(value))}
+                labelFormatter={(value) => dayTick(String(value), locale)}
                 formatter={(value, name, item) => {
                   const day = item?.payload as TrafficDay | undefined;
                   const uniques =
@@ -344,13 +385,19 @@ export function TrafficChart({
                   return (
                     <span className="flex w-full justify-between gap-3">
                       <span className="text-muted-foreground">
-                        {name === "views" ? "Views" : "Clones"}
+                        {name === "views"
+                          ? t("insights.charts.views")
+                          : t("insights.charts.clones")}
                       </span>
                       <span className="font-mono font-medium tabular-nums">
                         {fmt(Number(value))}
                         {typeof uniques === "number" && (
                           <span className="ml-1 font-sans text-muted-foreground">
-                            · {fmt(uniques)} unique
+                            ·{" "}
+                            {t("insights.charts.uniqueCount", {
+                              count: uniques,
+                              formatted: fmt(uniques),
+                            })}
                           </span>
                         )}
                       </span>

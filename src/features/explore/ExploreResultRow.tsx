@@ -4,9 +4,9 @@ import {
   LockSimpleIcon,
   StarIcon,
 } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import type { ForgeSearchRepo } from "@/lib/git/types";
-import { repoStateLabel } from "@/lib/repo-labels";
 import { cn } from "@/lib/utils";
 import { exploreOptionId, starParts } from "./explore-utils";
 
@@ -22,13 +22,20 @@ export function ExploreResultRow({
   active: boolean;
   onSelect: (repo: ForgeSearchRepo) => void;
 }) {
+  const { t, i18n } = useTranslation("explore");
   const Icon = repo.private
     ? LockSimpleIcon
     : repo.fork
       ? GitForkIcon
       : BookBookmarkIcon;
-  const stateLabel = repoStateLabel(repo.private, repo.fork);
-  const star = starParts(repo.stars ?? null);
+  const stateLabel = repo.private
+    ? repo.fork
+      ? t("repository.privateFork")
+      : t("repository.privateRepository")
+    : repo.fork
+      ? t("repository.fork")
+      : null;
+  const star = starParts(repo.stars ?? null, i18n.resolvedLanguage);
   return (
     <button
       type="button"
@@ -69,7 +76,7 @@ export function ExploreResultRow({
         </span>
         {repo.archived && (
           <Badge variant="secondary" className="shrink-0 text-[10px]">
-            Archived
+            {t("repository.archived")}
           </Badge>
         )}
         {star && (
@@ -77,8 +84,14 @@ export function ExploreResultRow({
           // the count and its unit.
           <span
             role="img"
-            aria-label={star.label}
-            title={star.label}
+            aria-label={t(
+              repo.stars === 1 ? "stars.one" : "stars.many",
+              { count: star.text },
+            )}
+            title={t(
+              repo.stars === 1 ? "stars.one" : "stars.many",
+              { count: star.text },
+            )}
             className="flex shrink-0 items-center gap-0.5 tabular-nums text-muted-foreground"
           >
             <StarIcon className="size-3" aria-hidden />

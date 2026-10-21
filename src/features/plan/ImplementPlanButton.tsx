@@ -13,6 +13,7 @@ import { useSessionsStore } from "@/features/sessions/store";
 import { type AgentKind, extractContextPack } from "@/lib/ai/agent";
 import { buildImplementPrompt } from "@/lib/ai/prompt";
 import { type PlanRun, usePlanStore } from "./store";
+import { usePlanText } from "./use-plan-text";
 
 /**
  * The plan's primary action: start a write-capable agent session that implements
@@ -22,6 +23,7 @@ import { type PlanRun, usePlanStore } from "./store";
  * it. The plan stays in the sidebar.
  */
 export function ImplementPlanButton({ run }: { run: PlanRun }) {
+  const tx = usePlanText();
   const start = useSessionsStore((s) => s.start);
   const markImplemented = usePlanStore((s) => s.markImplemented);
   const [open, setOpen] = useState(false);
@@ -56,15 +58,18 @@ export function ImplementPlanButton({ run }: { run: PlanRun }) {
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger render={<Button size="sm" />}>
         <PlayIcon weight="fill" data-icon="inline-start" />
-        Implement
+        {tx("Implement")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner align="end" sideOffset={6} className="isolate z-50">
           <Popover.Popup className="w-80 bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-            <p className="text-xs font-medium">Implement with an agent</p>
+            <p className="text-xs font-medium">
+              {tx("Implement with an agent")}
+            </p>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              Starts a write-capable session in an isolated worktree — your
-              working tree is never touched.
+              {tx(
+                "Starts a write-capable session in an isolated worktree — your working tree is never touched.",
+              )}
             </p>
             <div className="mt-2.5 flex items-center gap-1.5 border-y py-2">
               <AgentPicker
@@ -78,7 +83,7 @@ export function ImplementPlanButton({ run }: { run: PlanRun }) {
               <EffortPicker value={effort} onChange={setEffort} />
             </div>
             <Button size="sm" className="mt-2.5 w-full" onClick={onStart}>
-              Start session
+              {tx("Start session")}
             </Button>
           </Popover.Popup>
         </Popover.Positioner>

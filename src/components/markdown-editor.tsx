@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { useMentionAutocomplete } from "@/components/mention-autocomplete";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ export interface MarkdownEditorHandle {
 
 /** A formatting operation a toolbar button (or shortcut) performs. */
 type FormatAction =
-  | { kind: "wrap"; before: string; after: string; placeholder: string }
+  | { kind: "wrap"; before: string; after: string; placeholderKey: string }
   | { kind: "line"; prefix: string }
   | { kind: "link" };
 
@@ -129,20 +130,20 @@ const BOLD: FormatAction = {
   kind: "wrap",
   before: "**",
   after: "**",
-  placeholder: "bold text",
+  placeholderKey: "boldPlaceholder",
 };
 const ITALIC: FormatAction = {
   kind: "wrap",
   before: "_",
   after: "_",
-  placeholder: "italic text",
+  placeholderKey: "italicPlaceholder",
 };
 const LINK: FormatAction = { kind: "link" };
 
 /** Toolbar buttons, grouped (a divider renders between groups). */
 const TOOLBAR_GROUPS: {
   id: string;
-  label: string;
+  labelKey: string;
   icon: Icon;
   action: FormatAction;
   /** Canonical binding string (see @/lib/hotkeys/binding) — the labels format
@@ -152,7 +153,7 @@ const TOOLBAR_GROUPS: {
   [
     {
       id: "heading",
-      label: "Heading",
+      labelKey: "heading",
       icon: TextHIcon,
       action: { kind: "line", prefix: "### " },
     },
@@ -160,14 +161,14 @@ const TOOLBAR_GROUPS: {
   [
     {
       id: "bold",
-      label: "Bold",
+      labelKey: "bold",
       icon: TextBIcon,
       action: BOLD,
       shortcut: "mod+b",
     },
     {
       id: "italic",
-      label: "Italic",
+      labelKey: "italic",
       icon: TextItalicIcon,
       action: ITALIC,
       shortcut: "mod+i",
@@ -176,19 +177,19 @@ const TOOLBAR_GROUPS: {
   [
     {
       id: "quote",
-      label: "Quote",
+      labelKey: "quote",
       icon: QuotesIcon,
       action: { kind: "line", prefix: "> " },
     },
     {
       id: "code",
-      label: "Inline code",
+      labelKey: "inlineCode",
       icon: CodeIcon,
-      action: { kind: "wrap", before: "`", after: "`", placeholder: "code" },
+      action: { kind: "wrap", before: "`", after: "`", placeholderKey: "codePlaceholder" },
     },
     {
       id: "link",
-      label: "Link",
+      labelKey: "link",
       icon: LinkIcon,
       action: LINK,
       shortcut: "mod+k",
@@ -197,19 +198,19 @@ const TOOLBAR_GROUPS: {
   [
     {
       id: "bulleted-list",
-      label: "Bulleted list",
+      labelKey: "bulletedList",
       icon: ListBulletsIcon,
       action: { kind: "line", prefix: "- " },
     },
     {
       id: "numbered-list",
-      label: "Numbered list",
+      labelKey: "numberedList",
       icon: ListNumbersIcon,
       action: { kind: "line", prefix: "1. " },
     },
     {
       id: "task-list",
-      label: "Task list",
+      labelKey: "taskList",
       icon: ListChecksIcon,
       action: { kind: "line", prefix: "- [ ] " },
     },
@@ -262,6 +263,7 @@ export function MarkdownEditor({
   mentions?: MentionSource;
   "aria-label"?: string;
 }) {
+  const { t } = useTranslation("components");
   const [mode, setMode] = useState<"write" | "preview">("write");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Selection to restore after a controlled-value update from a format action.
@@ -336,7 +338,7 @@ export function MarkdownEditor({
             end,
             action.before,
             action.after,
-            action.placeholder,
+            t(`markdownEditor.${action.placeholderKey}`),
           )
         : action.kind === "line"
           ? applyLine(value, start, end, action.prefix)
@@ -424,7 +426,7 @@ export function MarkdownEditor({
           aria-pressed={mode === "write"}
           onClick={() => setMode("write")}
         >
-          Write
+          {t("markdownEditor.write")}
         </Button>
         <Button
           type="button"
@@ -433,7 +435,7 @@ export function MarkdownEditor({
           aria-pressed={mode === "preview"}
           onClick={() => setMode("preview")}
         >
-          Preview
+          {t("markdownEditor.preview")}
         </Button>
         {actions && (
           <>
@@ -459,8 +461,8 @@ export function MarkdownEditor({
                     variant="ghost"
                     size="icon-xs"
                     disabled={disabled}
-                    aria-label={hint ? `${btn.label} (${hint})` : btn.label}
-                    title={hint ? `${btn.label} · ${hint}` : btn.label}
+                    aria-label={hint ? `${t(`markdownEditor.${btn.labelKey}`)} (${hint})` : t(`markdownEditor.${btn.labelKey}`)}
+                    title={hint ? `${t(`markdownEditor.${btn.labelKey}`)} · ${hint}` : t(`markdownEditor.${btn.labelKey}`)}
                     // Keep the textarea focused/selected when clicking a button.
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => runAction(btn.action)}
@@ -514,7 +516,7 @@ export function MarkdownEditor({
             // this preview is for reading your own draft, not for navigating.
             <Markdown>{value}</Markdown>
           ) : (
-            <p className="text-xs text-muted-foreground">Nothing to preview</p>
+            <p className="text-xs text-muted-foreground">{t("markdownEditor.nothingToPreview")}</p>
           )}
         </div>
       )}

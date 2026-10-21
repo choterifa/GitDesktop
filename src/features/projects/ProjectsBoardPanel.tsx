@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  type ComponentProps,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -23,7 +24,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { DisabledReasonButton } from "@/components/disabled-reason-button";
+import { DisabledReasonButton as BaseDisabledReasonButton } from "@/components/disabled-reason-button";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
 import { usePanelPortalContainer } from "@/components/panel-portal";
 import { SelectClipText } from "@/components/select-clip-text";
@@ -256,6 +257,19 @@ import {
   type Zoom,
 } from "./roadmap-model";
 import { cellEditHeld } from "./TableCell";
+import { projectsText, useProjectsText } from "./use-projects-text";
+
+function ProjectDisabledReasonButton(
+  props: ComponentProps<typeof BaseDisabledReasonButton>,
+) {
+  const projectText = useProjectsText();
+  return (
+    <BaseDisabledReasonButton
+      {...props}
+      reason={props.reason ? projectText(props.reason) : props.reason}
+    />
+  );
+}
 
 /** Where an issue or pull request on this board lands, per kind: the tab that
  *  owns it in-app, and the web path a CROSS-REPO card falls back to (GitHub's own
@@ -402,22 +416,39 @@ const ARCHIVE_BODY: Record<
   (noun: ItemNoun, surface: Surface) => string
 > = {
   hidden: (noun, surface) =>
-    `The ${noun} leaves the ${surface}. Bring it back any time from View options → Show archived cards.`,
+    projectsText(
+      "The {{noun}} leaves the {{surface}}. Bring it back any time from View options → Show archived cards.",
+      { noun: projectsText(noun), surface: projectsText(surface) },
+    ),
   shown: (noun, surface) =>
-    `The ${noun} stays in place, marked Archived, and leaves the ${surface} when you turn Show archived cards off. Restore ${noun} brings it back.`,
+    projectsText(
+      "The {{noun}} stays in place, marked Archived, and leaves the {{surface}} when you turn Show archived cards off. Restore {{noun}} brings it back.",
+      { noun: projectsText(noun), surface: projectsText(surface) },
+    ),
 };
 const REMOVE_BODY: Record<
   BoardItemContent["kind"],
   (noun: ItemNoun) => string
 > = {
   draft: () =>
-    "This deletes the draft permanently — drafts live on this project and nowhere else.",
+    projectsText(
+      "This deletes the draft permanently — drafts live on this project and nowhere else.",
+    ),
   issue: (noun) =>
-    `The ${noun} leaves this project. The issue itself is untouched, and you can add it back later.`,
+    projectsText(
+      "The {{noun}} leaves this project. The issue itself is untouched, and you can add it back later.",
+      { noun: projectsText(noun) },
+    ),
   pullRequest: (noun) =>
-    `The ${noun} leaves this project. The pull request itself is untouched, and you can add it back later.`,
+    projectsText(
+      "The {{noun}} leaves this project. The pull request itself is untouched, and you can add it back later.",
+      { noun: projectsText(noun) },
+    ),
   redacted: (noun) =>
-    `The ${noun} leaves this project. The item itself is untouched, and you can add it back later.`,
+    projectsText(
+      "The {{noun}} leaves this project. The item itself is untouched, and you can add it back later.",
+      { noun: projectsText(noun) },
+    ),
 };
 /** {@link ARCHIVE_BODY} for a SELECTION, keyed the same way and on the same fact:
  *  with the toggle off the cards leave the board, with it on they stay put under
@@ -430,11 +461,25 @@ const BULK_ARCHIVE_BODY: Record<
   hidden: (n, noun, surface) =>
     n === 1
       ? ARCHIVE_BODY.hidden(noun, surface)
-      : `The ${n} ${noun}s leave the ${surface}. Bring them back any time from View options → Show archived cards.`,
+      : projectsText(
+          "The {{count}} {{noun}} leave the {{surface}}. Bring them back any time from View options → Show archived cards.",
+          {
+            count: n,
+            noun: projectsText(noun === "card" ? "cards" : "rows"),
+            surface: projectsText(surface),
+          },
+        ),
   shown: (n, noun, surface) =>
     n === 1
       ? ARCHIVE_BODY.shown(noun, surface)
-      : `The ${n} ${noun}s stay in place, marked Archived, and leave the ${surface} when you turn Show archived cards off. Restore ${noun} brings one back.`,
+      : projectsText(
+          "The {{count}} {{noun}} stay in place, marked Archived, and leave the {{surface}} when you turn Show archived cards off. Restore them to bring them back.",
+          {
+            count: n,
+            noun: projectsText(noun === "card" ? "cards" : "rows"),
+            surface: projectsText(surface),
+          },
+        ),
 };
 
 /** {@link REMOVE_BODY} for a SELECTION. Keyed on how many DRAFTS it holds, which
@@ -443,14 +488,21 @@ const BULK_ARCHIVE_BODY: Record<
 function bulkRemoveBody(cards: BoardItem[], noun: ItemNoun): string {
   if (cards.length === 1) return REMOVE_BODY[cards[0].content.kind](noun);
   const drafts = cards.filter((card) => card.content.kind === "draft").length;
-  const leaves = `The ${cards.length} ${noun}s leave this project.`;
+  const pluralNoun = projectsText(noun === "card" ? "cards" : "rows");
   if (drafts === 0)
-    return `${leaves} The items themselves are untouched, and you can add them back later.`;
-  // Both arms built whole rather than stitched from shared fragments: "which
-  // live(s)" has to agree with the subject the branch chose.
-  return drafts === 1
-    ? `${leaves} One of them is a draft, which lives on this project and nowhere else, so it is deleted permanently.`
-    : `${leaves} ${drafts} of them are drafts, which live on this project and nowhere else, so those are deleted permanently.`;
+    return projectsText(
+      "The {{count}} {{noun}} leave this project. The items themselves are untouched, and you can add them back later.",
+      { count: cards.length, noun: pluralNoun },
+    );
+  if (drafts === 1)
+    return projectsText(
+      "The {{count}} {{noun}} leave this project. One is a draft, which lives on this project and nowhere else, so it is deleted permanently.",
+      { count: cards.length, noun: pluralNoun },
+    );
+  return projectsText(
+    "The {{count}} {{noun}} leave this project. {{drafts}} are drafts, which live on this project and nowhere else, so those are deleted permanently.",
+    { count: cards.length, noun: pluralNoun, drafts },
+  );
 }
 
 /** Held rather than queued: a move cancels the board's reads, and query-core's
@@ -769,11 +821,26 @@ const BULK_NO_SELECTION_REASON: Record<ItemNoun, string> = {
  *  added later has to state its own sentence here instead of type-checking its
  *  way past a lookup that would return `undefined` at runtime. */
 const BULK_NOTHING_REASON: Record<BulkVerb, (noun: ItemNoun) => string> = {
-  move: (noun) => `Every selected ${noun} is archived`,
-  fields: (noun) => `Every selected ${noun} is archived`,
-  archive: (noun) => `Every selected ${noun} is already archived`,
-  restore: (noun) => `No selected ${noun} is archived`,
-  remove: (noun) => `Select ${noun}s to remove`,
+  move: (noun) =>
+    projectsText("All selected {{noun}} are archived", {
+      noun: projectsText(noun === "card" ? "cards" : "rows"),
+    }),
+  fields: (noun) =>
+    projectsText("All selected {{noun}} are archived", {
+      noun: projectsText(noun === "card" ? "cards" : "rows"),
+    }),
+  archive: (noun) =>
+    projectsText("All selected {{noun}} are already archived", {
+      noun: projectsText(noun === "card" ? "cards" : "rows"),
+    }),
+  restore: (noun) =>
+    projectsText("None of the selected {{noun}} are archived", {
+      noun: projectsText(noun === "card" ? "cards" : "rows"),
+    }),
+  remove: (noun) =>
+    projectsText("Select {{noun}} to remove", {
+      noun: projectsText(noun === "card" ? "cards" : "rows"),
+    }),
 };
 
 /** A view's filter as the board's LENS. GitHub reports an unfiltered view as
@@ -803,6 +870,7 @@ function ClearViewButton({
   onClear: () => void;
   landing?: boolean;
 }) {
+  const projectText = useProjectsText();
   return (
     <button
       type="button"
@@ -810,7 +878,7 @@ function ClearViewButton({
       onClick={onClear}
       className="cursor-pointer underline hover:text-foreground"
     >
-      Clear view
+      {projectText("Clear view")}{" "}
     </button>
   );
 }
@@ -916,10 +984,11 @@ function MenuLatchRelease({
 /** The board's first paint: three column shells rather than a spinner, so the
  *  real columns replace them without the surface shifting. */
 function BoardSkeleton() {
+  const projectText = useProjectsText();
   return (
     <>
       <span role="status" className="sr-only">
-        Loading the project board…
+        {projectText("Loading the project board…")}{" "}
       </span>
       <div aria-busy className="flex min-h-0 flex-1 gap-2">
         {["a", "b", "c"].map((key) => (
@@ -971,6 +1040,7 @@ function SelectionHintStrip({
   noun: ItemNoun;
   onDismiss?: () => void;
 }) {
+  const projectText = useProjectsText();
   const reserve = onDismiss === undefined;
   const linkClass =
     "shrink-0 font-medium whitespace-nowrap underline underline-offset-2 hover:no-underline";
@@ -985,10 +1055,12 @@ function SelectionHintStrip({
         for a range.
       </span>
       {reserve ? (
-        <span className={cn(linkClass, "invisible")}>Don't show again</span>
+        <span className={cn(linkClass, "invisible")}>
+          {projectText("Don't show again")}
+        </span>
       ) : (
         <button type="button" onClick={onDismiss} className={linkClass}>
-          Don't show again
+          {projectText("Don't show again")}{" "}
         </button>
       )}
     </div>
@@ -1041,6 +1113,7 @@ function ErrorCard({
   /** For a caller's `useRetryFocusRescue`, whose host outlives this card. */
   retryRef?: Ref<HTMLButtonElement>;
 }) {
+  const projectText = useProjectsText();
   return (
     <div className="px-3 py-4 text-xs">
       <p className="text-muted-foreground">{presentError(error).summary}</p>
@@ -1052,7 +1125,7 @@ function ErrorCard({
         data-body-landing=""
         onClick={onRetry}
       >
-        Retry
+        {projectText("Retry")}{" "}
       </Button>
     </div>
   );
@@ -1086,6 +1159,7 @@ function DateSourceRows({
   value: DateSource | null;
   onPick: (rowId: string) => void;
 }) {
+  const projectText = useProjectsText();
   return (
     <div className="space-y-1">
       <p id={labelId} className="px-1 text-xs text-muted-foreground">
@@ -1116,14 +1190,14 @@ function DateSourceRows({
                   its iteration rather than naming one day. */}
               {f.kind === "iteration" && (
                 <span className="shrink-0 text-muted-foreground">
-                  iteration
+                  {projectText("iteration")}{" "}
                 </span>
               )}
             </label>
           ))}
           <label className={GROUP_ROW_CLASS}>
             <Radio value={NO_SOURCE_ROW_ID} />
-            <span className="min-w-0 truncate">None</span>
+            <span className="min-w-0 truncate">{projectText("None")}</span>
           </label>
         </RadioGroup>
       )}
@@ -1150,6 +1224,7 @@ export function ProjectsBoardPanel({
   /** The Projects tab is the visible one. Gates every read in this subtree. */
   active: boolean;
 }) {
+  const projectText = useProjectsText();
   const gh = useForgeStatus(repoPath);
   const provider = gh.data?.provider;
   const isGitHub = provider === "github";
@@ -3281,7 +3356,7 @@ export function ProjectsBoardPanel({
   })();
   // Both no-board arms offer it: an empty catalog and a cut-short one alike.
   const newProjectButton = (
-    <DisabledReasonButton
+    <ProjectDisabledReasonButton
       variant="outline"
       size="xs"
       disabled={newProjectHeld !== undefined}
@@ -3289,8 +3364,8 @@ export function ProjectsBoardPanel({
       onClick={openNewProject}
     >
       <PlusIcon data-icon="inline-start" />
-      New project…
-    </DisabledReasonButton>
+      {projectText("New project…")}{" "}
+    </ProjectDisabledReasonButton>
   );
 
   // One mutation instance per VERB, never shared: each surface's pending state
@@ -5408,8 +5483,8 @@ export function ProjectsBoardPanel({
         return settledArm(
           <BoardNotice>
             <p>
-              This repository is on {providerLabel(provider)} — Projects boards
-              are a GitHub feature.
+              {projectText("This repository is on")} {providerLabel(provider)}{" "}
+              {projectText("— Projects boards are a GitHub feature.")}{" "}
             </p>
           </BoardNotice>,
         );
@@ -5423,7 +5498,7 @@ export function ProjectsBoardPanel({
           <div data-body-landing="">
             <ForgeNotReady
               repoPath={repoPath}
-              feature="project boards"
+              feature={projectText("project boards")}
               retryRef={forgeRescue.retryRef}
             />
           </div>,
@@ -5451,10 +5526,10 @@ export function ProjectsBoardPanel({
                   `projectScopeMissing` only fires when a classic token has
                   neither. The reconnect below asks for `project`, which is the
                   one that also permits the writes the pickers offer. */}
-              Reading project boards needs the{" "}
-              <span className="font-mono">project</span> or{" "}
-              <span className="font-mono">read:project</span> scope, and your
-              GitHub sign-in has neither.
+              {projectText("Reading project boards needs the")}{" "}
+              <span className="font-mono">project</span> {projectText("or")}{" "}
+              <span className="font-mono">read:project</span>{" "}
+              {projectText("scope, and your GitHub sign-in has neither.")}{" "}
             </ScopeGapBlock>
           </div>,
         );
@@ -5485,10 +5560,15 @@ export function ProjectsBoardPanel({
         return settledArm(
           <BoardNotice>
             <p>
-              No project came back for this repository or its owner, but the
-              list was cut short, so there may be more.
+              {projectText(
+                "No project came back for this repository or its owner, but the list was cut short, so there may be more.",
+              )}{" "}
             </p>
-            <p>Open the owner's Projects page on GitHub to see all of them.</p>
+            <p>
+              {projectText(
+                "Open the owner's Projects page on GitHub to see all of them.",
+              )}
+            </p>
             <p data-body-landing="">{newProjectButton}</p>
           </BoardNotice>,
         );
@@ -5496,11 +5576,14 @@ export function ProjectsBoardPanel({
         return settledArm(
           <BoardNotice>
             <p>
-              A GitHub Project is a board that gathers issues and pull requests
-              (from this repository and others) into columns you define.
+              {projectText(
+                "A GitHub Project is a board that gathers issues and pull requests (from this repository and others) into columns you define.",
+              )}{" "}
             </p>
             <p>
-              Neither this repository nor its owner has one yet. Start one here.
+              {projectText(
+                "Neither this repository nor its owner has one yet. Start one here.",
+              )}{" "}
             </p>
             <p data-body-landing="">{newProjectButton}</p>
           </BoardNotice>,
@@ -5512,7 +5595,7 @@ export function ProjectsBoardPanel({
       case filterEmpty:
         return settledArm(
           <BoardNotice>
-            <p>No items match this view's filter.</p>
+            <p>{projectText("No items match this view's filter.")}</p>
             <p className="font-mono break-all">{lensQuery}</p>
             <p>
               <ClearViewButton onClear={clearView} landing />
@@ -5585,7 +5668,7 @@ export function ProjectsBoardPanel({
                     size="xs"
                     onClick={() => setViewOptionsOpen(true)}
                   >
-                    View options
+                    {projectText("View options")}{" "}
                   </Button>
                 </div>
               )}
@@ -5892,12 +5975,14 @@ export function ProjectsBoardPanel({
       // The last-resort focus landing ({@link focusBodyLanding}): named, so focus
       // parked here announces where it is.
       role="region"
-      aria-label="Project board"
+      aria-label={projectText("Project board")}
       tabIndex={-1}
       className="flex h-full flex-col p-2 outline-none"
     >
       {project !== null && (
-        <h2 className="sr-only">{project.title} project board</h2>
+        <h2 className="sr-only">
+          {project.title} {projectText("project board")}
+        </h2>
       )}
       {!showBoardChrome && bodyLoading && <BoardToolbarSkeleton />}
       {showBoardChrome && (
@@ -5911,7 +5996,11 @@ export function ProjectsBoardPanel({
           >
             {/* Fixed width, so the row wraps the same at any title length and
                 BoardToolbarSkeleton can mirror it. */}
-            <SelectTrigger size="sm" aria-label="Project" className="w-64">
+            <SelectTrigger
+              size="sm"
+              aria-label={projectText("Project")}
+              className="w-64"
+            >
               {/* An ellipsis where the title is cut, so a cut on a word boundary
                   never reads as the whole title. `block!` because the trigger
                   styles its value as a flex line-clamp, which clips without one;
@@ -5923,7 +6012,7 @@ export function ProjectsBoardPanel({
               />
               {project?.closed === true && (
                 <span className="mr-auto shrink-0 text-muted-foreground">
-                  (closed)
+                  {projectText("(closed)")}{" "}
                 </span>
               )}
             </SelectTrigger>
@@ -5938,7 +6027,7 @@ export function ProjectsBoardPanel({
                   grouping alone, and the trigger names it once one is picked. */}
               {closedProjects.length > 0 && (
                 <SelectGroup>
-                  <SelectLabel>Closed</SelectLabel>
+                  <SelectLabel>{projectText("Closed")}</SelectLabel>
                   {closedProjects.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       <SelectClipText>{`${p.title} (closed)`}</SelectClipText>
@@ -5954,8 +6043,8 @@ export function ProjectsBoardPanel({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  aria-label="Project actions"
-                  title="Project actions"
+                  aria-label={projectText("Project actions")}
+                  title={projectText("Project actions")}
                 />
               }
             >
@@ -6016,7 +6105,7 @@ export function ProjectsBoardPanel({
                 // rides the same prop path as the `variant` beside it. Always
                 // focusable — a held Add item carries a reason, which takes
                 // `focusableWhenDisabled` rather than leaving the tab order.
-                <DisabledReasonButton
+                <ProjectDisabledReasonButton
                   data-board-add-trigger=""
                   variant="outline"
                   size="sm"
@@ -6026,21 +6115,21 @@ export function ProjectsBoardPanel({
               }
             >
               <PlusIcon data-icon="inline-start" />
-              Add item
+              {projectText("Add item")}{" "}
             </DropdownMenuTrigger>
             <DropdownMenuContent className="min-w-56">
               <DropdownMenuItem onClick={() => switchAddDialog("existing")}>
-                Add issue or pull request…
+                {projectText("Add issue or pull request…")}{" "}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => switchAddDialog("draft")}>
-                New draft…
+                {projectText("New draft…")}{" "}
               </DropdownMenuItem>
               {/* Here even with no strip on screen: a project with no updates
                   draws none, so this row is how its first one gets posted. Its
                   permission holds are already the trigger's, which says why. */}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={openStatusPost}>
-                Post status update…
+                {projectText("Post status update…")}{" "}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -6080,7 +6169,7 @@ export function ProjectsBoardPanel({
           >
             <Popover.Trigger render={<Button variant="outline" size="sm" />}>
               <FadersHorizontalIcon data-icon="inline-start" />
-              View options
+              {projectText("View options")}{" "}
             </Popover.Trigger>
             <Popover.Portal container={portalContainer}>
               <Popover.Positioner
@@ -6097,7 +6186,7 @@ export function ProjectsBoardPanel({
                     render={<p />}
                     className="px-1 pb-1.5 text-xs font-medium"
                   >
-                    View options
+                    {projectText("View options")}{" "}
                   </Popover.Title>
                   {/* One section per view control; later slices add their own
                       beside this one, so the section shape is the contract.
@@ -6118,7 +6207,7 @@ export function ProjectsBoardPanel({
                         id={viewLabelId}
                         className="px-1 text-xs text-muted-foreground"
                       >
-                        View
+                        {projectText("View")}{" "}
                       </p>
                       {viewsHeldReason !== undefined ? (
                         <p className="px-1 py-1 text-xs text-muted-foreground">
@@ -6142,7 +6231,9 @@ export function ProjectsBoardPanel({
                           >
                             <label className={GROUP_ROW_CLASS}>
                               <Radio value={NO_VIEW_ROW_ID} />
-                              <span className="min-w-0 truncate">No view</span>
+                              <span className="min-w-0 truncate">
+                                {projectText("No view")}
+                              </span>
                             </label>
                             {viewList.map((v) => (
                               <label key={v.id} className={GROUP_ROW_CLASS}>
@@ -6180,7 +6271,7 @@ export function ProjectsBoardPanel({
                           six-column grid: the verbs that ADD a view, then the
                           three that change the view the radio has picked. */}
                       <div className="grid grid-cols-6 gap-1 px-0.5 pt-1">
-                        <DisabledReasonButton
+                        <ProjectDisabledReasonButton
                           variant="ghost"
                           size="xs"
                           wrapperClassName="col-span-3"
@@ -6189,9 +6280,9 @@ export function ProjectsBoardPanel({
                           reason={viewActionReason(false)}
                           onClick={openNewView}
                         >
-                          New view…
-                        </DisabledReasonButton>
-                        <DisabledReasonButton
+                          {projectText("New view…")}{" "}
+                        </ProjectDisabledReasonButton>
+                        <ProjectDisabledReasonButton
                           variant="ghost"
                           size="xs"
                           wrapperClassName="col-span-3"
@@ -6200,9 +6291,9 @@ export function ProjectsBoardPanel({
                           reason={duplicateViewReason}
                           onClick={() => void duplicateCurrentView()}
                         >
-                          Duplicate
-                        </DisabledReasonButton>
-                        <DisabledReasonButton
+                          {projectText("Duplicate")}{" "}
+                        </ProjectDisabledReasonButton>
+                        <ProjectDisabledReasonButton
                           variant="ghost"
                           size="xs"
                           wrapperClassName="col-span-2"
@@ -6211,9 +6302,9 @@ export function ProjectsBoardPanel({
                           reason={viewActionReason(true)}
                           onClick={openRenameView}
                         >
-                          Rename…
-                        </DisabledReasonButton>
-                        <DisabledReasonButton
+                          {projectText("Rename…")}{" "}
+                        </ProjectDisabledReasonButton>
+                        <ProjectDisabledReasonButton
                           variant="ghost"
                           size="xs"
                           wrapperClassName="col-span-2"
@@ -6222,9 +6313,9 @@ export function ProjectsBoardPanel({
                           reason={viewFieldsReason}
                           onClick={openViewFields}
                         >
-                          Fields…
-                        </DisabledReasonButton>
-                        <DisabledReasonButton
+                          {projectText("Fields…")}{" "}
+                        </ProjectDisabledReasonButton>
+                        <ProjectDisabledReasonButton
                           variant="ghost"
                           size="xs"
                           wrapperClassName="col-span-2"
@@ -6233,8 +6324,8 @@ export function ProjectsBoardPanel({
                           reason={deleteViewReason}
                           onClick={() => void removeCurrentView()}
                         >
-                          Delete…
-                        </DisabledReasonButton>
+                          {projectText("Delete…")}{" "}
+                        </ProjectDisabledReasonButton>
                       </div>
                     </div>
                     {/* The layout the view on screen draws in, changeable for the
@@ -6246,7 +6337,7 @@ export function ProjectsBoardPanel({
                           id={layoutLabelId}
                           className="px-1 text-xs text-muted-foreground"
                         >
-                          Layout
+                          {projectText("Layout")}{" "}
                         </p>
                         <RadioGroup
                           className="gap-0"
@@ -6269,7 +6360,7 @@ export function ProjectsBoardPanel({
                             <label key={l} className={GROUP_ROW_CLASS}>
                               <Radio value={l} />
                               <span className="min-w-0 truncate">
-                                {VIEW_LAYOUT_LABEL[l]}
+                                {projectText(VIEW_LAYOUT_LABEL[l])}
                               </span>
                             </label>
                           ))}
@@ -6277,17 +6368,17 @@ export function ProjectsBoardPanel({
                         {layoutUnsaved && (
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pt-1">
                             <span className="text-[11px] text-muted-foreground">
-                              For this visit only.
+                              {projectText("For this visit only.")}{" "}
                             </span>
-                            <DisabledReasonButton
+                            <ProjectDisabledReasonButton
                               variant="outline"
                               size="xs"
                               disabled={saveLayoutReason !== undefined}
                               reason={saveLayoutReason}
                               onClick={() => void saveLayout()}
                             >
-                              Save layout to view
-                            </DisabledReasonButton>
+                              {projectText("Save layout to view")}{" "}
+                            </ProjectDisabledReasonButton>
                           </div>
                         )}
                       </div>
@@ -6299,7 +6390,7 @@ export function ProjectsBoardPanel({
                       <>
                         <DateSourceRows
                           labelId={startLabelId}
-                          label="Start field"
+                          label={projectText("Start field")}
                           heldReason={dateSourceHeldReason}
                           fields={sourceFields}
                           value={dateSources.start}
@@ -6307,7 +6398,7 @@ export function ProjectsBoardPanel({
                         />
                         <DateSourceRows
                           labelId={targetLabelId}
-                          label="Target field"
+                          label={projectText("Target field")}
                           heldReason={dateSourceHeldReason}
                           fields={sourceFields}
                           value={dateSources.target}
@@ -6318,7 +6409,7 @@ export function ProjectsBoardPanel({
                             id={zoomLabelId}
                             className="px-1 text-xs text-muted-foreground"
                           >
-                            Zoom
+                            {projectText("Zoom")}{" "}
                           </p>
                           <RadioGroup
                             className="gap-0"
@@ -6349,7 +6440,7 @@ export function ProjectsBoardPanel({
                         id={groupLabelId}
                         className="px-1 text-xs text-muted-foreground"
                       >
-                        Group by
+                        {projectText("Group by")}{" "}
                       </p>
                       {groupHeldReason !== undefined || groupField === null ? (
                         // Nothing to choose from, so the reason IS the content
@@ -6399,7 +6490,7 @@ export function ProjectsBoardPanel({
                           each pick one of several. The caption keeps the section
                           shape its siblings set. */}
                       <p className="px-1 text-xs text-muted-foreground">
-                        Archived cards
+                        {projectText("Archived cards")}{" "}
                       </p>
                       {/* Applies on change, like the rows above — the popup stays
                           open so the board can be looked at both ways without
@@ -6410,7 +6501,7 @@ export function ProjectsBoardPanel({
                           onCheckedChange={(c) => setArchivedShown(c === true)}
                         />
                         <span className="min-w-0 truncate">
-                          Show archived cards
+                          {projectText("Show archived cards")}{" "}
                         </span>
                       </label>
                     </div>
@@ -6455,7 +6546,7 @@ export function ProjectsBoardPanel({
               </span>
             )}
             {(items.hasNextPage || pageError || heldNextPage) && (
-              <DisabledReasonButton
+              <ProjectDisabledReasonButton
                 variant="outline"
                 size="xs"
                 disabled={loadMoreHeld !== undefined}
@@ -6475,7 +6566,7 @@ export function ProjectsBoardPanel({
                 }}
               >
                 {pageError ? "Try again" : "Load more"}
-              </DisabledReasonButton>
+              </ProjectDisabledReasonButton>
             )}
           </div>
         </div>
@@ -6540,7 +6631,7 @@ export function ProjectsBoardPanel({
                     }}
                     className="cursor-pointer text-muted-foreground underline hover:text-foreground"
                   >
-                    Retry
+                    {projectText("Retry")}{" "}
                   </button>
                 )}
               </p>
@@ -6569,7 +6660,7 @@ export function ProjectsBoardPanel({
           {rowSortDropped !== null && <span>{rowSortDropped}</span>}
           {lensQuery !== null && (
             <span className="flex min-w-0 items-center gap-1">
-              Filter:
+              {projectText("Filter:")}{" "}
               <span
                 className="min-w-0 truncate font-mono"
                 onMouseEnter={clipTitleFromText}
@@ -6637,12 +6728,12 @@ export function ProjectsBoardPanel({
           className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5 border-b bg-muted/40 px-2.5 py-1.5 text-[11px]"
         >
           <span className="mr-1 tabular-nums text-muted-foreground">
-            {cardCount(selectionSize, noun)} selected
+            {cardCount(selectionSize, noun)} {projectText("selected")}{" "}
           </span>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <DisabledReasonButton
+                <ProjectDisabledReasonButton
                   variant="ghost"
                   size="sm"
                   disabled={bulkRows.move.reason !== undefined}
@@ -6675,7 +6766,7 @@ export function ProjectsBoardPanel({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <DisabledReasonButton
+          <ProjectDisabledReasonButton
             variant="ghost"
             size="sm"
             disabled={bulkRows.fields.reason !== undefined}
@@ -6683,8 +6774,8 @@ export function ProjectsBoardPanel({
             onClick={openBulkFields}
           >
             {bulkRows.fields.label}
-          </DisabledReasonButton>
-          <DisabledReasonButton
+          </ProjectDisabledReasonButton>
+          <ProjectDisabledReasonButton
             variant="ghost"
             size="sm"
             disabled={bulkRows.archive.reason !== undefined}
@@ -6692,8 +6783,8 @@ export function ProjectsBoardPanel({
             onClick={() => void bulkRetireCards("archive")}
           >
             {bulkRows.archive.label}
-          </DisabledReasonButton>
-          <DisabledReasonButton
+          </ProjectDisabledReasonButton>
+          <ProjectDisabledReasonButton
             variant="ghost"
             size="sm"
             disabled={bulkRows.restore.reason !== undefined}
@@ -6701,8 +6792,8 @@ export function ProjectsBoardPanel({
             onClick={() => void bulkRestoreCards()}
           >
             {bulkRows.restore.label}
-          </DisabledReasonButton>
-          <DisabledReasonButton
+          </ProjectDisabledReasonButton>
+          <ProjectDisabledReasonButton
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
@@ -6711,10 +6802,10 @@ export function ProjectsBoardPanel({
             onClick={() => void bulkRetireCards("remove")}
           >
             {bulkRows.remove.label}
-          </DisabledReasonButton>
+          </ProjectDisabledReasonButton>
           <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
           <Button variant="ghost" size="sm" onClick={dismissSelection}>
-            Clear
+            {projectText("Clear")}{" "}
           </Button>
         </div>
       )}

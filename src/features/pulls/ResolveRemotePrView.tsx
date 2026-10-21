@@ -23,6 +23,7 @@ import { useConfirm } from "@/lib/stores/confirm";
 import { useConflictResolve } from "@/lib/stores/conflict-resolve";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 const baseName = (path: string) => path.split("/").pop() || path;
 
@@ -74,6 +75,7 @@ export function ResolveRemotePrView({
   /** Leave the takeover — the worktree is gone (finished or discarded). */
   onDone: () => void;
 }) {
+  const tx = usePullsText();
   const status = useRepoStatus(worktreePath);
   const finish = useFinishRemotePrResolve(repoPath, lens);
   const abort = useAbortRemotePrResolve(repoPath);
@@ -152,24 +154,34 @@ export function ResolveRemotePrView({
         worktreeId,
       });
       if (outcome.status === "pushed") {
-        toast.success(`Conflicts resolved — pushed ${head}`);
+        toast.success(tx("Conflicts resolved — pushed {{head}}", { head }));
         onDone();
         return;
       }
       // Unreachable by contract: finish either pushes or errors — it never hands
       // back conflicts (that shape belongs to the local sibling's rebase path).
       // Surfaced rather than swallowed, so a contract drift can't pass silently.
-      toastError(new Error("The resolve finished with an unexpected result."));
+      toastError(
+        new Error(tx("The resolve finished with an unexpected result.")),
+      );
     } catch (e) {
       toastError(e);
     }
   }
 
   async function onAbort() {
-    if (!(await useConfirm.getState().ask(DISCARD_RESOLVE_CONFIRM))) return;
+    if (
+      !(await useConfirm.getState().ask({
+        title: tx(DISCARD_RESOLVE_CONFIRM.title),
+        body: tx(DISCARD_RESOLVE_CONFIRM.body),
+        confirmLabel: tx(DISCARD_RESOLVE_CONFIRM.confirmLabel),
+        confirmVariant: "destructive",
+      }))
+    )
+      return;
     try {
       await abort.mutateAsync({ worktreePath });
-      toast.success("Resolution discarded");
+      toast.success(tx("Resolution discarded"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -194,9 +206,10 @@ export function ResolveRemotePrView({
           {/* Wraps rather than truncates — this sentence is the only place the
               direction and the push are stated, so it can never be cut off. */}
           <span className="min-w-0">
-            Merging <span className="font-mono">{base}</span> into{" "}
-            <span className="font-mono">{head}</span> — finishing pushes the
-            result to the pull request.
+            {tx(
+              "Merging {{base}} into {{head}} — finishing pushes the result to the pull request.",
+              { base, head },
+            )}
           </span>
         </span>
         <div className="flex items-center gap-1.5">
@@ -208,7 +221,9 @@ export function ResolveRemotePrView({
               onClick={() => startAll(conflictedPaths, worktreePath)}
             >
               <SparkleIcon data-icon="inline-start" />
-              {remaining === 1 ? "Resolve with AI" : "Resolve all with AI"}
+              {remaining === 1
+                ? tx("Resolve with AI")
+                : tx("Resolve all with AI")}
             </Button>
           )}
           <Button
@@ -217,7 +232,7 @@ export function ResolveRemotePrView({
             disabled={busy}
             onClick={() => void onAbort()}
           >
-            Discard
+            {tx("Discard")}
           </Button>
           <DisabledReasonButton
             size="xs"
@@ -226,17 +241,17 @@ export function ResolveRemotePrView({
             reason={(() => {
               switch (true) {
                 case remaining > 0:
-                  return "Resolve every conflict first";
+                  return tx("Resolve every conflict first");
                 case busy:
                   return undefined;
                 default:
-                  return offlineHold;
+                  return offlineHold ? tx(offlineHold) : undefined;
               }
             })()}
             onClick={() => void onFinish()}
           >
             {finish.isPending && <Spinner data-icon="inline-start" />}
-            Finish &amp; push
+            {tx("Finish & push")}
           </DisabledReasonButton>
         </div>
       </div>
@@ -247,13 +262,15 @@ export function ResolveRemotePrView({
           className="w-64 shrink-0 overflow-y-auto border-r"
           onKeyDown={onListKeyDown}
           role="listbox"
-          aria-label="Conflicted files"
+          aria-label={tx("Conflicted files")}
         >
           {done ? (
             <div className="flex items-start gap-1.5 p-3 text-xs text-muted-foreground">
               <CheckCircleIcon className="mt-px size-3.5 shrink-0 text-success" />
               <span>
-                All conflicts resolved — Finish to push the updated branch.
+                {tx(
+                  "All conflicts resolved — Finish to push the updated branch.",
+                )}
               </span>
             </div>
           ) : (
@@ -287,7 +304,9 @@ export function ResolveRemotePrView({
         <div className="min-h-0 flex-1">
           {done ? (
             <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-              All conflicts resolved — Finish to push the updated branch.
+              {tx(
+                "All conflicts resolved — Finish to push the updated branch.",
+              )}
             </div>
           ) : selectedPath ? (
             walkActive === selectedPath ? (

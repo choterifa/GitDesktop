@@ -1,0 +1,12 @@
+{
+  "available": "Actualización disponible: v{{version}}",
+  "readyToInstall": "Hay una nueva versión de GitDesktop lista para instalar.",
+  "installRestart": "Instalar y reiniciar",
+  "downloading": "Descargando v{{version}}…",
+  "downloadingProgress": "Descargando v{{version}}… {{percent}}%",
+  "downloadedWaiting": "Se descargó v{{version}}; espera tu confirmación",
+  "installing": "Instalando v{{version}}…",
+  "installedRestarting": "Actualización instalada; reiniciando…",
+  "whatsNew": "Novedades de la versión v{{version}}",
+  "gotIt": "Entendido"
+}

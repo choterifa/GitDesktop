@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { PlanQuestion } from "@/lib/ai/prompt";
 import { cn } from "@/lib/utils";
+import { usePlanText } from "./use-plan-text";
 
 /** Sentinel for the "Other — write your own" choice. A reserved token (not a
  *  leading space, which is fragile) so it can never collide with a real option. */
@@ -29,6 +30,7 @@ export function PlanQuestions({
   generating: boolean;
   onRefine: (decisions: { question: string; answer: string }[]) => void;
 }) {
+  const tx = usePlanText();
   const groupId = useId();
   // Per-question state: the picked option (or the OTHER sentinel), and the
   // free-text the user typed for an "Other" answer. Keyed by question index.
@@ -49,19 +51,19 @@ export function PlanQuestions({
 
   return (
     <section
-      aria-label="Open questions"
+      aria-label={tx("Open questions")}
       className="mt-4 border bg-card text-card-foreground"
     >
       <header className="flex items-start gap-2.5 border-b px-3.5 py-3">
         <ChatCircleDotsIcon className="mt-0.5 size-4 shrink-0 text-primary" />
         <div className="min-w-0">
           <p className="text-xs font-medium">
-            A few questions to sharpen the plan
+            {tx("A few questions to sharpen the plan")}
           </p>
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            The planner wasn't sure on a few decisions. Answer what you can —
-            pick a suggestion or write your own — and it'll re-plan with your
-            choices.
+            {tx(
+              "The planner wasn't sure on a few decisions. Answer what you can — pick a suggestion or write your own — and it'll re-plan with your choices.",
+            )}
           </p>
         </div>
       </header>
@@ -73,6 +75,7 @@ export function PlanQuestions({
             name={`${groupId}-q${i}`}
             index={i}
             question={q}
+            tx={tx}
             picked={picked[i]}
             custom={custom[i] ?? ""}
             onPick={(v) => setPicked((p) => ({ ...p, [i]: v }))}
@@ -88,17 +91,20 @@ export function PlanQuestions({
 
       <div className="flex items-center gap-2 border-t px-3.5 py-3">
         <span className="text-[11px] text-muted-foreground tabular-nums">
-          {answeredCount} of {questions.length} answered
+          {tx("{{answered}} of {{total}} answered", {
+            answered: answeredCount,
+            total: questions.length,
+          })}
         </span>
         <Button
           size="sm"
           className="ml-auto"
           disabled={generating || answeredCount === 0}
           onClick={() => onRefine(decisions)}
-          title="Re-run the planner with your answers folded in"
+          title={tx("Re-run the planner with your answers folded in")}
         >
           <ArrowsClockwiseIcon data-icon="inline-start" />
-          Refine plan
+          {tx("Refine plan")}
         </Button>
       </div>
     </section>
@@ -112,6 +118,7 @@ function QuestionBlock({
   name,
   index,
   question,
+  tx,
   picked,
   custom,
   onPick,
@@ -120,6 +127,7 @@ function QuestionBlock({
   name: string;
   index: number;
   question: PlanQuestion;
+  tx: ReturnType<typeof usePlanText>;
   picked: string | undefined;
   custom: string;
   onPick: (value: string) => void;
@@ -153,6 +161,7 @@ function QuestionBlock({
             key={opt}
             name={name}
             label={opt}
+            tx={tx}
             recommended={oi === 0 && question.options.length > 1}
             checked={picked === opt}
             onSelect={() => onPick(opt)}
@@ -160,7 +169,8 @@ function QuestionBlock({
         ))}
         <OptionRow
           name={name}
-          label="Other — write your own"
+          label={tx("Other — write your own")}
+          tx={tx}
           checked={isOther}
           onSelect={() => onPick(OTHER)}
         />
@@ -170,8 +180,10 @@ function QuestionBlock({
             type="text"
             value={custom}
             onChange={(e) => onCustom(e.target.value)}
-            placeholder="Your answer…"
-            aria-label={`Your answer to: ${question.question}`}
+            placeholder={tx("Your answer…")}
+            aria-label={tx("Your answer to: {{question}}", {
+              question: question.question,
+            })}
             className="mt-1 w-full border border-input bg-transparent px-3 py-2 text-xs leading-relaxed outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 placeholder:text-muted-foreground dark:bg-input/30"
           />
         )}
@@ -185,12 +197,14 @@ function QuestionBlock({
 function OptionRow({
   name,
   label,
+  tx,
   recommended,
   checked,
   onSelect,
 }: {
   name: string;
   label: string;
+  tx: ReturnType<typeof usePlanText>;
   recommended?: boolean;
   checked: boolean;
   onSelect: () => void;
@@ -224,7 +238,7 @@ function OptionRow({
       <span className="min-w-0">{label}</span>
       {recommended && (
         <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-          Recommended
+          {tx("Recommended")}
         </span>
       )}
     </label>

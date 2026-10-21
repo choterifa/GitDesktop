@@ -1,6 +1,7 @@
 import { SparkleIcon, XIcon } from "@phosphor-icons/react";
 import { useSelector } from "@tanstack/react-store";
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { createAiClient } from "@/lib/ai/client";
 import {
   aiExcludePatterns,
@@ -39,16 +40,14 @@ import { useLatestRef } from "@/lib/use-latest-ref";
 
 /** Why a commit range has nothing left to describe, by what hid it. */
 const EMPTY_RANGE_COPY: Record<HiddenCause, string> = {
-  patterns:
-    "These commits' changes all match your AI ignore patterns — nothing to describe.",
-  unreadable:
-    "Nothing to describe — files whose names aren't readable text are always kept from AI.",
-  both: "Nothing to describe — files whose names aren't readable text are always kept from AI, and the rest of these commits' changes match your AI ignore patterns.",
+  patterns: "rewrite.emptyRange.patterns",
+  unreadable: "rewrite.emptyRange.unreadable",
+  both: "rewrite.emptyRange.both",
 };
 
 /** Why Generate holds while the squash runs: the message it would revise has
  *  already been sent. */
-const SQUASH_PENDING_GENERATE_REASON = "Wait for the squash to finish";
+const SQUASH_PENDING_GENERATE_REASON = "rewrite.pendingGenerateReason";
 
 /** Whether a failed rewrite left a rebase in progress (a timed-out or interrupted
  *  run, or a rollback that couldn't abort): the banner in Changes owns it then. A
@@ -71,6 +70,7 @@ export function useGenerateSquashMessage(
   repoPath: string,
   onText: (message: string) => void,
 ) {
+  const { t } = useTranslation("history");
   const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -95,8 +95,8 @@ export function useGenerateSquashMessage(
         const cause = hiddenCause(diff.excludedFiles, diff.unreadableFiles);
         toast.error(
           cause
-            ? EMPTY_RANGE_COPY[cause]
-            : "These commits have no combined changes to describe.",
+            ? t(EMPTY_RANGE_COPY[cause])
+            : t("rewrite.emptyRange.noCombinedChanges"),
         );
         return;
       }
@@ -157,6 +157,7 @@ export function SquashDialog({
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation("history");
   const rewrite = useRewriteCommits(repoPath);
   const setRepoTab = useUiStore((s) => s.setRepoTab);
   const aiEnabled = useAiEnabled();
@@ -182,7 +183,7 @@ export function SquashDialog({
     defaultValues: { message: defaultMessage },
     onSubmit: async ({ value }) => {
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(promotionBlocksCheckoutCopy());
         return;
       }
       const startedFor = steps;
@@ -193,7 +194,7 @@ export function SquashDialog({
             s.hashes.length > 1 ? { ...s, message: value.message.trim() } : s,
           ),
         });
-        toast.success(`Squashed ${count} commits into one`);
+        toast.success(t("rewrite.squashSuccess", { count }));
         if (!dismissedRef.current && liveSteps.current === startedFor)
           onOpenChange(false);
         // A selection made against the pre-rewrite list (one made mid-flight
@@ -242,10 +243,9 @@ export function SquashDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Squash {count} commits?</DialogTitle>
+            <DialogTitle>{t("rewrite.squashTitle", { count })}</DialogTitle>
             <DialogDescription>
-              Combines the selected commits into one. This rewrites local
-              history; a conflict rolls it back.
+              {t("rewrite.squashDescription")}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
@@ -254,7 +254,7 @@ export function SquashDialog({
           >
             {(field) => (
               <field.TextareaField
-                label="Commit message"
+                label={t("rewrite.commitMessage")}
                 rows={6}
                 className="max-h-60 min-h-24 resize-y font-mono"
               />
@@ -271,7 +271,7 @@ export function SquashDialog({
                   onClick={ai.cancel}
                 >
                   <XIcon data-icon="inline-start" />
-                  Cancel
+                  {t("rewrite.cancel")}
                 </Button>
               ) : (
                 // `runHead` is the collapsing step's tip, so without it there's no
@@ -286,18 +286,18 @@ export function SquashDialog({
                   // disabled Generate's shortcut is dead too.
                   title={
                     runHead && !isSubmitting
-                      ? `Generate the commit message with AI${generateChord.hint}`
-                      : "Generate the commit message with AI"
+                      ? `${t("rewrite.generateTitle")}${generateChord.hint}`
+                      : t("rewrite.generateTitle")
                   }
-                  reason={
+                  reason={t(
                     isSubmitting
                       ? SQUASH_PENDING_GENERATE_REASON
-                      : "Nothing to generate from — this squash has no run of commits to combine"
-                  }
+                      : "rewrite.noRunToGenerate",
+                  )}
                   onClick={() => runHead && ai.generate(base, runHead)}
                 >
                   <SparkleIcon data-icon="inline-start" />
-                  Generate
+                  {t("rewrite.generate")}
                 </DisabledReasonButton>
               ))}
             <Button
@@ -305,11 +305,11 @@ export function SquashDialog({
               variant="outline"
               onClick={() => onDialogOpenChange(false)}
             >
-              Cancel
+              {t("rewrite.cancel")}
             </Button>
             <form.AppForm>
               <form.SubmitButton disabled={ai.generating}>
-                Squash commits
+                {t("rewrite.submit")}
               </form.SubmitButton>
             </form.AppForm>
           </DialogFooter>

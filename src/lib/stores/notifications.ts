@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import { normPath } from "@/lib/git/path";
 import type { RemoteLens } from "@/lib/git/types";
+import { i18n } from "@/lib/i18n";
 import { memoizedStoreLoader } from "@/lib/plugin-store";
 import { type RepoTab, useUiStore } from "@/lib/stores/ui";
 
@@ -437,10 +438,111 @@ export function refuseIfSwitched(
 ): boolean {
   const { live, away, closed } = landedIn(startedIn);
   if (!live) {
-    const what = closed
-      ? "You closed the repository"
-      : "You switched repositories";
-    toast.info(`${what} ${when} — ${outcome}${away}.`);
+    const ns = "repositoryOperations";
+    const what = i18n.t(
+      closed ? "repoSwitchGuard.closed" : "repoSwitchGuard.switched",
+      { ns },
+    );
+    const whenKey: Record<string, string> = {
+      "while the dialog was open": "dialogOpen",
+      "before the checkout finished": "checkoutFinished",
+      "before the close started": "closeStarted",
+      "before the delete started": "deleteStarted",
+      "before the marker check finished": "markerCheckFinished",
+      "before the push started": "pushStarted",
+      "before the removal finished": "removalFinished",
+      "before the reopen started": "reopenStarted",
+      "before the stage started": "stageStarted",
+      "before the switch started": "switchStarted",
+      "before the undo started": "undoStarted",
+      "before the update started": "updateStarted",
+      "while the menu was open": "menuOpen",
+    };
+    const localizedWhen = whenKey[when]
+      ? i18n.t(`repoSwitchGuard.when.${whenKey[when]}`, { ns })
+      : when;
+    const outcomeKey: Record<string, string> = {
+      "no branch was checked out": "noBranchCheckedOut",
+      "no stash was popped": "noStashPopped",
+      "nothing was checked out": "nothingCheckedOut",
+      "nothing was cherry-picked": "nothingCherryPicked",
+      "nothing was deleted": "nothingDeleted",
+      "nothing was discarded": "nothingDiscarded",
+      "nothing was downloaded": "nothingDownloaded",
+      "nothing was published": "nothingPublished",
+      "nothing was pushed": "nothingPushed",
+      "nothing was removed": "nothingRemoved",
+      "nothing was reset": "nothingReset",
+      "nothing was reverted": "nothingReverted",
+      "nothing was staged": "nothingStaged",
+      "nothing was stashed": "nothingStashed",
+      "nothing was undone": "nothingUndone",
+      "nothing was uploaded": "nothingUploaded",
+      "nothing was closed": "nothingClosed",
+      "nothing was reopened": "nothingReopened",
+      "nothing was posted or closed": "nothingPostedOrClosed",
+      "your comment was posted, but the discussion wasn't closed":
+        "commentPostedDiscussionNotClosed",
+      "your comment was posted, but the discussion wasn't reopened":
+        "commentPostedDiscussionNotReopened",
+      "your comment was posted, but the issue wasn't closed":
+        "commentPostedIssueNotClosed",
+      "your comment was posted, but the issue wasn't reopened":
+        "commentPostedIssueNotReopened",
+    };
+    const mappedOutcome = outcomeKey[outcome];
+    const updatedBranch = outcome.match(/^(.*) wasn't updated$/);
+    const targetNotClosed = outcome.match(
+      /^your comment was posted, but the (.*) wasn't closed$/,
+    );
+    const targetNotReopened = outcome.match(
+      /^your comment was posted, but the (.*) wasn't reopened$/,
+    );
+    const targetKey: Record<string, string> = {
+      "pull request": "pullRequest",
+      "merge request": "mergeRequest",
+      issue: "issue",
+    };
+    const localizedTarget = (match: RegExpMatchArray) => {
+      const key = targetKey[match[1]];
+      return key ? i18n.t(`repoSwitchGuard.targets.${key}`, { ns }) : match[1];
+    };
+    const localizedOutcome = mappedOutcome
+      ? i18n.t(`repoSwitchGuard.outcomes.${mappedOutcome}`, { ns })
+      : updatedBranch
+        ? i18n.t("repoSwitchGuard.outcomes.branchNotUpdated", {
+            ns,
+            branch: updatedBranch[1],
+          })
+        : targetNotClosed
+          ? i18n.t("repoSwitchGuard.outcomes.commentPostedTargetNotClosed", {
+              ns,
+              target: localizedTarget(targetNotClosed),
+            })
+          : targetNotReopened
+            ? i18n.t(
+                "repoSwitchGuard.outcomes.commentPostedTargetNotReopened",
+                {
+                  ns,
+                  target: localizedTarget(targetNotReopened),
+                },
+              )
+            : outcome;
+    const localizedAway = away
+      ? i18n.t("repoSwitchGuard.away", {
+          ns,
+          repo: repoNameFromPath(startedIn),
+        })
+      : "";
+    toast.info(
+      i18n.t("repoSwitchGuard.message", {
+        ns,
+        what,
+        when: localizedWhen,
+        outcome: localizedOutcome,
+        away: localizedAway,
+      }),
+    );
   }
   return !live;
 }

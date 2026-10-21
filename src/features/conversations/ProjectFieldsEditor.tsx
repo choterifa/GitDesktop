@@ -54,6 +54,7 @@ import type {
   RemoteLens,
 } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import {
   pendingWriteReason,
   SAVING_LAST_CHANGE_REASON,
@@ -65,11 +66,7 @@ import {
   projectScopeReadOnly,
   ScopeGapBlock,
 } from "./ProjectsPopover";
-import {
-  OFFLINE_ROWS_NOTICE,
-  offlinePendingMessage,
-  refreshFailed,
-} from "./remote-section-state";
+import { OFFLINE_ROWS_NOTICE, refreshFailed } from "./remote-section-state";
 
 const READ_ONLY_SCOPE_REASON =
   "Your GitHub sign-in can read project fields but not change them (needs the project scope)";
@@ -107,7 +104,6 @@ type MirroredDraft = { projectId: string; entry: FieldDraft; rev: number };
  *  with the later board silently winning ({@link applyFieldDraft}). */
 const NO_DRAFTS: EditorDrafts<FieldDraft> = { boards: {}, issueOwners: {} };
 
-const ISSUE_FIELDS_UNSENT = "Issue field changes weren't applied";
 /** An issue-field write rides a board membership, and none is left to carry it. */
 const ISSUE_FIELDS_NO_BOARD =
   "Issue field changes weren't applied — this item isn't on a board they can be saved through anymore";
@@ -288,6 +284,7 @@ export function ProjectFieldsEditor({
    *  answer the palette's "Edit project fields…". */
   paletteEnabled?: boolean;
 }) {
+  const tx = useCommonText();
   const host = useActiveGhHost();
   const scopes = useGhScopes(host);
   const openReconnect = useUiStore((s) => s.openReconnect);
@@ -482,13 +479,17 @@ export function ProjectFieldsEditor({
         !live.has(projectId) &&
         ownDraftsChanged(seeds[projectId] ?? {}, touched, routesFor(projectId)),
     );
-    if (stranded) toast.info(STRANDED_NOTICE);
-    if (lockedBoardFields) toast.info(LOCKED_BOARD_NOTICE);
-    if (unsentIssueFields)
+    if (stranded) toast.info(tx(STRANDED_NOTICE));
+    if (lockedBoardFields) toast.info(tx(LOCKED_BOARD_NOTICE));
+    if (unsentIssueFields) {
+      const reason = issueFieldHostReason(issueHost);
       toast.info(
-        `${ISSUE_FIELDS_UNSENT}: ${issueFieldHostReason(issueHost) ?? ""}`,
+        tx("Issue field changes weren't applied: {{reason}}", {
+          reason: reason ? tx(reason) : "",
+        }),
       );
-    if (unplacedIssueFields) toast.info(ISSUE_FIELDS_NO_BOARD);
+    }
+    if (unplacedIssueFields) toast.info(tx(ISSUE_FIELDS_NO_BOARD));
 
     // Sibling boards bridging the same org field keep their old value until the
     // settle's re-read: a board's values carry its own wrapper ids, so this
@@ -548,9 +549,9 @@ export function ProjectFieldsEditor({
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Edit project fields"
+            aria-label={tx("Edit project fields")}
             disabled={!!heldReason}
-            reason={heldReason}
+            reason={heldReason ? tx(heldReason) : undefined}
           />
         }
       >
@@ -561,7 +562,7 @@ export function ProjectFieldsEditor({
         ) : (
           <SlidersHorizontalIcon data-icon="inline-start" />
         )}
-        Project fields
+        {tx("Project fields")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner
@@ -576,7 +577,7 @@ export function ProjectFieldsEditor({
               render={<p />}
               className="px-1 pb-1.5 text-xs font-medium"
             >
-              Project fields
+              {tx("Project fields")}
             </Popover.Title>
             {readOnlyScope && (
               <div className="mb-1 border-b pb-1">
@@ -591,9 +592,10 @@ export function ProjectFieldsEditor({
                     })
                   }
                 >
-                  Changing project fields needs the{" "}
-                  <span className="font-mono">project</span> scope, which your
-                  GitHub sign-in is missing.
+                  {tx(
+                    "Changing project fields requires the {{scope}} scope, which your GitHub sign-in is missing.",
+                    { scope: "project" },
+                  )}
                 </ScopeGapBlock>
               </div>
             )}
@@ -618,7 +620,10 @@ export function ProjectFieldsEditor({
                   // scope gap outranks the per-board access one, and BoardSection
                   // puts the per-field reasons below both — org issue-field rows
                   // included, deliberately: the board is how the user got here.
-                  lockedReason={boardLockedReason(readOnlyScope, board)}
+                  lockedReason={(() => {
+                    const reason = boardLockedReason(readOnlyScope, board);
+                    return reason ? tx(reason) : undefined;
+                  })()}
                   issueHost={issueHost}
                   seed={seeds[board.project.id]}
                   draft={drafts.boards[board.project.id]}
@@ -631,7 +636,7 @@ export function ProjectFieldsEditor({
             </div>
             {boards.length > 0 && !readOnlyScope && (
               <p className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground">
-                Changes apply when this closes.
+                {tx("Changes apply when this closes.")}
               </p>
             )}
           </Popover.Popup>
@@ -668,6 +673,7 @@ function BoardSection({
   mirrored: Record<string, MirroredDraft>;
   onChange: (def: WritableFieldDef, entry: FieldDraft) => void;
 }) {
+  const tx = useCommonText();
   const defs = useProjectFields(repoPath, board.project.id, open);
   const writable = (defs.data?.fields ?? []).filter(isWritable);
   const baseline = seed ?? seedBoard(board);
@@ -695,13 +701,18 @@ function BoardSection({
       {defs.isPaused && (defs.isPending || defs.isError) ? (
         <p className="py-1 text-xs text-muted-foreground">
           {defs.data === undefined
-            ? offlinePendingMessage("this board's fields")
-            : OFFLINE_ROWS_NOTICE}
+            ? tx(
+                "You're offline — {{subject}} will load once you're back online.",
+                { subject: tx("this board's fields") },
+              )
+            : tx(OFFLINE_ROWS_NOTICE)}
         </p>
       ) : (
         (defs.isPending ||
           (defs.isError && defs.isFetching && defs.data === undefined)) && (
-          <p className="py-1 text-xs text-muted-foreground">Loading fields…</p>
+          <p className="py-1 text-xs text-muted-foreground">
+            {tx("Loading fields…")}
+          </p>
         )
       )}
       {refreshFailed(defs) && defs.error !== null && (
@@ -716,13 +727,13 @@ function BoardSection({
             className="mt-1.5"
             onClick={() => defs.refetch()}
           >
-            Retry
+            {tx("Retry")}
           </Button>
         </div>
       )}
       {defs.isSuccess && writable.length === 0 && (
         <p className="py-1 text-xs text-muted-foreground">
-          This board defines no fields you can change here.
+          {tx("This board defines no fields you can change here.")}
         </p>
       )}
       {writable.map((def) => {
@@ -766,7 +777,7 @@ function BoardSection({
           line above would be a lie. */}
       {defs.data?.truncated === true && (
         <p className="text-[11px] text-muted-foreground">
-          Some fields aren't shown.
+          {tx("Some fields aren't shown.")}
         </p>
       )}
     </div>
@@ -805,6 +816,7 @@ function FieldRow({
   lockedReason?: string;
   onChange: (entry: FieldDraft) => void;
 }) {
+  const tx = useCommonText();
   const inputId = useId();
   // Remounts the scalar input, which is uncontrolled so that a partly-typed entry
   // the browser reports as empty stays legible while it can't be parsed. Bumped
@@ -818,14 +830,14 @@ function FieldRow({
     setShownMirror(mirrorKey);
   const action =
     current === null ? (
-      <span className="text-[11px] text-muted-foreground">Not set</span>
+      <span className="text-[11px] text-muted-foreground">{tx("Not set")}</span>
     ) : (
       <DisabledReasonButton
         type="button"
         variant="ghost"
         size="xs"
         className="text-muted-foreground"
-        aria-label={`Clear ${def.name}`}
+        aria-label={tx("Clear {{name}}", { name: def.name })}
         disabled={!!lockedReason}
         reason={lockedReason}
         onClick={() => {
@@ -833,7 +845,7 @@ function FieldRow({
           onChange(null);
         }}
       >
-        Clear
+        {tx("Clear")}
       </DisabledReasonButton>
     );
 

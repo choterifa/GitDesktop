@@ -1,0 +1,115 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "saveChanges": "Save changes",
+    "discard": "Discard",
+    "general": "AI code review",
+    "security": "AI security audit"
+  },
+  "states": {
+    "saving": "Saving…",
+    "noChanges": "No changes to save",
+    "unsavedChanges": "You have unsaved changes"
+  },
+  "lifecycles": {
+    "commit": "On commit",
+    "pr-open": "On pull request opened",
+    "pr-sync": "On new commits to a reviewed PR"
+  },
+  "lifecycleHelp": {
+    "commit": "Runs after you commit on a branch that meets the conditions.",
+    "prOpen": "Runs once when a pull request is opened.",
+    "prSync": "Re-reviews a pull request when new commits arrive — only PRs already reviewed in that mode."
+  },
+  "repo": {
+    "title": "Repository automations",
+    "description": "What runs automatically in this repository. Cells start from the global defaults in Settings → Automations; change one here to override it for this repository only.",
+    "saved": "Repository automations saved",
+    "noOverrides": "No overrides to reset",
+    "resetTitle": "Remove all overrides and inherit the global defaults",
+    "reset": "Reset to global defaults",
+    "loadFailed": "Couldn't load repository automations",
+    "loading": "Loading repository automations…",
+    "overridden": "Overridden"
+  },
+  "conditions": {
+    "removePattern": "Remove pattern",
+    "addPattern": "Add pattern",
+    "title": "Conditions",
+    "onlyBranches": "Only these branches (optional)",
+    "exceptBranches": "Except these branches",
+    "matchAgainst": "Match against",
+    "tryBranch": "Try a branch",
+    "runs": "runs",
+    "skippedExcludedBy": "skipped — excluded by",
+    "skippedNoInclude": "skipped — no include matches",
+    "matchSource": "Source branch",
+    "matchTarget": "Target branch",
+    "matchEither": "Either branch",
+    "summaryOnly": "only {{patterns}}",
+    "summaryExcept": "except {{patterns}}"
+  },
+  "section": {
+    "title": "Automations",
+    "description": "Run an AI action automatically when something happens. These defaults apply to every repository; a repository can override them from its ⋯ menu. Reviews use the review model configured in the AI section — PR results are posted as a comment, commit results open from their notification row, and from Automation history whatever your Notify on choice for Automation results is (Settings → Notifications).",
+    "reviewDrafts": "Review draft PRs when created",
+    "draftReviewsOff": "Off: automated review runs when a draft is marked ready for review."
+  },
+  "result": {
+    "securityTitle": "AI security audit",
+    "reviewTitle": "AI review",
+    "timedOutPartial": "Timed out — partial output",
+    "stoppedEarly": "Stopped early"
+  },
+  "history": {
+    "title": "Automation history",
+    "description": "What this repository's automations ran, what they skipped, and why.",
+    "reasons": {
+      "postedComment": "Posted as a comment",
+      "reviewSaved": "Review saved",
+      "delivered": "Delivered",
+      "running": "Running — watch it in Activity",
+      "unsettledCommit": "Didn't settle — it may still be running, or the app closed mid-run",
+      "unsettledOther": "Didn't settle — the app closed mid-run, or another instance owns it",
+      "skipped": "Skipped — {{reason}}",
+      "branchSkip": "branch conditions didn't match",
+      "needsFirstReview": "waiting for a first review in this mode",
+      "headCovered": "this head was already reviewed",
+      "headDismissed": "this head was dismissed",
+      "alreadyReviewed": "already reviewed",
+      "draftSkipped": "draft (draft reviews are off)",
+      "tooOld": "opened more than 14 days ago",
+      "emptyDiff": "no changes to review",
+      "cancelled": "Cancelled",
+      "claimHeld": "Handed off — another review run owns this head",
+      "eligibilityErrorDetail": "Couldn't read review history — {{detail}}",
+      "eligibilityError": "Couldn't read review history — treated as already reviewed",
+      "failedDetail": "Failed — {{detail}}",
+      "failed": "Failed",
+      "timedOut": "Timed out — partial output kept",
+      "paused": "AI features hidden — automations paused",
+      "resumed": "AI features shown — automations resumed",
+      "unknown": "Unknown"
+    },
+    "count": {
+      "seen": "{{text}} (seen {{count}}×)",
+      "skippedCommits": "Skipped {{count}} commits — {{reason}}",
+      "commits": "{{text}} ({{count}} commits)"
+    },
+    "markerResumed": "Automations resumed",
+    "markerPaused": "Automations paused",
+    "viewResultLabel": "View result — {{action}}{{title}}",
+    "coldStartBanner": "Automations are off in cold-start test mode.",
+    "pausedBanner": "Automations are paused while AI features are hidden.",
+    "off": "off",
+    "noAutomationEnabled": "No automation is enabled for this repository",
+    "newestDecisionRecorded": " — the most recent decision here was recorded ",
+    "emptyRecorded": "No decisions recorded yet.",
+    "emptyNotSetUp": "No automations are set up for this repository.",
+    "emptyDescription": "Decisions appear here as commits land and pull requests are checked.",
+    "setUp": "Set up automations",
+    "recordedDecisions": "Recorded automation decisions",
+    "viewResult": "View result",
+    "wontRetry": "Won't retry for this head until you push or relaunch."
+  }
+}

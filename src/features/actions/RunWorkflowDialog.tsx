@@ -1,5 +1,6 @@
 import { PlusIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { SelectClipText } from "@/components/select-clip-text";
@@ -24,7 +25,6 @@ import {
 import { useRetryFocusRescue } from "@/features/conversations/ConversationListPanel";
 import {
   DEGRADED_ACTION_CLASS,
-  offlinePendingMessage,
   refreshFailed,
 } from "@/features/conversations/remote-section-state";
 import { clipTitleFromText } from "@/lib/clip-title";
@@ -35,12 +35,7 @@ import {
   useWorkflowDispatchable,
   useWorkflows,
 } from "@/lib/github/actions";
-import {
-  ACT_PENDING_REASON,
-  pendingWriteReason,
-  refuseWhileOffline,
-  useOfflineHold,
-} from "@/lib/offline-writes";
+import { refuseWhileOffline, useOfflineHold } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
@@ -70,6 +65,7 @@ export function RunWorkflowDialog({
    *  keeps its previous selection. */
   initialWorkflow?: string;
 }) {
+  const { t } = useTranslation("actions");
   // Per-mount base for the field ids (label↔control association).
   const idBase = useId();
   // GitLab and Bitbucket have no per-workflow dispatch — one pipeline config per
@@ -109,10 +105,10 @@ export function RunWorkflowDialog({
   const workflowItems = Object.fromEntries(
     dispatchable.map((w) => [String(w.id), w.name]),
   );
-  // value → label map so the closed trigger shows "Default" for "", not a blank.
+  // value → label map so the closed trigger shows the translated default for "", not a blank.
   // The popup renders from it too, so the two can never drift.
   const pipelineItems: Record<string, string> = {
-    "": "Default",
+    "": t("form.defaultPipeline"),
     ...Object.fromEntries(pipelineNames.map((n) => [n, n])),
   };
 
@@ -265,16 +261,19 @@ export function RunWorkflowDialog({
           return workflow;
       }
     })();
-    if (refuseWhileOffline()) return;
+    if (refuseWhileOffline(t("states.offlineUnavailable"))) return;
     try {
       await runWorkflow.mutateAsync({
         workflow: workflowArg,
         gitRef: gitRef.trim(),
         inputs: record,
       });
-      toast.success(isPipelines ? "Pipeline started" : "Workflow dispatched", {
-        description: "It may take a few seconds to appear in the runs list.",
-      });
+      toast.success(
+        t(isPipelines ? "toasts.pipelineStarted" : "toasts.workflowDispatched"),
+        {
+          description: t("toasts.appearInRunsSoon"),
+        },
+      );
       // The toast reports the dispatch wherever the user went; the navigation only
       // applies to the dialog they are still in, so it is gated on the session that
       // started it — a close, a reopen, or a tab switch mid-dispatch would
@@ -318,27 +317,31 @@ export function RunWorkflowDialog({
   // run whenever the connection returns, long after the user left the dialog.
   // Every hold carries a reason, ranked running-first, so a flip between them
   // never drops focus to a native disable.
-  const offlineHold = useOfflineHold();
+  const offlineHold = useOfflineHold()
+    ? t("states.offlineUnavailable")
+    : undefined;
   const runHeldReason = (() => {
     switch (true) {
       case runWorkflow.isPending:
-        return pendingWriteReason(runWorkflow.isPaused, ACT_PENDING_REASON);
+        return runWorkflow.isPaused
+          ? t("states.offlineQueued")
+          : t("states.startingRun");
       case offlineHold !== undefined:
         return offlineHold;
       // Only a read that succeeded may say there is nothing to run; a failed one
       // says so, matching the field's own notice.
       case !isPipelines && !workflow && workflowsLoading:
-        return "Loading workflows…";
+        return t("form.loadingWorkflows");
       case !isPipelines && !workflow && workflowsFailed:
-        return "Couldn't load workflows";
+        return t("form.couldNotLoadWorkflows");
       case !isPipelines && !workflow && noneDispatchable:
-        return "No active workflows to run here";
+        return t("form.noActiveWorkflows");
       case !isPipelines && !workflow:
-        return "Choose a workflow";
+        return t("form.chooseWorkflow");
       case selectedNoTrigger:
-        return "This workflow has no manual trigger on this branch or tag";
+        return t("form.noManualTriggerShort");
       case !gitRef.trim():
-        return "Enter a branch or tag";
+        return t("form.enterBranchOrTag");
       default:
         return undefined;
     }
@@ -349,16 +352,16 @@ export function RunWorkflowDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isPipelines ? "Run pipeline" : "Run workflow"}
+            {t(isPipelines ? "form.runPipeline" : "form.runWorkflow")}
           </DialogTitle>
           <DialogDescription>
             {isPipelines ? (
-              "Run a new pipeline on a branch or tag."
+              t("form.runPipelineDescription")
             ) : (
               <>
-                Manually trigger a workflow that has a{" "}
-                <code className="font-mono">workflow_dispatch</code> trigger, on
-                a branch or tag.
+                {t("form.manuallyTriggerWorkflow")}{" "}
+                <code className="font-mono">workflow_dispatch</code>{" "}
+                {t("form.workflowTriggerSuffix")} {t("form.onBranchOrTag")}
               </>
             )}
           </DialogDescription>
@@ -371,7 +374,7 @@ export function RunWorkflowDialog({
               tabIndex={-1}
               className="space-y-2 outline-none"
             >
-              <Label htmlFor={`${idBase}-workflow`}>Workflow</Label>
+              <Label htmlFor={`${idBase}-workflow`}>{t("form.workflow")}</Label>
               <Select
                 items={workflowItems}
                 value={workflow}
@@ -395,7 +398,9 @@ export function RunWorkflowDialog({
                 >
                   <SelectValue
                     placeholder={
-                      workflowsLoading ? "Loading…" : "Select a workflow"
+                      workflowsLoading
+                        ? t("states.loading")
+                        : t("form.selectWorkflow")
                     }
                     onMouseEnter={clipTitleFromText}
                   />
@@ -414,7 +419,9 @@ export function RunWorkflowDialog({
                             edge. The `items` map keeps the plain name, which a
                             disabled row can never reach anyway. */}
                         <SelectClipText>
-                          {refused ? `${w.name} (no manual trigger)` : w.name}
+                          {refused
+                            ? `${w.name} (${t("form.noManualTrigger")})`
+                            : w.name}
                         </SelectClipText>
                       </SelectItem>
                     );
@@ -426,7 +433,7 @@ export function RunWorkflowDialog({
                   id={workflowHintId}
                   className="text-xs text-muted-foreground"
                 >
-                  {offlinePendingMessage("workflows")}
+                  {t("form.offlineWorkflowsPending")}
                 </p>
               )}
               {workflowsFailed && (
@@ -434,31 +441,31 @@ export function RunWorkflowDialog({
                   id={workflowHintId}
                   className="text-xs text-muted-foreground"
                 >
-                  Couldn't load workflows.{" "}
+                  {t("form.couldNotLoadWorkflows")}{" "}
                   <button
                     ref={workflowsRescue.retryRef}
                     type="button"
-                    aria-label="Retry loading workflows"
+                    aria-label={t("states.retryLoadingWorkflows")}
                     onClick={() => void workflows.refetch()}
                     className={DEGRADED_ACTION_CLASS}
                   >
-                    Retry
+                    {t("states.retry")}
                   </button>
                 </p>
               )}
               {noneDispatchable && (
                 <p className="text-xs text-muted-foreground">
-                  No active workflows found. A workflow needs a{" "}
-                  <code className="font-mono">workflow_dispatch</code> trigger
-                  to be run manually.
+                  {t("form.noActiveWorkflowsDescription")}{" "}
+                  <code className="font-mono">workflow_dispatch</code>{" "}
+                  {t("form.noActiveTriggerSuffix")}
                 </p>
               )}
               {/* At most one hint shows; an empty picker outranks a refused pick. */}
               {selectedNoTrigger && !noneDispatchable && (
                 <p className="text-xs text-muted-foreground">
-                  This workflow can't be run manually: it has no{" "}
-                  <code className="font-mono">workflow_dispatch</code> trigger
-                  on the chosen branch or tag.
+                  {t("form.noManualTriggerDescription")}{" "}
+                  <code className="font-mono">workflow_dispatch</code>{" "}
+                  {t("form.onChosenBranchOrTag")}
                 </p>
               )}
             </div>
@@ -466,7 +473,9 @@ export function RunWorkflowDialog({
 
           {hasCustomPipelines && (
             <div className="space-y-2">
-              <Label htmlFor={`${idBase}-pipeline`}>Pipeline</Label>
+              <Label htmlFor={`${idBase}-pipeline`}>
+                {t("nouns.pipeline")}
+              </Label>
               <Select
                 items={pipelineItems}
                 value={pipeline}
@@ -487,7 +496,7 @@ export function RunWorkflowDialog({
           )}
 
           <div className="space-y-2">
-            <Label htmlFor={`${idBase}-ref`}>Branch or tag</Label>
+            <Label htmlFor={`${idBase}-ref`}>{t("form.branchOrTag")}</Label>
             <Input
               id={`${idBase}-ref`}
               value={gitRef}
@@ -504,9 +513,9 @@ export function RunWorkflowDialog({
           >
             <div className="flex items-center justify-between">
               <Label id={`${idBase}-inputs-label`}>
-                {isPipelines ? "Variables" : "Inputs"}{" "}
+                {t(isPipelines ? "form.variables" : "form.inputs")}{" "}
                 <span className="font-normal text-muted-foreground">
-                  (optional)
+                  ({t("form.optional")})
                 </span>
               </Label>
               <Button
@@ -521,14 +530,14 @@ export function RunWorkflowDialog({
                 }
               >
                 <PlusIcon data-icon="inline-start" />
-                {isPipelines ? "Add variable" : "Add input"}
+                {t(isPipelines ? "form.addVariable" : "form.addInput")}
               </Button>
             </div>
             {inputs.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 {isPipelines
-                  ? "Add CI/CD variables to pass to the pipeline."
-                  : "Add key/value pairs if the workflow defines inputs."}
+                  ? t("form.addVariablesHint")
+                  : t("form.addInputsHint")}
               </p>
             ) : (
               <div className="space-y-2">
@@ -543,7 +552,7 @@ export function RunWorkflowDialog({
                           ),
                         )
                       }
-                      placeholder="name"
+                      placeholder={t("form.namePlaceholder")}
                       className="h-8 flex-1"
                       autoComplete="off"
                     />
@@ -558,7 +567,7 @@ export function RunWorkflowDialog({
                           ),
                         )
                       }
-                      placeholder="value"
+                      placeholder={t("form.valuePlaceholder")}
                       className="h-8 flex-1"
                       autoComplete="off"
                     />
@@ -566,9 +575,11 @@ export function RunWorkflowDialog({
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      aria-label={
-                        isPipelines ? "Remove variable" : "Remove input"
-                      }
+                      aria-label={t(
+                        isPipelines
+                          ? "form.removeVariable"
+                          : "form.removeInput",
+                      )}
                       onClick={() =>
                         setInputs((prev) => prev.filter((r) => r.id !== row.id))
                       }
@@ -584,14 +595,14 @@ export function RunWorkflowDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("states.cancel")}
           </Button>
           <DisabledReasonButton
             disabled={runHeldReason !== undefined}
             reason={runHeldReason}
             onClick={submit}
           >
-            {isPipelines ? "Run pipeline" : "Run workflow"}
+            {t(isPipelines ? "form.runPipeline" : "form.runWorkflow")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

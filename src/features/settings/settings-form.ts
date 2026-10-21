@@ -9,6 +9,7 @@ import { type AppSettings, DEFAULT_SETTINGS } from "@/lib/settings/api";
 export type SettingsDraft = Omit<
   AppSettings,
   | "recentRepos"
+  | "language"
   | "diffViewMode"
   | "changesViewMode"
   | "defaultBranch"
@@ -24,6 +25,7 @@ export function toDraft(settings: AppSettings): SettingsDraft {
   // their own controls.
   const {
     recentRepos,
+    language,
     diffViewMode,
     changesViewMode,
     defaultBranch,
@@ -32,6 +34,7 @@ export function toDraft(settings: AppSettings): SettingsDraft {
     sidebarCollapsed,
     ...draft
   } = settings;
+  void language;
   return draft;
 }
 

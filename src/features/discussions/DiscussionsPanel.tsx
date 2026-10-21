@@ -51,6 +51,7 @@ import { useUiStore } from "@/lib/stores/ui";
 import { parseableDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { CreateDiscussionDialog } from "./CreateDiscussionDialog";
+import { useDiscussionsText } from "./use-discussions-text";
 
 /** Loading rows for the list, shared by the probe and list arms. */
 const DISCUSSION_SKELETON_ROWS = 3;
@@ -65,6 +66,7 @@ type ProbeArm =
   | "disabled";
 
 export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
+  const tx = useDiscussionsText();
   const gh = useForgeStatus(repoPath);
   const ghReady = forgeReady(gh.data);
   // Discussions are a GitHub-only capability (GitLab has none) — gate the query on
@@ -88,25 +90,25 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
   const discussionsDisabledReason = (signedOutReason: string) => {
     switch (true) {
       case gh.isPending:
-        return "Loading discussions…";
+        return tx("Loading discussions…");
       // A status probe that couldn't reach the host knows nothing about the
       // sign-in, so it must not read as a sign-in instruction.
       case gh.isError && gh.data === undefined:
-        return "Couldn't reach this repository's host";
+        return tx("Couldn't reach this repository's host");
       case !ghReady:
         return signedOutReason;
       case !supportsDiscussions:
-        return "Discussions aren't available on this repository's host";
+        return tx("Discussions aren't available on this repository's host");
       // A park outranks the failure it follows; a failure being refetched
       // still loads.
       case meta.isPaused && (meta.isPending || meta.isError):
-        return offlinePendingMessage("discussions");
+        return tx(offlinePendingMessage("discussions"));
       case meta.isPending || (meta.isError && meta.isFetching):
-        return "Loading discussions…";
+        return tx("Loading discussions…");
       case meta.isError:
-        return "Couldn't load discussions for this repository";
+        return tx("Couldn't load discussions for this repository");
       default:
-        return "Discussions aren't enabled for this repository";
+        return tx("Discussions aren't enabled for this repository");
     }
   };
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -171,7 +173,7 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
 
   const categoryLabel = activeCat
     ? `${activeCat.emoji ? `${activeCat.emoji} ` : ""}${activeCat.name}`
-    : "All categories";
+    : tx("All categories");
 
   const navTargets = visible.map((d) => ({ number: d.number }));
   const onListKeyDown = listKeyboardNav({
@@ -209,13 +211,13 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
   };
   const offlineState = (
     <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-      {offlinePendingMessage("discussions")}
+      {tx(offlinePendingMessage("discussions"))}
     </p>
   );
   const emptyCopy = (() => {
-    if (discussions.length > 0) return "No discussions match the filter.";
-    if (activeCat) return "No discussions in this category yet.";
-    return "No discussions yet.";
+    if (discussions.length > 0) return tx("No discussions match the filter.");
+    if (activeCat) return tx("No discussions in this category yet.");
+    return tx("No discussions yet.");
   })();
 
   const discussionRow = (d: (typeof visible)[number]) => {
@@ -249,7 +251,9 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
             <span className="truncate" title={d.title}>
               {d.title}
             </span>
-            {d.isAnswered && <Badge variant="secondary">answered</Badge>}
+            {d.isAnswered && (
+              <Badge variant="secondary">{tx("answered")}</Badge>
+            )}
           </p>
           {d.labels.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
@@ -259,10 +263,13 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
             </div>
           )}
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            #{d.number} · {d.author || "unknown"} · {d.categoryName}
+            #{d.number} · {d.author || tx("unknown")} · {d.categoryName}
           </p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {d.commentCount} {d.commentCount === 1 ? "comment" : "comments"}
+            {tx(
+              d.commentCount === 1 ? "{{count}} comment" : "{{count}} comments",
+              { count: d.commentCount },
+            )}
             {parseableDate(d.createdAt) && (
               <>
                 {" · "}
@@ -274,7 +281,12 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
                 {" · "}
                 <span aria-hidden>▲ {d.upvoteCount}</span>
                 <span className="sr-only">
-                  {d.upvoteCount} {d.upvoteCount === 1 ? "upvote" : "upvotes"}
+                  {tx(
+                    d.upvoteCount === 1
+                      ? "{{count}} upvote"
+                      : "{{count}} upvotes",
+                    { count: d.upvoteCount },
+                  )}
                 </span>
               </>
             )}
@@ -345,7 +357,7 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
         className="cursor-pointer"
         onClick={retry}
       >
-        Retry
+        {tx("Retry")}
       </Button>
     </div>
   );
@@ -364,17 +376,17 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
       case "unsupported":
         return (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            Discussions aren't available on this repository's host.
+            {tx("Discussions aren't available on this repository's host.")}
           </p>
         );
       case "offline":
         return offlineState;
       case "error":
-        return errorState("Couldn't load discussions for this repository.");
+        return errorState(tx("Couldn't load discussions for this repository."));
       case "disabled":
         return (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            Discussions aren't enabled for this repository.
+            {tx("Discussions aren't enabled for this repository")}
           </p>
         );
       case null:
@@ -387,7 +399,7 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
       case "offline":
         return offlineState;
       case "error":
-        return errorState("Couldn't load discussions.");
+        return errorState(tx("Couldn't load discussions."));
       case "empty":
         return (
           <p className="px-3 py-4 text-xs text-muted-foreground">{emptyCopy}</p>
@@ -439,7 +451,7 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
                   listEnabled
                     ? undefined
                     : discussionsDisabledReason(
-                        "Sign in to GitHub to browse discussions",
+                        tx("Sign in to GitHub to browse discussions"),
                       )
                 }
               />
@@ -455,7 +467,7 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
                 categoryId === null && "bg-accent text-accent-foreground",
               )}
             >
-              All categories
+              {tx("All categories")}
             </DropdownMenuItem>
             {categories.map((c) => (
               <DropdownMenuItem
@@ -480,14 +492,14 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
             listEnabled
               ? undefined
               : discussionsDisabledReason(
-                  "Sign in to GitHub to start a discussion",
+                  tx("Sign in to GitHub to start a discussion"),
                 )
           }
-          title="New discussion"
+          title={tx("New discussion")}
           onClick={() => setCreateOpen(true)}
         >
           <PlusIcon data-icon="inline-start" />
-          New
+          {tx("New")}
         </DisabledReasonButton>
       </div>
       <div className="space-y-2 border-b p-2">
@@ -495,14 +507,14 @@ export function DiscussionsPanel({ repoPath }: { repoPath: string }) {
           ref={filterRef}
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          placeholder="Search by title, #, author, or category"
+          placeholder={tx("Search by title, #, author, or category")}
           className="h-7"
           autoComplete="off"
         />
         {listEnabled && (
           <ScopeRefreshHint
             scope="write:discussion"
-            action="Writing in discussions"
+            action={tx("Writing in discussions")}
             coveredBy={["repo"]}
           />
         )}

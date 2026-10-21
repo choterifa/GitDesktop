@@ -1,0 +1,76 @@
+{
+  "back": "Back",
+  "title": "Explore repositories",
+  "searchPlaceholder": "Search repositories",
+  "searchLabel": "Search repositories",
+  "searchResults": "Search results",
+  "loading": "Loading…",
+  "loadMore": "Load more",
+  "bitbucketSearchHint": "Search covers your Bitbucket workspaces.",
+  "searchCap": "GitHub returns at most 1,000 search results — refine your search.",
+  "sort": {
+    "label": "Sort results",
+    "best": "Best match",
+    "stars": "Most stars",
+    "updated": "Recently updated"
+  },
+  "tabs": {
+    "yours": "Your repositories",
+    "popular": "Popular"
+  },
+  "empty": {
+    "yours": "No repositories yet.",
+    "search": "No repositories match."
+  },
+  "errors": {
+    "bitbucketTitle": "Connect your Bitbucket account",
+    "bitbucketBody": "Add an Atlassian API token in Settings → Accounts to search your Bitbucket workspaces.",
+    "openAccounts": "Open Settings → Accounts",
+    "cliMissingTitle": "{{cli}} not found",
+    "cliMissingBody": "Install {{cli}} and run {{authCmd}} to search repositories.",
+    "loadTitle": "Couldn't load repositories"
+  },
+  "detail": {
+    "selectRepository": "Select a repository",
+    "selectRepositoryDescription": "Pick a repository from the list to preview its README and clone, fork, or star it.",
+    "updated": "updated",
+    "viewOn": "View on {{provider}}",
+    "noReadme": "No README."
+  },
+  "repository": {
+    "private": "Private",
+    "fork": "Fork",
+    "privateFork": "Private fork",
+    "privateRepository": "Private repository",
+    "archived": "Archived"
+  },
+  "fork": {
+    "action": "Fork",
+    "pending": "Forking…",
+    "confirmTitle": "Fork {{name}}?",
+    "confirmBody": "Creates a fork on {{provider}} in the background. You can clone it once it's ready.",
+    "success": "Forked to {{name}}",
+    "notReady": "It may take a moment before the fork can be cloned.",
+    "clone": "Clone the fork"
+  },
+  "stars": {
+    "one": "{{count}} star",
+    "many": "{{count}} stars",
+    "checking": "Checking star state…",
+    "remove": "Unstar",
+    "add": "Star"
+  },
+  "clone": {
+    "submit": "Clone",
+    "title": "Clone {{name}}",
+    "description": "Choose a folder to clone into. Clones over HTTPS or SSH using your system git credentials.",
+    "localPath": "Local path",
+    "choosePathReason": "Choose a local path to clone into",
+    "pathPlaceholder": "Choose a folder to clone into…",
+    "choose": "Choose…",
+    "destinationLabel": "Clones into",
+    "submodules": "Clone submodules",
+    "submodulesDescription": "Initializes every submodule, including nested ones, after cloning."
+  },
+  "cancel": "Cancel"
+}

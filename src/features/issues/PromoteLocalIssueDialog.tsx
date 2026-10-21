@@ -2,6 +2,7 @@ import { KanbanIcon } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
@@ -44,9 +45,6 @@ import { cn } from "@/lib/utils";
 
 type Destination = "forge" | "jira";
 
-/** The Jira toasts' View, success and partial failure alike. */
-const JIRA_VIEW_LABEL = "View in Jira";
-
 /**
  * Publishes a local issue to a real tracker — the repo's forge (GitHub or
  * GitLab) or the linked Jira project. It closes the local issue FIRST, then
@@ -69,6 +67,7 @@ export function PromoteLocalIssueDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("issues");
   // Promotion always targets the fork's own remote (origin) — never the parent.
   const createIssue = useCreateIssue(repoPath, "origin");
   const update = useUpdateLocalIssue(repoPath);
@@ -80,7 +79,10 @@ export function PromoteLocalIssueDialog({
   const canPublishForge = forgeFeatureReady(forge.data, "issueCreate");
   // Both forge toasts' View, named only once the forge status has answered:
   // `remoteLabel` defaults to GitHub, and submit isn't gated on the status.
-  const forgeViewLabel = forge.data ? `View on ${remoteLabel}` : undefined;
+  const forgeViewLabel = forge.data
+    ? t("remoteParts.viewOn", { provider: remoteLabel })
+    : undefined;
+  const jiraViewLabel = t("panel.viewInJira");
 
   const link = useJiraLink(repoPath).data;
   const jiraPerms = useJiraPermissions(repoPath, link);
@@ -164,7 +166,9 @@ export function PromoteLocalIssueDialog({
       ? undefined
       : pendingWriteReason(
           createPaused[ownPendingTo],
-          `Creating the ${destinationLabel[ownPendingTo]} issue…`,
+          t("promote.creatingIssue", {
+            destination: destinationLabel[ownPendingTo],
+          }),
         );
 
   const carried = issue.comments.filter((c) => c.body.trim());
@@ -217,7 +221,7 @@ export function PromoteLocalIssueDialog({
     // carry-over) failing must NOT re-arm the submit — retrying would open a
     // duplicate. Track it so the catch can disclose instead of re-running.
     let created: { number: number; url: string } | null = null;
-    let failedStep = "linking the local issue";
+    let failedStep = t("promote.linkingLocalIssue");
     try {
       // Closed before the create: the local close lands even offline, so a
       // connection lost mid-flow can't leave this issue open beside its successor.
@@ -236,7 +240,7 @@ export function PromoteLocalIssueDialog({
       created = { number, url };
       // The back-link before the carry, so a carry failure still leaves it.
       await linkLocal(`Promoted to ${remoteLabel} issue [#${number}](${url}).`);
-      failedStep = "carrying over comments";
+      failedStep = t("promote.carryingComments");
       for (const c of carried) {
         await forgeIssueComment(repoPath, number, c.body, "origin");
       }
@@ -245,10 +249,10 @@ export function PromoteLocalIssueDialog({
       // while this repo and this local issue still are — landed elsewhere it
       // would close a dialog the user reopened there and pull them back.
       const { live, away } = landedIn(repoPath);
-      toast.success(`Opened issue #${number}${away}`, {
+      toast.success(t("promote.openedIssue", { number, away }), {
         description: url,
         action: {
-          label: forgeViewLabel ?? "View",
+          label: forgeViewLabel ?? t("promote.view"),
           onClick: () => openUrl(url),
         },
       });
@@ -278,7 +282,12 @@ export function PromoteLocalIssueDialog({
       const { live, away } = landedIn(repoPath);
       if (stillOnThisIssue(live)) flushSync(() => onOpenChange(false));
       toastComposedError({
-        title: `Created issue #${number}${away}, but ${failedStep} failed: ${presentError(e).summary}`,
+        title: t("promote.forgePartialFailure", {
+          number,
+          away,
+          step: failedStep,
+          error: presentError(e).summary,
+        }),
         errors: [e],
         view: { url, label: forgeViewLabel },
         duration: 10000,
@@ -294,7 +303,7 @@ export function PromoteLocalIssueDialog({
     const prior = { status: issue.status, closedAt: issue.closedAt };
     let closedAt: string | null = null;
     let created: { key: string; url: string } | null = null;
-    let failedStep = "linking the local issue";
+    let failedStep = t("promote.linkingLocalIssue");
     try {
       // Closed first, as on the forge path.
       const stamp = new Date().toISOString();
@@ -307,7 +316,7 @@ export function PromoteLocalIssueDialog({
       });
       created = { key, url };
       await linkLocal(`Promoted to Jira issue [${key}](${url}).`);
-      failedStep = "carrying over comments";
+      failedStep = t("promote.carryingComments");
       for (const c of carried) {
         await jiraIssueComment(link.siteHost, key, c.body);
       }
@@ -317,9 +326,9 @@ export function PromoteLocalIssueDialog({
       // continuation outlives the detach a switch causes, so it has to answer
       // for where it ended up.
       const { live, away } = landedIn(repoPath);
-      toast.success(`Created ${key}${away}`, {
+      toast.success(t("promote.createdJira", { key, away }), {
         description: url,
-        action: { label: JIRA_VIEW_LABEL, onClick: () => openUrl(url) },
+        action: { label: jiraViewLabel, onClick: () => openUrl(url) },
       });
       if (stillOnThisIssue(live)) {
         flushSync(() => onOpenChange(false));
@@ -335,9 +344,14 @@ export function PromoteLocalIssueDialog({
       const { live, away } = landedIn(repoPath);
       if (stillOnThisIssue(live)) flushSync(() => onOpenChange(false));
       toastComposedError({
-        title: `Created ${key}${away}, but ${failedStep} failed: ${presentError(e).summary}`,
+        title: t("promote.jiraPartialFailure", {
+          key,
+          away,
+          step: failedStep,
+          error: presentError(e).summary,
+        }),
         errors: [e],
-        view: { url, label: JIRA_VIEW_LABEL },
+        view: { url, label: jiraViewLabel },
         duration: 10000,
       });
     }
@@ -393,11 +407,16 @@ export function PromoteLocalIssueDialog({
         });
       } catch (reopenError) {
         toastComposedError({
-          title: `Couldn't create the ${noun}: ${presentError(e).summary}`,
-          description:
-            "The local issue couldn't be reopened — reopen it from its view.",
+          title: t("promote.createFailed", {
+            noun,
+            error: presentError(e).summary,
+          }),
+          description: t("promote.reopenFailed"),
           errors: [e, reopenError],
-          headings: [`Creating the ${noun}`, "Reopening the local issue"],
+          headings: [
+            t("promote.creatingNoun", { noun }),
+            t("promote.reopeningLocalIssue"),
+          ],
         });
         return;
       }
@@ -432,7 +451,7 @@ export function PromoteLocalIssueDialog({
       case !!offlineHold:
         return offlineHold;
       case shownOtherPublishing:
-        return "Another local issue is still being published.";
+        return t("promote.anotherPublishing");
       default:
         return undefined;
     }
@@ -442,23 +461,23 @@ export function PromoteLocalIssueDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Publish this issue to {targetLabel}?</DialogTitle>
+          <DialogTitle>
+            {t("promote.title", { destination: targetLabel })}
+          </DialogTitle>
           <DialogDescription>
-            Opens a new issue on {targetLabel} with this title and description
             {shownCarriedCount > 0
-              ? ` and re-posts its ${shownCarriedCount} comment${
-                  shownCarriedCount === 1 ? "" : "s"
-                }`
-              : ""}
-            . The local issue is closed first, then linked to its replacement
-            once it's created. Free-form local labels aren't carried over.
+              ? t("promote.descriptionWithComments", {
+                  destination: targetLabel,
+                  count: shownCarriedCount,
+                })
+              : t("promote.description", { destination: targetLabel })}
           </DialogDescription>
         </DialogHeader>
 
         {bothAvailable && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">
-              Publish to
+              {t("promote.publishToLabel")}
             </p>
             {/* Segmented toggle: two Tab-focusable buttons with aria-pressed,
                 matching the app's existing segmented-tab idiom (each is its own
@@ -466,7 +485,7 @@ export function PromoteLocalIssueDialog({
             <div
               className="flex gap-2"
               role="group"
-              aria-label="Publish destination"
+              aria-label={t("promote.destination")}
             >
               <DisabledReasonButton
                 variant={shownTarget === "forge" ? "secondary" : "outline"}
@@ -501,7 +520,7 @@ export function PromoteLocalIssueDialog({
                 reason={shownPendingReason}
               >
                 <KanbanIcon data-icon="inline-start" />
-                Jira
+                {t("promote.jira")}
               </DisabledReasonButton>
             </div>
           </div>
@@ -510,26 +529,25 @@ export function PromoteLocalIssueDialog({
         {jiraLoadingTypes && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner data-icon="inline-start" />
-            Loading issue types…
+            {t("promote.loadingTypes")}
           </p>
         )}
         {jiraTypesError && (
           <div className="flex items-center gap-2 border px-3 py-2 text-xs text-muted-foreground">
-            <span className="flex-1">Couldn't load Jira issue types.</span>
+            <span className="flex-1">{t("promote.typesFailed")}</span>
             <Button
               type="button"
               variant="outline"
               size="xs"
               onClick={() => jiraTypes.refetch()}
             >
-              Retry
+              {t("promote.retry")}
             </Button>
           </div>
         )}
         {jiraNoTypes && (
           <p className="text-xs text-warning">
-            This Jira project has no creatable issue type — create one in Jira
-            or check your project permissions.
+            {t("promote.noTypes")}
           </p>
         )}
 
@@ -540,7 +558,7 @@ export function PromoteLocalIssueDialog({
             disabled={shownPending}
             reason={shownPendingReason}
           >
-            Cancel
+            {t("promote.cancel")}
           </DisabledReasonButton>
           <DisabledReasonButton
             onClick={promote}
@@ -553,7 +571,7 @@ export function PromoteLocalIssueDialog({
             reason={publishReason}
           >
             {shownPending && <Spinner data-icon="inline-start" />}
-            Publish to {targetLabel}
+            {t("promote.publishTo", { destination: targetLabel })}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

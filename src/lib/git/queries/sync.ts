@@ -10,24 +10,39 @@ import * as api from "../api";
 import { useMutationCacheSnapshot, useRepoMutation } from "./internal";
 import { pendingMutationEntries } from "./pr-writes";
 import {
-  BRANCH_PUSH_ACTIVE_MESSAGE,
   BRANCH_PUSH_KEY,
   type BranchPushState,
+  branchPublishLabel as branchPublishLabelCore,
+  branchPushActiveMessage,
+  branchPushHoldItemReason as branchPushHoldItemReasonCore,
+  branchPushHoldReason as branchPushHoldReasonCore,
   branchPushKey,
+  branchPushLabel as branchPushLabelCore,
   type PushVars,
   pendingBranchPushesFor,
 } from "./push-writes";
+import { pushWriteCopy } from "./sync-copy";
 
 export {
   BRANCH_PUSH_ACTIVE_MESSAGE,
   type BranchPushState,
-  branchPublishLabel,
-  branchPushHoldItemReason,
-  branchPushHoldReason,
-  branchPushLabel,
   nextPushLatch,
   type PushVars,
 } from "./push-writes";
+
+export const branchPublishLabel = (remote: string | null): string =>
+  branchPublishLabelCore(remote, pushWriteCopy);
+
+export const branchPushHoldItemReason = (paused: boolean): string =>
+  branchPushHoldItemReasonCore(paused, pushWriteCopy);
+
+export const branchPushHoldReason = (paused: boolean): string =>
+  branchPushHoldReasonCore(paused, pushWriteCopy);
+
+export const branchPushLabel = (
+  push: BranchPushState,
+  row: { upstream: string | null; upstreamGone: boolean },
+): string => branchPushLabelCore(push, row, pushWriteCopy);
 
 export function useFetchRemote(repo: string) {
   return useRepoMutation(repo, () => api.gitFetch(repo));
@@ -317,7 +332,7 @@ export function refuseWhilePushRuns(
   repo: string,
 ): boolean {
   if (!isBranchPushActive(queryClient, repo)) return false;
-  toast.info(BRANCH_PUSH_ACTIVE_MESSAGE);
+  toast.info(branchPushActiveMessage(pushWriteCopy));
   return true;
 }
 

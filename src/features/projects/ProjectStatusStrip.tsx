@@ -81,6 +81,7 @@ import {
   scalarDraft,
 } from "./ProjectFieldControls";
 import { plainFirstLine } from "./status-summary";
+import { useProjectsText } from "./use-projects-text";
 
 /** Every status this build names, in the order the editor offers them: the three
  *  health readings first, then the two that end or pause the work. */
@@ -141,6 +142,7 @@ function statusMeta(status: string | null): { label: string; tone: string } {
 }
 
 function StatusChip({ status }: { status: string | null }) {
+  const tx = useProjectsText();
   const { label, tone } = statusMeta(status);
   return (
     <span
@@ -149,7 +151,7 @@ function StatusChip({ status }: { status: string | null }) {
         tone,
       )}
     >
-      {label}
+      {tx(label)}
     </span>
   );
 }
@@ -208,6 +210,7 @@ export function ProjectStatusStrip({
    *  entry, which leaves the strip with nothing drawn to stand on. */
   onFocusLost: () => void;
 }) {
+  const tx = useProjectsText();
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -311,7 +314,7 @@ export function ProjectStatusStrip({
 
   return (
     <section
-      aria-label="Project status"
+      aria-label={tx("Project status")}
       className="mb-2 shrink-0 border-b pb-1.5 text-[11px]"
     >
       <button
@@ -329,7 +332,7 @@ export function ProjectStatusStrip({
             expanded && "rotate-90",
           )}
         />
-        <span className="sr-only">Project status: </span>
+        <span className="sr-only">{tx("Project status")}: </span>
         <StatusChip status={latest.status} />
         <span
           className="min-w-0 flex-1 truncate text-foreground"
@@ -340,7 +343,7 @@ export function ProjectStatusStrip({
         {target !== null && (
           <span className="shrink-0 text-muted-foreground">
             <span aria-hidden>→ </span>
-            <span className="sr-only">target </span>
+            <span className="sr-only">{tx("target")} </span>
             {target}
           </span>
         )}
@@ -355,7 +358,7 @@ export function ProjectStatusStrip({
           <div
             ref={listRef}
             role="list"
-            aria-label="Status update history"
+            aria-label={tx("Status update history")}
             onKeyDown={onListKeyDown}
             onFocus={onListFocus}
           >
@@ -402,6 +405,7 @@ function StatusEntry({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const tx = useProjectsText();
   const start = displayDate(update.startDate);
   const target = displayDate(update.targetDate);
   const body = update.body?.trim() ? update.body : null;
@@ -409,10 +413,12 @@ function StatusEntry({
   // A held row keeps its label and says why in a parenthetical beside it, the
   // board menu's grammar: a disabled menu item can't carry a tooltip.
   const held = writeHeldNote !== undefined;
-  const editLabel = held ? `Edit update (${writeHeldNote})` : "Edit update…";
+  const editLabel = held
+    ? tx("Edit update ({{reason}})", { reason: writeHeldNote })
+    : tx("Edit update…");
   const deleteLabel = held
-    ? `Delete update (${writeHeldNote})`
-    : "Delete update…";
+    ? tx("Delete update ({{reason}})", { reason: writeHeldNote })
+    : tx("Delete update…");
 
   const content = (
     <>
@@ -436,13 +442,13 @@ function StatusEntry({
           </span>
         )}
         <span className="text-muted-foreground">
-          {pending ? "Posting…" : <RelativeTime date={update.createdAt} />}
+          {pending ? tx("Posting…") : <RelativeTime date={update.createdAt} />}
         </span>
         {start !== null && (
-          <span className="text-muted-foreground">Start {start}</span>
+          <span className="text-muted-foreground">{tx("Start {{date}}", { date: start })}</span>
         )}
         {target !== null && (
-          <span className="text-muted-foreground">Target {target}</span>
+          <span className="text-muted-foreground">{tx("Target {{date}}", { date: target })}</span>
         )}
         {manageable && (
           <DropdownMenu>
@@ -451,7 +457,7 @@ function StatusEntry({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Status update actions"
+                  aria-label={tx("Status update actions")}
                   // Inside the roving row: a row the arrows haven't reached keeps
                   // its button out of the Tab order too.
                   tabIndex={rowProps.tabIndex}
@@ -575,10 +581,11 @@ function StatusDateField({
   onEdit: (entry: DateEntry) => void;
   onClear: () => void;
 }) {
+  const tx = useProjectsText();
   const inputId = useId();
   return (
     <div className="space-y-2">
-      <Label htmlFor={inputId}>{def.name}</Label>
+      <Label htmlFor={inputId}>{tx(def.name)}</Label>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <ScalarInput
@@ -593,10 +600,10 @@ function StatusDateField({
           type="button"
           variant="outline"
           size="xs"
-          aria-label={`Clear ${def.name.toLowerCase()}`}
+          aria-label={tx("Clear {{name}}", { name: tx(def.name.toLowerCase()) })}
           onClick={onClear}
         >
-          Clear
+          {tx("Clear")}
         </Button>
       </div>
     </div>
@@ -632,6 +639,7 @@ export function ProjectStatusUpdateDialog({
     content: ProjectStatusContent,
   ) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const open = editor !== null;
   const statusId = useId();
   // The entry the dialog is editing, held past the close so the title and the
@@ -700,11 +708,11 @@ export function ProjectStatusUpdateDialog({
   // value the entry already holds that this build doesn't name, so saving an
   // unrelated change never rewrites a status the user didn't touch.
   const items: Record<string, string> = {};
-  for (const value of STATUS_ORDER) items[value] = STATUS_META[value].label;
+  for (const value of STATUS_ORDER) items[value] = tx(STATUS_META[value].label);
   if (editing !== null) {
     if (editing.status !== null && !isKnownStatus(editing.status))
-      items[editing.status] = humanizeStatus(editing.status);
-    items[NO_STATUS_KEY] = "No status";
+      items[editing.status] = tx(humanizeStatus(editing.status));
+    items[NO_STATUS_KEY] = tx("No status");
   }
 
   const startValue = dateValue(START_DEF, start);
@@ -714,22 +722,22 @@ export function ProjectStatusUpdateDialog({
   const heldReason = (() => {
     switch (true) {
       case pending || submitting:
-        return pendingWriteReason(paused, "Saving your update…");
+        return pendingWriteReason(paused, tx("Saving your update…"));
       // A post writes one of the statuses this build names — the value its save
       // path accepts — so anything else holds here rather than failing silently.
       case status === "" || (editing === null && !isKnownStatus(status)):
-        return "Pick a status to post the update";
+        return tx("Pick a status to post the update");
       case startValue === INVALID_DRAFT:
-        return "Finish or clear the start date";
+        return tx("Finish or clear the start date");
       case targetValue === INVALID_DRAFT:
-        return "Finish or clear the target date";
+        return tx("Finish or clear the target date");
       // Only an edit can reach it (a post always carries its status), and GitHub
       // refuses a create with none of the four; an edit is held the same way.
       case status === NO_STATUS_KEY &&
         bodyBlank &&
         startValue === null &&
         targetValue === null:
-        return "Keep a status, a note or a date on the update";
+        return tx("Keep a status, a note or a date on the update");
       default:
         return null;
     }
@@ -766,12 +774,12 @@ export function ProjectStatusUpdateDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              {editing === null ? "Post status update" : "Edit status update"}
+              {editing === null ? tx("Post status update") : tx("Edit status update")}
             </DialogTitle>
             <DialogDescription>
               {editing === null
-                ? "Tell everyone on the project how the work is going. The newest update leads the board."
-                : "Changes this update for everyone on the project."}
+                ? tx("Tell everyone on the project how the work is going. The newest update leads the board.")
+                : tx("Changes this update for everyone on the project.")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
@@ -781,7 +789,7 @@ export function ProjectStatusUpdateDialog({
                 // placeholder: a post starts with no status, and the empty field
                 // has to say it's the step to take.
                 <div className="space-y-2">
-                  <Label htmlFor={statusId}>Status</Label>
+                  <Label htmlFor={statusId}>{tx("Status")}</Label>
                   <Select
                     items={items}
                     value={field.state.value || null}
@@ -792,7 +800,7 @@ export function ProjectStatusUpdateDialog({
                   >
                     <SelectTrigger id={statusId} className="w-full">
                       <SelectValue
-                        placeholder="Pick a status"
+                        placeholder={tx("Pick a status")}
                         onMouseEnter={clipTitleFromText}
                       />
                     </SelectTrigger>
@@ -810,8 +818,8 @@ export function ProjectStatusUpdateDialog({
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Note"
-                  placeholder="What's changed, what's next, and anything in the way"
+                  label={tx("Note")}
+                  placeholder={tx("What's changed, what's next, and anything in the way")}
                   rows={6}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                 />
@@ -856,7 +864,7 @@ export function ProjectStatusUpdateDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               {/* Held with its reason FOCUSABLE, the contract BoardDraftEditDialog
@@ -875,7 +883,7 @@ export function ProjectStatusUpdateDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  {editing === null ? "Post update" : "Save update"}
+                  {editing === null ? tx("Post update") : tx("Save update")}
                 </form.SubmitButton>
               </span>
             </form.AppForm>
@@ -918,6 +926,7 @@ export function ProjectStatusSection({
   /** Where focus goes when a delete empties the strip. */
   onFocusLost: () => void;
 }) {
+  const tx = useProjectsText();
   const read = useProjectStatusUpdates(repoPath, projectId, enabled);
   const createUpdate = useCreateProjectStatusUpdate();
   const updateUpdate = useUpdateProjectStatusUpdate();
@@ -970,9 +979,9 @@ export function ProjectStatusSection({
 
   async function remove(update: ProjectStatusUpdate): Promise<boolean> {
     const ok = await useConfirm.getState().ask({
-      title: "Delete this status update?",
-      body: "It's removed from the project for everyone. This can't be undone.",
-      confirmLabel: "Delete update",
+      title: tx("Delete this status update?"),
+      body: tx("It's removed from the project for everyone. This can't be undone."),
+      confirmLabel: tx("Delete update"),
       confirmVariant: "destructive",
     });
     if (!ok) return false;

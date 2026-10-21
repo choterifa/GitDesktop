@@ -46,6 +46,7 @@ import {
 } from "./AgentPickers";
 import { EnsembleRunDialog } from "./EnsembleRunDialog";
 import { type AgentSession, type PendingTask, useSessionsStore } from "./store";
+import { useSessionText } from "./use-session-text";
 
 const MAX_MENTIONS = 8;
 
@@ -76,6 +77,7 @@ function isolationNoteFor({
   status,
   probeFailed,
   agentInImage,
+  tx,
 }: {
   effective: Isolation;
   global: Isolation;
@@ -89,6 +91,7 @@ function isolationNoteFor({
   probeFailed: boolean;
   /** `agent` is among the agent CLIs the saved image config bakes in. */
   agentInImage: boolean;
+  tx: (source: string, options?: Record<string, unknown>) => string;
 }): IsolationNote | undefined {
   if (effective === "worktree") {
     if (global !== "container") return undefined;
@@ -96,8 +99,8 @@ function isolationNoteFor({
       tone: "muted",
       text:
         agent === "codex" && perAgentCopy
-          ? "Runs on the host for this session — Codex keeps its own OS-enforced sandbox."
-          : "Runs on the host for this session — file writes are confined by convention, not the kernel.",
+          ? tx("Runs on the host for this session — Codex keeps its own OS-enforced sandbox.")
+          : tx("Runs on the host for this session — file writes are confined by convention, not the kernel."),
     };
   }
   // A probe that failed with nothing to show for it. (Once there IS data, a later
@@ -107,25 +110,25 @@ function isolationNoteFor({
     return probeFailed
       ? {
           tone: "warn",
-          text: "Couldn't check container status — the session will verify at start.",
+          text: tx("Couldn't check container status — the session will verify at start."),
         }
-      : { tone: "muted", text: "Checking container status…" };
+      : { tone: "muted", text: tx("Checking container status…") };
   if (!status.runtime)
     return {
       tone: "warn",
-      text: "No Docker or Podman found — container sessions need one installed.",
+      text: tx("No Docker or Podman found — container sessions need one installed."),
       settingsAction: true,
     };
   const runtime = RUNTIME_LABEL[status.runtime];
   if (!status.ready)
     return {
       tone: "warn",
-      text: `${runtime} is installed but its engine isn't running. Start it, then try again.`,
+      text: tx("{{runtime}} is installed but its engine isn't running. Start it, then try again.", { runtime }),
     };
   if (!status.imagePresent)
     return {
       tone: "warn",
-      text: `${runtime} is ready — build the agent image first.`,
+      text: tx("{{runtime}} is ready — build the agent image first.", { runtime }),
       settingsAction: true,
     };
   // More specific than the generic "doesn't match" below — the backend rejects turn
@@ -137,13 +140,13 @@ function isolationNoteFor({
   if (!agentInImage && perAgentCopy)
     return {
       tone: "warn",
-      text: imageMissingAgentText(agent),
+      text: imageMissingAgentText(agent, tx),
       settingsAction: true,
     };
   if (!status.imageMatches)
     return {
       tone: "warn",
-      text: "The agent image doesn't match the current Node / agent selection — rebuild in Settings to apply.",
+      text: tx("The agent image doesn't match the current Node / agent selection — rebuild in Settings to apply."),
       settingsAction: true,
     };
   return undefined;
@@ -184,6 +187,7 @@ export function SessionComposer({
   /** Imperative handle so a turn's "Edit & resend" can load its prompt here. */
   handleRef?: React.Ref<SessionComposerHandle>;
 }) {
+  const tx = useSessionText();
   const start = useSessionsStore((s) => s.start);
   const startEnsemble = useSessionsStore((s) => s.startEnsemble);
   const send = useSessionsStore((s) => s.send);
@@ -466,8 +470,9 @@ export function SessionComposer({
         status: probe,
         probeFailed,
         agentInImage,
+        tx,
       });
-  const blockedReason = isolationNote?.text ?? CONTAINER_BLOCKED_TEXT;
+  const blockedReason = isolationNote?.text ?? tx(CONTAINER_BLOCKED_TEXT);
   // The note's "Set up in Settings…" jump. Opening Settings unmounts
   // RepositoryView (App.tsx renders it behind `view === "repo"`), which would take
   // this composer's draft AND its isolation pick with it — a task typed, switched
@@ -521,7 +526,7 @@ export function SessionComposer({
   const mcpUsable = mcpSupportedFor(startAgent, isContainer);
   const mcpDisabledReason =
     !mcpUsable && startAgent === "codex"
-      ? "Codex runs MCP in container sessions — switch Isolation to Container above"
+      ? tx("Codex runs MCP in container sessions — switch Isolation to Container above")
       : undefined;
   // For an ACTIVE session the agent + isolation are fixed, so gate on the session's
   // own values and let the user re-pick servers (applies from the next turn).
@@ -885,7 +890,7 @@ export function SessionComposer({
               onKeyDown={onKeyDown}
               rows={1}
               aria-label={
-                session ? "Reply to the agent" : "Describe a task for the agent"
+                session ? tx("Reply to the agent") : tx("Describe a task for the agent")
               }
               aria-autocomplete="list"
               aria-expanded={mention !== null || slash !== null}
@@ -905,8 +910,8 @@ export function SessionComposer({
               }
               placeholder={
                 session
-                  ? "Reply to the agent…  (@ file, / command)"
-                  : "Describe a task for the agent…  (@ file, / command)"
+                  ? tx("Reply to the agent…  (@ file, / command)")
+                  : tx("Describe a task for the agent…  (@ file, / command)")
               }
               className="max-h-40 min-h-9 w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
             />
@@ -950,7 +955,7 @@ export function SessionComposer({
                       className="-mt-0.5 h-6 shrink-0 px-1.5 text-[11px] text-muted-foreground"
                       onClick={openIsolationSettings}
                     >
-                      Set up in Settings…
+                      {tx("Set up in Settings…")}
                     </Button>
                   ) : null}
                 </>
@@ -988,7 +993,7 @@ export function SessionComposer({
                         isOverride:
                           startIsolation !== null &&
                           startIsolation !== globalIsolation,
-                        note: isolationNote,
+                note: isolationNote,
                         onSettingsAction: openIsolationSettings,
                       }
                 }
@@ -1010,7 +1015,7 @@ export function SessionComposer({
                       onClick={() => session && cancel(session.id)}
                     >
                       <StopIcon weight="fill" />
-                      Stop
+                      {tx("Stop")}
                     </Button>
                   </m.div>
                 ) : (
@@ -1038,10 +1043,10 @@ export function SessionComposer({
                         onClick={submit}
                       >
                         {creating && !session
-                          ? "Starting…"
+                          ? tx("Starting…")
                           : !session && mode === "ensemble"
-                            ? "Best-of-N…"
-                            : "Send"}
+                            ? tx("Best-of-N…")
+                            : tx("Send")}
                       </Button>
                     </span>
                   </m.div>
@@ -1090,16 +1095,17 @@ function MentionList({
   onPick: (path: string) => void;
   onHover: (i: number) => void;
 }) {
+  const tx = useSessionText();
   return (
     <div
       id="session-mention-list"
       role="listbox"
-      aria-label="Repository files"
+      aria-label={tx("Repository files")}
       className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full overflow-y-auto border bg-popover shadow-md ring-1 ring-foreground/10"
     >
       {matches.length === 0 ? (
         <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
-          {loading ? "Loading files…" : `No files match “${query}”.`}
+          {loading ? tx("Loading files…") : tx("No files match “{{query}}”.", { query })}
         </p>
       ) : (
         matches.map((f, i) => {
@@ -1158,6 +1164,7 @@ function SlashList({
   onPick: (cmd: SlashCommand) => void;
   onHover: (i: number) => void;
 }) {
+  const tx = useSessionText();
   // Keep the keyboard-highlighted row visible as you arrow through the full,
   // un-narrowed (scrollable) list.
   useEffect(() => {
@@ -1170,12 +1177,12 @@ function SlashList({
     <div
       id="session-slash-list"
       role="listbox"
-      aria-label="Slash commands"
+      aria-label={tx("Slash commands")}
       className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full overflow-y-auto border bg-popover shadow-md ring-1 ring-foreground/10"
     >
       {matches.length === 0 ? (
         <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
-          {loading ? "Loading…" : `No commands or skills match “/${query}”.`}
+          {loading ? tx("Loading…") : tx("No commands or skills match “/{{query}}”.", { query })}
         </p>
       ) : (
         matches.map((c, i) => {
@@ -1230,7 +1237,7 @@ function SlashList({
                       : "text-muted-foreground/70",
                   )}
                 >
-                  {badge}
+                  {tx(badge)}
                 </span>
               )}
             </button>

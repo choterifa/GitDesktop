@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -25,7 +26,6 @@ import {
 } from "@/components/ui/dialog";
 import { LABELS_PICKER_COPY } from "@/features/conversations/LabelsPopover";
 import {
-  NO_ACCESS_REASON,
   projectScopeMissing,
   projectScopeReadOnly,
   READ_ONLY_SCOPE_REASON,
@@ -86,18 +86,6 @@ import {
 } from "./IssueMetaPickers";
 import { useGenerateIssueDraft } from "./useGenerateIssueDraft";
 
-/** One clause of the post-create disclosure, per link that can fail after the issue
- *  exists. The create itself succeeded in every case, which is why none of them
- *  re-arms the submit — and why more than one can fail in a single run, so these
- *  compose into a list rather than naming a single culprit. The plural arm is its
- *  own entry rather than a patched string: "the project" over two picked boards
- *  names the wrong thing. */
-const LINK_FAILED: Record<"project" | "projects" | "sub-issue", string> = {
-  project: "adding it to the project failed",
-  projects: "adding it to the projects failed",
-  "sub-issue": "linking as a sub-issue failed",
-};
-
 export function CreateIssueDialog({
   repoPath,
   lens,
@@ -119,6 +107,7 @@ export function CreateIssueDialog({
    *  (parent), and the view stays on the parent instead of navigating away. */
   subIssueParentId?: string;
 }) {
+  const { t } = useTranslation("issues");
   const createIssue = useCreateIssue(repoPath, lens);
   const addSubIssue = useAddSubIssue();
   const repoLabels = useRepoLabels(repoPath, open, lens);
@@ -133,11 +122,13 @@ export function CreateIssueDialog({
   const remoteLabel = isGitLab ? "GitLab" : "GitHub";
   // Every toast's View, named only once the forge status has answered; a bare
   // "View" beats the GitHub default `remoteLabel` falls back to.
-  const forgeViewLabel = forge.data ? `View on ${remoteLabel}` : undefined;
+  const forgeViewLabel = forge.data
+    ? t("remoteParts.viewOn", { provider: remoteLabel })
+    : undefined;
   // The create target's display name: the parent slug under the upstream lens
   // (falling back to "the upstream repository" while it loads), else the forge.
   const targetLabel = isUpstream
-    ? (parentSlug ?? "the upstream repository")
+    ? (parentSlug ?? t("dialogs.upstreamRepository"))
     : remoteLabel;
   const selectIssue = useUiStore((s) => s.selectIssue);
   const repoName = useUiStore((s) => s.repoName) ?? "";
@@ -149,8 +140,8 @@ export function CreateIssueDialog({
     cancel,
     generating,
     close: () => onOpenChange(false),
-    readyTitle: "Issue draft ready",
-    readyDescription: "It's waiting in the dialog.",
+    readyTitle: t("dialogs.issueDraftReady"),
+    readyDescription: t("dialogs.waitingInDialog"),
     reopen: () => onOpenChange(true),
   });
   const [labels, setLabels] = useState<Set<string>>(new Set());
@@ -246,9 +237,9 @@ export function CreateIssueDialog({
   // the same way; only WHERE the block renders differs.
   const projectScopeRemedy = (
     <ScopeGapBlock host={ghHost} onReconnect={reconnectForProjectScope}>
-      Adding an issue to a project needs the{" "}
-      <span className="font-mono">project</span> scope, which your GitHub
-      sign-in is missing.
+      {t("dialogs.projectScopePrefix")}{" "}
+      <span className="font-mono">project</span>{" "}
+      {t("dialogs.projectScopeSuffix")}
     </ScopeGapBlock>
   );
 
@@ -317,7 +308,7 @@ export function CreateIssueDialog({
           });
         } catch (e) {
           const key = addProjectIds.length === 1 ? "project" : "projects";
-          failures.push({ heading: LINK_FAILED[key], error: e });
+          failures.push({ heading: t(`dialogs.${key}Failure`), error: e });
         }
       }
       let subIssueLinked = false;
@@ -331,7 +322,7 @@ export function CreateIssueDialog({
           });
           subIssueLinked = true;
         } catch (e) {
-          failures.push({ heading: LINK_FAILED["sub-issue"], error: e });
+          failures.push({ heading: t("dialogs.subIssueFailure"), error: e });
         }
       }
       // The toasts below name the origin repo when this settles elsewhere;
@@ -351,11 +342,18 @@ export function CreateIssueDialog({
           (f) => `${f.heading}: ${presentError(f.error).summary}`,
         );
         toastComposedError({
-          title: `Created issue #${number}, but ${reasons.join("; ")}`,
+          title: t("dialogs.addedToProjectsToast", {
+            number,
+            reasons: reasons.join("; "),
+          }),
           errors: failures.map((f) => f.error),
-          headings: failures.map(
-            (f) => f.heading.charAt(0).toUpperCase() + f.heading.slice(1),
-          ),
+          headings: failures.map((f) => {
+            if (f.heading === t("dialogs.projectFailure"))
+              return t("dialogs.projectHeading");
+            if (f.heading === t("dialogs.projectsFailure"))
+              return t("dialogs.projectsHeading");
+            return t("dialogs.subIssueHeading");
+          }),
           description: originNote,
           view: { url, label: forgeViewLabel },
           duration: 10000,
@@ -369,13 +367,13 @@ export function CreateIssueDialog({
       if (subIssueLinked) {
         // Stay on the parent so the new issue appears in its sub-issue list
         // (GitHub's own behavior) — no navigate.
-        toast.success(`Created sub-issue #${number}`, {
+        toast.success(t("dialogs.createdSubIssue", { number }), {
           description: originNote ? `${originNote} · ${url}` : url,
           action,
         });
         return;
       }
-      toast.success(`Opened issue #${number}`, {
+      toast.success(t("dialogs.openedIssue", { number }), {
         description: originNote ? `${originNote} · ${url}` : url,
         action,
       });
@@ -470,7 +468,7 @@ export function CreateIssueDialog({
               className="mt-1.5"
               onClick={() => void projects.refetch()}
             >
-              Retry
+              {t("dialogs.retry")}
             </Button>
           </div>
         );
@@ -480,13 +478,13 @@ export function CreateIssueDialog({
       case projects.isPending:
         return (
           <p className="px-1 py-1 text-xs text-muted-foreground">
-            Loading projects…
+            {t("dialogs.loadingProjects")}
           </p>
         );
       case openProjects.length === 0:
         return (
           <p className="px-1 py-1 text-xs text-muted-foreground">
-            No open projects in this repository or its owner.
+            {t("dialogs.noOpenProjects")}
           </p>
         );
       // Distinct from the line above: this board HAS projects, they are all
@@ -495,7 +493,7 @@ export function CreateIssueDialog({
       case pickableProjects.length === 0:
         return (
           <p className="px-1 py-1 text-xs text-muted-foreground">
-            Every open project is already picked.
+            {t("dialogs.everyProjectPicked")}
           </p>
         );
       default:
@@ -579,17 +577,17 @@ export function CreateIssueDialog({
           <DialogHeader>
             <DialogTitle>
               {subIssueParentId
-                ? "Create sub-issue"
+                ? t("dialogs.createSubIssue")
                 : isUpstream
-                  ? `New issue in ${targetLabel}`
-                  : "Create issue"}
+                  ? t("dialogs.newIssueIn", { target: targetLabel })
+                  : t("dialogs.createIssue")}
             </DialogTitle>
             <DialogDescription>
               {subIssueParentId
-                ? "Opens a new issue on GitHub and links it as a sub-issue."
+                ? t("dialogs.opensSubIssue")
                 : isUpstream
-                  ? `Opens a new issue on ${targetLabel} (the upstream repository), not your fork.`
-                  : `Opens a new issue on ${remoteLabel} for this repository.`}
+                  ? t("dialogs.opensUpstreamIssue", { target: targetLabel })
+                  : t("dialogs.opensRemoteIssue", { provider: remoteLabel })}
             </DialogDescription>
           </DialogHeader>
 
@@ -598,7 +596,7 @@ export function CreateIssueDialog({
           <div className={cn(DIALOG_SCROLL, "min-h-0 flex-1 space-y-4")}>
             {isUpstream && !subIssueParentId && (
               <p className="text-xs text-muted-foreground">
-                This opens an issue on the upstream repository, not your fork.
+                {t("dialogs.upstreamNotice")}
               </p>
             )}
             {/* Labels and assignees sit ABOVE the title, the shape CreatePrDialog
@@ -613,12 +611,12 @@ export function CreateIssueDialog({
                     <Button
                       variant="outline"
                       size="xs"
-                      aria-label="Add labels"
+                      aria-label={t("dialogs.addLabels")}
                     />
                   }
                 >
                   <TagIcon data-icon="inline-start" />
-                  Labels
+                  {t("dialogs.labels")}
                 </Popover.Trigger>
                 {/* Bare on purpose: this component's body renders above
                     DialogContent's PanelPortalReset, so a
@@ -633,10 +631,16 @@ export function CreateIssueDialog({
                     className="isolate z-50"
                   >
                     <Popover.Popup className="w-60 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-                      <p className="px-1 pb-1.5 text-xs font-medium">Labels</p>
+                      <p className="px-1 pb-1.5 text-xs font-medium">
+                        {t("dialogs.labels")}
+                      </p>
                       {(repoLabels.data ?? []).length === 0 && (
                         <p className="px-1 py-1 text-xs text-muted-foreground">
-                          {emptyPickerCopy(repoLabels, LABELS_PICKER_COPY)}
+                          {repoLabels.isPaused
+                            ? t("shared.waitingForConnection", {
+                                noun: t("dialogs.labelsNoun"),
+                              })
+                            : emptyPickerCopy(repoLabels, LABELS_PICKER_COPY)}
                         </p>
                       )}
                       {(repoLabels.data ?? []).map((label) => (
@@ -688,8 +692,8 @@ export function CreateIssueDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Title"
-                  placeholder="Summarize the issue"
+                  label={t("dialogs.title")}
+                  placeholder={t("dialogs.summarizeIssue")}
                   // Explicit now that pickers sit above it. The dialog used to
                   // land focus here by accident — the title was simply the first
                   // focusable thing in the body — and the reorder would otherwise
@@ -701,8 +705,8 @@ export function CreateIssueDialog({
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Description"
-                  placeholder="Jot down rough notes, then draft with AI"
+                  label={t("dialogs.description")}
+                  placeholder={t("dialogs.draftPlaceholder")}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                   actions={
@@ -714,7 +718,7 @@ export function CreateIssueDialog({
                         onClick={cancel}
                       >
                         <XIcon data-icon="inline-start" />
-                        Cancel
+                        {t("dialogs.cancel")}
                       </Button>
                     ) : (
                       // Empty notes stay a plain disable; a running create says why.
@@ -733,12 +737,14 @@ export function CreateIssueDialog({
                         // a disabled Generate's shortcut is dead too.
                         title={
                           notes.trim() && !isSubmitting
-                            ? `Expand your notes into a structured issue with AI${generateChord.hint}`
-                            : "Expand your notes into a structured issue with AI"
+                            ? t("dialogs.expandNotesTitleWithHint", {
+                                hint: generateChord.hint,
+                              })
+                            : t("dialogs.expandNotes")
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Draft with AI
+                        {t("dialogs.draftWithAi")}
                       </DisabledReasonButton>
                     )
                   }
@@ -788,7 +794,7 @@ export function CreateIssueDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("dialogs.cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -805,10 +811,10 @@ export function CreateIssueDialog({
                   className={ARIA_DISABLED_CLASS}
                 >
                   {subIssueParentId
-                    ? "Create sub-issue"
+                    ? t("dialogs.createSubIssue")
                     : isUpstream
-                      ? `Create in ${targetLabel}`
-                      : "Create issue"}
+                      ? t("dialogs.createIn", { target: targetLabel })
+                      : t("dialogs.createIssue")}
                 </form.SubmitButton>
                 {offlineSubmit.blockedReason ? (
                   <span id={offlineSubmit.reasonId} className="sr-only">
@@ -845,8 +851,10 @@ function ProjectPickRow({
   onPick: () => void;
   onFocus: () => void;
 }) {
+  const { t } = useTranslation("issues");
   const held =
-    lockedReason ?? (project.viewerCanUpdate ? undefined : NO_ACCESS_REASON);
+    lockedReason ??
+    (project.viewerCanUpdate ? undefined : t("dialogs.noProjectAccess"));
   const { blockedReason, reasonId, wrapperTitle, describedBy, nativeProps } =
     useDisabledReason({
       disabled: held !== undefined,
@@ -942,6 +950,7 @@ function ProjectsField({
   onPick: (project: ProjectV2Ref) => void;
   onRemove: (id: string) => void;
 }) {
+  const { t } = useTranslation("issues");
   const [pickerOpen, setPickerOpen] = useState(false);
   // Roving tabindex: the band is a single tab stop; ArrowLeft/Right move the roved
   // index, which sets which chip is focusable + focused.
@@ -1024,7 +1033,7 @@ function ProjectsField({
 
   return (
     <LabeledGroup
-      label="Projects"
+      label={t("dialogs.projects")}
       className="space-y-1.5"
       actions={
         <Popover.Root
@@ -1043,12 +1052,12 @@ function ProjectsField({
                 data-add-project-trigger=""
                 variant="outline"
                 size="xs"
-                aria-label="Add to project"
+                aria-label={t("dialogs.addToProject")}
               />
             }
           >
             <KanbanIcon data-icon="inline-start" />
-            Add to project
+            {t("dialogs.addToProject")}
           </Popover.Trigger>
           {/* Bare on purpose: this body renders above DialogContent's
               PanelPortalReset, so a usePanelPortalContainer() call here would
@@ -1062,7 +1071,7 @@ function ProjectsField({
             >
               <Popover.Popup className="w-72 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                 <p className="px-1 pb-1.5 text-xs font-medium">
-                  Add to project
+                  {t("dialogs.addToProject")}
                 </p>
                 {scopeNotice !== null && (
                   <div className="mb-1 border-b pb-1">{scopeNotice}</div>
@@ -1089,7 +1098,7 @@ function ProjectsField({
                 )}
                 {truncated && (
                   <p className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground">
-                    Some projects aren't shown.
+                    {t("dialogs.someProjectsOmitted")}
                   </p>
                 )}
               </Popover.Popup>
@@ -1146,7 +1155,7 @@ function ProjectsField({
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            Added to these projects on create.
+            {t("dialogs.addedProjectsOnCreate")}
           </p>
         </>
       )}

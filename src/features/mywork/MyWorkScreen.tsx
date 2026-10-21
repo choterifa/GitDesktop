@@ -35,7 +35,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   OFFLINE_ROWS_NOTICE,
-  offlinePendingMessage,
   refreshFailed,
 } from "@/features/conversations/remote-section-state";
 import { clipTitleFromText } from "@/lib/clip-title";
@@ -54,6 +53,7 @@ import {
   type RepoOrigin,
 } from "@/lib/git/types";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { applyRepoLens } from "@/lib/repo-lens/queries";
 import type { RecentRepo } from "@/lib/settings/api";
@@ -167,19 +167,32 @@ const joinLabels = (labels: string[]) =>
 /** What the configured legs actually cover, so an empty inbox never claims a
  *  reach it doesn't have. One forge speaks for itself; a mix names which part is
  *  account-wide and which is bounded by the checkouts you've opened. */
-function scopeSentence(providers: ForgeProvider[]): string {
-  if (providers.length === 1) return EMPTY_SCOPE[providers[0]];
+function scopeSentence(
+  providers: ForgeProvider[],
+  tx: ReturnType<typeof useCommonText>,
+): string {
+  if (providers.length === 1) return tx(EMPTY_SCOPE[providers[0]]);
   const wide = providers.filter((p) => ACCOUNT_WIDE[p]).map(providerLabel);
   const scoped = providers.filter((p) => !ACCOUNT_WIDE[p]).map(providerLabel);
   const parts: string[] = [];
   if (wide.length > 0) {
     parts.push(
-      `${joinLabels(wide)} ${wide.length > 1 ? "cover" : "covers"} every repo you're involved in, not just local ones.`,
+      tx(
+        wide.length > 1
+          ? "{{labels}} cover every repo you're involved in, not just local ones."
+          : "{{labels}} covers every repo you're involved in, not just local ones.",
+        { labels: joinLabels(wide) },
+      ),
     );
   }
   if (scoped.length > 0) {
     parts.push(
-      `${joinLabels(scoped)} ${scoped.length > 1 ? "cover" : "covers"} the repositories you've opened here.`,
+      tx(
+        scoped.length > 1
+          ? "{{labels}} cover the repositories you've opened here."
+          : "{{labels}} covers the repositories you've opened here.",
+        { labels: joinLabels(scoped) },
+      ),
     );
   }
   return parts.join(" ");
@@ -536,6 +549,7 @@ function openRowContextMenu(url: string): void {
  * Welcome screen; Back / Esc return to the previous view.
  */
 export function MyWorkScreen() {
+  const tx = useCommonText();
   const closeMyWork = useUiStore((s) => s.closeMyWork);
   const openPr = useUiStore((s) => s.openPr);
   const openIssue = useUiStore((s) => s.openIssue);
@@ -753,7 +767,11 @@ export function MyWorkScreen() {
         // an IPC failure would be misdescribed by it, so it takes the generic
         // toast.
         if (isAppError(e) && e.kind === "notARepo") {
-          toast.error(`${match.path} is no longer a git repository.`);
+          toast.error(
+            tx("{{path}} is no longer a git repository.", {
+              path: match.path,
+            }),
+          );
         } else {
           toastError(e);
         }
@@ -950,12 +968,12 @@ export function MyWorkScreen() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Back"
+          aria-label={tx("Back")}
           onClick={closeMyWork}
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="text-sm font-medium">My work</span>
+        <span className="text-sm font-medium">{tx("My work")}</span>
         {showCounts && (
           <span className="text-xs tabular-nums text-muted-foreground">
             {items.length}
@@ -965,8 +983,8 @@ export function MyWorkScreen() {
           variant="ghost"
           size="icon-sm"
           className="ml-auto"
-          aria-label="Refresh"
-          title="Refresh"
+          aria-label={tx("Refresh")}
+          title={tx("Refresh")}
           disabled={refreshing}
           onClick={refresh}
         >
@@ -978,15 +996,15 @@ export function MyWorkScreen() {
         <Tabs value={tab} onValueChange={(v) => setTab(v as MyWorkTab)}>
           <TabsList>
             <TabsTrigger value="all">
-              All
+              {tx("All")}
               <Count n={counts.all} />
             </TabsTrigger>
             <TabsTrigger value="prs">
-              Pull requests
+              {tx("Pull requests")}
               <Count n={counts.prs} />
             </TabsTrigger>
             <TabsTrigger value="issues">
-              Issues
+              {tx("Issues")}
               <Count n={counts.issues} />
             </TabsTrigger>
           </TabsList>
@@ -995,8 +1013,8 @@ export function MyWorkScreen() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onInputKeyDown}
-          placeholder="Filter by title, repository, or number"
-          aria-label="Filter your work"
+          placeholder={tx("Filter by title, repository, or number")}
+          aria-label={tx("Filter your work")}
           role="combobox"
           aria-expanded={interactive.length > 0}
           // Same predicate as aria-expanded, and the same set the list renders:
@@ -1087,11 +1105,18 @@ function MyWorkBody({
   onSelect: (url: string) => void;
   onOpen: OpenItem;
 }) {
+  const tx = useCommonText();
   if (offline) {
-    return <QuietLine>{offlinePendingMessage("your work")}</QuietLine>;
+    return (
+      <QuietLine>
+        {tx("You're offline — {{subject}} will load once you're back online.", {
+          subject: tx("your work"),
+        })}
+      </QuietLine>
+    );
   }
   if (loading) {
-    return <ListRowSkeletons rows={8} lines={1} name="your work" />;
+    return <ListRowSkeletons rows={8} lines={1} name={tx("your work")} />;
   }
   if (errors.length > 0) {
     return <MyWorkError errors={errors} onRetry={onRetry} />;
@@ -1102,9 +1127,9 @@ function MyWorkBody({
     // screen, is where a first run needs the sign-in commands.
     return (
       <QuietLine>
-        No forge accounts connected. Run gh auth login or glab auth login for
-        GitHub or GitLab, or add an Atlassian API token in Settings → Accounts
-        for Bitbucket.
+        {tx(
+          "No forge accounts connected. Run gh auth login or glab auth login for GitHub or GitLab, or add an Atlassian API token in Settings → Accounts for Bitbucket.",
+        )}
       </QuietLine>
     );
   }
@@ -1112,7 +1137,7 @@ function MyWorkBody({
   // EVERY forge — a leg that settles instantly and empty (Bitbucket with no
   // local checkouts) must not speak for one still fetching.
   if (items.length === 0 && !allSettled) {
-    return <ListRowSkeletons rows={8} lines={1} name="your work" />;
+    return <ListRowSkeletons rows={8} lines={1} name={tx("your work")} />;
   }
   if (items.length === 0) {
     // Every claim here is scoped to the forges that ANSWERED, so a failed leg's
@@ -1122,22 +1147,27 @@ function MyWorkBody({
     // rather than CapNote: the note's filter advice has nothing to narrow, but
     // the page must not read as "nothing exists".
     const sole = answered.length === 1 ? answered[0] : null;
-    const source = sole ? providerLabel(sole) : "Your forges";
+    const source = sole ? providerLabel(sole) : tx("Your forges");
     const nothing = sole
-      ? `Nothing on ${providerLabel(sole)} involves you right now.`
-      : "Nothing involves you right now.";
+      ? tx("Nothing on {{provider}} involves you right now.", {
+          provider: providerLabel(sole),
+        })
+      : tx("Nothing involves you right now.");
     return capped ? (
       <QuietLine>
-        {`${source} didn't return everything. There may be work this view can't show.`}
+        {tx(
+          "{{source}} didn't return everything. There may be work this view can't show.",
+          { source },
+        )}
       </QuietLine>
     ) : (
-      <QuietLine>{`${nothing} ${scopeSentence(answered)}`}</QuietLine>
+      <QuietLine>{`${nothing} ${scopeSentence(answered, tx)}`}</QuietLine>
     );
   }
   if (visible.length === 0) {
     return (
       <>
-        <QuietLine>No items match.</QuietLine>
+        <QuietLine>{tx("No items match.")}</QuietLine>
         {capped && <CapNote />}
       </>
     );
@@ -1174,6 +1204,7 @@ function MyWorkList({
   onSelect: (url: string) => void;
   onOpen: OpenItem;
 }) {
+  const tx = useCommonText();
   const parentRef = useRef<HTMLDivElement>(null);
   const [menuItem, setMenuItem] = useState<MyWorkItem | null>(null);
   const virtualizer = useVirtualizer({
@@ -1249,7 +1280,7 @@ function MyWorkList({
             className="min-h-0 flex-1 overflow-y-auto"
             role="listbox"
             id={MY_WORK_LISTBOX_ID}
-            aria-label="Your work"
+            aria-label={tx("Your work")}
           >
             <div
               className="relative w-full"
@@ -1294,16 +1325,18 @@ function MyWorkList({
                   <ContextMenuItem
                     onClick={() => onOpen(menuItem, { preferWorktree: false })}
                   >
-                    Open in main workspace
+                    {tx("Open in main workspace")}
                   </ContextMenuItem>
                 )}
               <ContextMenuItem onClick={() => openUrl(menuItem.url)}>
-                {`Open on ${providerLabel(menuItem.provider)}`}
+                {tx("Open on {{provider}}", {
+                  provider: providerLabel(menuItem.provider),
+                })}
               </ContextMenuItem>
               <ContextMenuItem
-                onClick={() => copyText(menuItem.url, "Link copied")}
+                onClick={() => copyText(menuItem.url, tx("Link copied"))}
               >
-                Copy link
+                {tx("Copy link")}
               </ContextMenuItem>
             </>
           )}
@@ -1328,19 +1361,29 @@ function MyWorkNotices({
   bodyOffline: boolean;
   sourcesFailed: boolean;
 }) {
+  const tx = useCommonText();
   const lines = legs.flatMap((leg) => {
     // A parked leg is waiting, not failing: no failure line. Its drawn rows are
     // its last loaded ones only when they aren't another key's placeholder.
     if (leg.query.isPaused) {
       if (bodyOffline) return [];
       return hasOwnData(leg)
-        ? [OFFLINE_ROWS_NOTICE]
-        : [offlinePendingMessage(`${providerLabel(leg.provider)} work`)];
+        ? [tx(OFFLINE_ROWS_NOTICE)]
+        : [
+            tx(
+              "You're offline — {{subject}} will load once you're back online.",
+              {
+                subject: tx("{{provider}} work", {
+                  provider: providerLabel(leg.provider),
+                }),
+              },
+            ),
+          ];
     }
-    if (refreshFailed(leg.query)) return [FAILURE_NOTICE[leg.provider]];
-    return settledNow(leg) ? [] : [FETCH_NOTICE[leg.provider]];
+    if (refreshFailed(leg.query)) return [tx(FAILURE_NOTICE[leg.provider])];
+    return settledNow(leg) ? [] : [tx(FETCH_NOTICE[leg.provider])];
   });
-  if (sourcesFailed) lines.push(SOURCES_NOTICE);
+  if (sourcesFailed) lines.push(tx(SOURCES_NOTICE));
   return (
     <div aria-live="polite" className="px-3 text-[11px] text-muted-foreground">
       {/* Deduped: several parked legs share the one offline line. */}
@@ -1356,9 +1399,10 @@ function MyWorkNotices({
 /** The one-page-of-results note. Rendered by the body, not the list, so it
  *  survives a filter that matches nothing. */
 function CapNote() {
+  const tx = useCommonText();
   return (
     <p className="px-3 py-2 text-center text-[11px] text-muted-foreground">
-      This list may be missing items. Filter to narrow what's loaded.
+      {tx("This list may be missing items. Filter to narrow what's loaded.")}
     </p>
   );
 }
@@ -1380,9 +1424,12 @@ function MyWorkRow({
   onSelect: (url: string) => void;
   onOpen: OpenItem;
 }) {
+  const tx = useCommonText();
   const Icon = item.isPullRequest ? GitPullRequestIcon : CircleDashedIcon;
-  const typeLabel = item.isPullRequest ? "Pull request" : "Issue";
-  const browserLabel = `Opens on ${item.host || providerLabel(item.provider)} — not a local repository`;
+  const typeLabel = item.isPullRequest ? tx("Pull request") : tx("Issue");
+  const browserLabel = tx("Opens on {{host}} — not a local repository", {
+    host: item.host || providerLabel(item.provider),
+  });
   return (
     <button
       type="button"
@@ -1430,7 +1477,7 @@ function MyWorkRow({
       </span>
       {item.isDraft && (
         <Badge variant="secondary" className="h-4">
-          Draft
+          {tx("Draft")}
         </Badge>
       )}
       {/* The glyph is decorative, so the forge rides the row's ACCESSIBLE text,
@@ -1522,6 +1569,7 @@ function MyWorkError({
   errors: LegError[];
   onRetry: () => void;
 }) {
+  const tx = useCommonText();
   const soleProvider = errors.length === 1 ? errors[0].provider : null;
   const soleError = errors.length === 1 ? errors[0].error : null;
   const soleKind = isAppError(soleError) ? soleError.kind : "";
@@ -1540,16 +1588,18 @@ function MyWorkError({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
       <p className="text-xs font-medium">
-        {signIn !== null ? SIGN_IN_TITLE[signIn] : "Couldn't load your work"}
+        {signIn !== null
+          ? tx(SIGN_IN_TITLE[signIn])
+          : tx("Couldn't load your work")}
       </p>
       <div className="max-w-xs text-xs text-muted-foreground">
         {errorLines(errors, signIn).map((line) => (
-          <p key={line}>{line}</p>
+          <p key={line}>{tx(line)}</p>
         ))}
       </div>
       <div className="flex items-center gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          Retry
+          {tx("Retry")}
         </Button>
         <Button
           type="button"
@@ -1557,7 +1607,7 @@ function MyWorkError({
           size="sm"
           onClick={() => useErrorDialog.getState().open(details)}
         >
-          Details
+          {tx("Details")}
         </Button>
       </div>
     </div>

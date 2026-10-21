@@ -7,10 +7,23 @@
  */
 
 const short = (hash: string) => hash.slice(0, 7);
+type HistoryT = TFunction<"history">;
 
 /** Checking out a commit and checking out a tag land in the same detached HEAD,
  *  so both name their entity and share the explanation. */
-export function checkoutDetachedConfirm(kind: "commit" | "tag", name: string) {
+export function checkoutDetachedConfirm(
+  kind: "commit" | "tag",
+  name: string,
+  t?: HistoryT,
+) {
+  if (t) {
+    const noun = t(`confirm.kind.${kind}`);
+    return {
+      title: t("confirm.checkout.title", { kind: noun, name }),
+      body: t("confirm.checkout.body", { kind: noun }),
+      confirmLabel: t("confirm.checkout.action", { kind: noun }),
+    };
+  }
   return {
     title: `Check out ${kind} ${name}?`,
     body: `Your files move to that ${kind} and HEAD detaches, so you won't be on a branch. Switching back to a branch returns everything to normal, and commits you make while detached need a new branch to keep them.`,
@@ -18,8 +31,8 @@ export function checkoutDetachedConfirm(kind: "commit" | "tag", name: string) {
   };
 }
 
-export const checkoutCommitConfirm = (hash: string) =>
-  checkoutDetachedConfirm("commit", short(hash));
+export const checkoutCommitConfirm = (hash: string, t?: HistoryT) =>
+  checkoutDetachedConfirm("commit", short(hash), t);
 
 /** A silent checkout reads as a dead end (Compare flips to its detached-HEAD
  *  empty state with no acknowledgment), so every checkout route — commit or
@@ -27,7 +40,8 @@ export const checkoutCommitConfirm = (hash: string) =>
 const checkedOutDetached = (name: string) =>
   `Checked out ${name} — HEAD is detached`;
 
-export function checkoutCommitSuccessToast(hash: string) {
+export function checkoutCommitSuccessToast(hash: string, t?: HistoryT) {
+  if (t) return t("toast.checkedOut", { name: short(hash) });
   return checkedOutDetached(short(hash));
 }
 
@@ -56,20 +70,38 @@ const OP_CONFLICT: Record<MergeParentOp, string> = {
     "If it conflicts, the pick pauses in Changes for you to resolve.",
 };
 
-export const revertCommitConfirm = (hash: string) => ({
-  title: `Revert commit ${short(hash)}?`,
-  body: `${OP_EFFECT.revert(hash, null)} ${OP_CONFLICT.revert}`,
-  confirmLabel: "Revert commit",
-});
+export const revertCommitConfirm = (hash: string, t?: HistoryT) =>
+  t
+    ? {
+        title: t("confirm.revert.title", { hash: short(hash) }),
+        body: `${t("confirm.revert.body", { hash: short(hash) })} ${t("confirm.revert.conflict")}`,
+        confirmLabel: t("dialogs.revertCommitAction"),
+      }
+    : {
+        title: `Revert commit ${short(hash)}?`,
+        body: `${OP_EFFECT.revert(hash, null)} ${OP_CONFLICT.revert}`,
+        confirmLabel: "Revert commit",
+      };
 
 export const cherryPickCommitConfirm = (
   hash: string,
   branch: string | null,
-) => ({
-  title: `Cherry-pick commit ${short(hash)}?`,
-  body: `${OP_EFFECT["cherry-pick"](hash, branch)} ${OP_CONFLICT["cherry-pick"]}`,
-  confirmLabel: "Cherry-pick commit",
-});
+  t?: HistoryT,
+) =>
+  t
+    ? {
+        title: t("confirm.cherryPick.title", { hash: short(hash) }),
+        body: `${t("confirm.cherryPick.body", {
+          hash: short(hash),
+          branch: branch ?? t("dialogs.thisBranch"),
+        })} ${t("confirm.cherryPick.conflict")}`,
+        confirmLabel: t("dialogs.cherryPickAction"),
+      }
+    : {
+        title: `Cherry-pick commit ${short(hash)}?`,
+        body: `${OP_EFFECT["cherry-pick"](hash, branch)} ${OP_CONFLICT["cherry-pick"]}`,
+        confirmLabel: "Cherry-pick commit",
+      };
 
 /** A cherry-pick that found its changes already on the branch. The full line is
  *  every route's wording and the merge-parent dialog's default; History's search
@@ -134,3 +166,4 @@ export const UNDO_ROOT_COMMIT_CONFIRM = {
   confirmLabel: "Undo first commit",
   confirmVariant: "destructive",
 } as const;
+import type { TFunction } from "i18next";

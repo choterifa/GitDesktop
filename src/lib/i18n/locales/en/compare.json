@@ -1,0 +1,70 @@
+{
+  "actions": {
+    "switchBranch": "Switch branch…",
+    "newBranch": "New branch…",
+    "createBranch": "Create branch",
+    "createTag": "Create tag"
+  },
+  "empty": {
+    "detachedTitle": "You're on a detached HEAD",
+    "detachedDescription": "Compare needs a checked-out branch. Switch to a branch to see how it differs from another.",
+    "noOtherBranchesTitle": "No other branches",
+    "noOtherBranchesDescription": "Compare shows how {{branch}} diverges from another branch. Create a branch to have something to compare against."
+  },
+  "header": {
+    "compareWith": "Compare",
+    "with": "with"
+  },
+  "pr": {
+    "mergeRequest": "merge request",
+    "pullRequest": "pull request",
+    "view": "View {{noun}} #{{number}}",
+    "draft": "draft",
+    "create": "Create {{noun}}",
+    "createLocal": "Create local PR…",
+    "noCommitsReason": "{{branch}} has no commits to propose onto {{base}}",
+    "openTitle": "Open a {{noun}} into {{branch}}",
+    "proposeLocally": "Propose merging {{branch}} into {{base}} locally"
+  },
+  "list": {
+    "ariaLabel": "Compare selection",
+    "allChanges": "All changes",
+    "ahead_one": "{{count}} ahead",
+    "ahead_other": "{{count}} ahead",
+    "behind_one": "{{count}} behind",
+    "behind_other": "{{count}} behind",
+    "onBranchNotOther": "on {{branch}}, not on {{other}}",
+    "even": "These branches are even."
+  },
+  "branchPicker": {
+    "ariaLabel": "Compare with branch",
+    "filterPlaceholder": "Filter branches…",
+    "noMatches": "No branches match",
+    "default": "default",
+    "divergence": "{{ahead}} ahead, {{behind}} behind {{branch}}"
+  },
+  "diff": {
+    "error": "Could not compare these branches",
+    "noChanges": "{{compare}} has no changes relative to {{base}}",
+    "versus": "vs",
+    "fileCount_one": "{{count}} file",
+    "fileCount_other": "{{count}} files",
+    "changedFiles": "Changed files",
+    "selectFile": "Select a file to see its changes"
+  },
+  "createBranch": {
+    "title": "Create branch from commit",
+    "description": "Creates a branch starting at {{hash}} and switches to it.",
+    "name": "Branch name"
+  },
+  "createTag": {
+    "title": "Create tag",
+    "description": "Tags commit {{hash}}.",
+    "name": "Tag name"
+  },
+  "toast": {
+    "branchCreated": "Created branch {{name}}",
+    "tagCreated": "Created tag {{name}}",
+    "cherryPicked": "Cherry-picked {{hash}}"
+  }
+}

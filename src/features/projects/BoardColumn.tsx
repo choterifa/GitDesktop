@@ -10,6 +10,7 @@ import type { BoardItem, ProjectFieldDef } from "@/lib/git/types";
 import { cn } from "@/lib/utils";
 import { BoardCard } from "./BoardCard";
 import type { BoardColumnModel } from "./board-model";
+import { useProjectsText } from "./use-projects-text";
 
 /** A card's resting height — one title line, one meta line, and the row's own
  *  bottom gap. `measureElement` corrects every mounted card from there, so this
@@ -89,6 +90,7 @@ export const BoardColumn = memo(function BoardColumn({
   onPeekChange: (itemId: string | null) => void;
   onOpen: (item: BoardItem) => void;
 }) {
+  const tx = useProjectsText();
   // State-backed, never a ref: with a plain RefObject the virtualizer captures
   // `null` in its mount effect and never re-reads, so `getVirtualItems()` stays
   // empty and the column paints blank under a full-height scrollbar.
@@ -180,7 +182,7 @@ export const BoardColumn = memo(function BoardColumn({
     return () => cancelAnimationFrame(frame);
   }, [activeIndex, activeItemId, focusNonce, scrollEl, virtualizer]);
 
-  const countLabel = `${items.length} ${items.length === 1 ? "item" : "items"}`;
+  const countLabel = `${items.length} ${tx(items.length === 1 ? "item" : "items")}`;
   return (
     <section
       data-column-index={columnIndex}
@@ -210,7 +212,12 @@ export const BoardColumn = memo(function BoardColumn({
         ref={setScrollEl}
         role={items.length === 0 ? undefined : "listbox"}
         aria-label={
-          items.length === 0 ? undefined : `${column.label}, ${countLabel}`
+          items.length === 0
+            ? undefined
+            : tx("{{column}}, {{count}}", {
+                column: column.label,
+                count: countLabel,
+              })
         }
         // Stated whether or not a selection is live: the board can always take
         // one, and a listbox that only claimed to be multi-selectable once the
@@ -220,7 +227,7 @@ export const BoardColumn = memo(function BoardColumn({
       >
         {items.length === 0 ? (
           <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-            No items
+            {tx("No items")}
           </p>
         ) : (
           <div

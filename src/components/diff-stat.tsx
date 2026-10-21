@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,11 +23,12 @@ export function DiffStat({
   format?: (n: number) => string;
   className?: string;
 }) {
+  const { t } = useTranslation("components");
   if (isBinary) {
     return (
       <span className={cn("shrink-0 text-muted-foreground", className)}>
         <span aria-hidden>bin</span>
-        <span className="sr-only">Binary file</span>
+        <span className="sr-only">{t("diffStat.binaryFile")}</span>
       </span>
     );
   }
@@ -44,8 +46,7 @@ export function DiffStat({
       {/* Raw counts, never `format`: an abbreviating caller (Insights) still
           owes assistive tech the exact numbers. */}
       <span className="sr-only">
-        {added} {added === 1 ? "line" : "lines"} added, {deleted}{" "}
-        {deleted === 1 ? "line" : "lines"} deleted
+        {t("diffStat.linesAdded", { count: added })}, {t("diffStat.linesDeleted", { count: deleted })}
       </span>
     </span>
   );

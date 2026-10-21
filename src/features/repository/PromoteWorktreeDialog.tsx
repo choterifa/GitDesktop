@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ function PromoteBody({
   worktree: UserWorktree;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const worktrees = useUserWorktrees(repoPath);
   const startPromote = useWorktreeRemovalStore((s) => s.startPromote);
   // Synchronous re-entry latch: no re-render separates two clicks in the same
@@ -106,7 +108,7 @@ function PromoteBody({
   const noMain = !worktrees.isPending && !mainPath;
   const worktreeDirty = (wStatus.data?.entries.length ?? 0) > 0;
   const mainDirty = (mStatus.data?.entries.length ?? 0) > 0;
-  const mainBranch = mStatus.data?.branch?.name ?? "the default branch";
+  const mainBranch = mStatus.data?.branch?.name ?? t("promote.defaultBranch");
   const mainMidOp = Boolean(
     mOpState.data?.merging ||
       mOpState.data?.rebasing ||
@@ -149,7 +151,7 @@ function PromoteBody({
     });
     if (refused) {
       runningRef.current = false;
-      toast.info(refused);
+      toast.info(t("promote.refused"));
       return;
     }
     onClose();
@@ -158,19 +160,22 @@ function PromoteBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Promote to main workspace?</DialogTitle>
+        <DialogTitle>{t("promote.title")}</DialogTitle>
         <DialogDescription>
-          Checks out{" "}
-          <span className="font-mono">{worktree.branch || "this branch"}</span>{" "}
-          in your main workspace and removes this worktree — a branch can only
-          be checked out in one worktree at a time.
+          {t("promote.descriptionStart")}{" "}
+          <span className="font-mono">
+            {worktree.branch || t("promote.thisBranch")}
+          </span>{" "}
+          {t("promote.descriptionEnd")}
         </DialogDescription>
       </DialogHeader>
 
       <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <span className="text-muted-foreground">Worktree</span>
+        <span className="text-muted-foreground">{t("promote.worktree")}</span>
         <PathText path={worktree.path} className="font-mono" />
-        <span className="text-muted-foreground">Main workspace</span>
+        <span className="text-muted-foreground">
+          {t("promote.mainWorkspace")}
+        </span>
         {mainPath ? (
           <PathText path={mainPath} className="font-mono" />
         ) : (
@@ -180,50 +185,36 @@ function PromoteBody({
 
       {checking ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Spinner /> Checking worktree state…
+          <Spinner /> {t("promote.checking")}
         </p>
       ) : statusError ? (
-        <p className="text-xs text-warning">
-          Couldn't read the worktree or main workspace state. Close this and try
-          again.
-        </p>
+        <p className="text-xs text-warning">{t("promote.statusError")}</p>
       ) : noMain ? (
-        <p className="text-xs text-warning">
-          Couldn't find the main workspace for this repository.
-        </p>
+        <p className="text-xs text-warning">{t("promote.noMain")}</p>
       ) : worktreeDirty ? (
-        <p className="text-xs text-warning">
-          This worktree has uncommitted changes. Commit or stash them before
-          promoting.
-        </p>
+        <p className="text-xs text-warning">{t("promote.worktreeDirty")}</p>
       ) : mainMidOp ? (
-        <p className="text-xs text-warning">
-          The main workspace has a merge, rebase, cherry-pick or revert in
-          progress — finish or abort it first.
-        </p>
+        <p className="text-xs text-warning">{t("promote.mainOperation")}</p>
       ) : mainConflicted ? (
-        <p className="text-xs text-warning">
-          The main workspace has unresolved conflicts — resolve or abort them
-          first.
-        </p>
+        <p className="text-xs text-warning">{t("promote.mainConflicted")}</p>
       ) : worktree.isLocked ? (
-        <p className="text-xs text-warning">
-          This worktree is locked. Unlock it before promoting.
-        </p>
+        <p className="text-xs text-warning">{t("promote.locked")}</p>
       ) : mainDirty ? (
         <p className="text-xs text-info">
-          Your main workspace has uncommitted changes on{" "}
-          <span className="font-mono">{mainBranch}</span> — they'll be stashed
-          first, and Pop latest stash brings them back.
+          {t("promote.mainDirtyStart")}{" "}
+          <span className="font-mono">{mainBranch}</span>{" "}
+          {t("promote.mainDirtyEnd")}
         </p>
       ) : null}
 
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
-          Cancel
+          {t("promote.cancel")}
         </Button>
         <Button disabled={checking || blocked} onClick={doPromote}>
-          {mainDirty && !blocked ? "Stash & promote" : "Promote"}
+          {mainDirty && !blocked
+            ? t("promote.stashAndPromote")
+            : t("promote.promote")}
         </Button>
       </DialogFooter>
     </>

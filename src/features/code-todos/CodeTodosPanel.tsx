@@ -6,6 +6,7 @@ import {
 } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +52,7 @@ export function CodeTodosPanel({
   repoPath: string;
   active: boolean;
 }) {
+  const { t, i18n } = useTranslation("codeTodos");
   const selectedTodo = useUiStore((s) => s.selectedTodo);
   const setSelectedTodo = useUiStore((s) => s.setSelectedTodo);
 
@@ -234,7 +236,7 @@ export function CodeTodosPanel({
           variant="ghost"
           size="icon-sm"
           className="ml-auto"
-          aria-label="Rescan for TODOs"
+          aria-label={t("rescan")}
           disabled={busy || noMarkers}
           onClick={() => scan.refetch()}
         >
@@ -245,7 +247,7 @@ export function CodeTodosPanel({
         <Input
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          placeholder="Filter by text or path"
+          placeholder={t("filterPlaceholder")}
           className="h-7"
           autoComplete="off"
         />
@@ -253,7 +255,7 @@ export function CodeTodosPanel({
 
       {noMarkers ? (
         <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-          Select a marker above to scan.
+          {t("selectMarker")}
         </p>
       ) : scan.isPending ? (
         <div className="space-y-2 p-3">
@@ -263,9 +265,7 @@ export function CodeTodosPanel({
         </div>
       ) : scan.isError ? (
         <div className="p-4 text-center text-xs">
-          <p className="font-medium text-destructive">
-            Couldn't scan for TODOs.
-          </p>
+          <p className="font-medium text-destructive">{t("scanFailed")}</p>
           <p className="mt-1 text-muted-foreground">
             {presentError(scan.error).summary}
           </p>
@@ -275,7 +275,7 @@ export function CodeTodosPanel({
             className="mt-3"
             onClick={() => scan.refetch()}
           >
-            Retry
+            {t("retry")}
           </Button>
         </div>
       ) : allItems.length === 0 ? (
@@ -284,9 +284,9 @@ export function CodeTodosPanel({
             <EmptyMedia variant="icon">
               <ListChecksIcon />
             </EmptyMedia>
-            <EmptyTitle>No TODO comments found</EmptyTitle>
+            <EmptyTitle>{t("empty.title")}</EmptyTitle>
             <EmptyDescription>
-              Nothing in the working tree matches {markers.join(", ")}.
+              {t("empty.description", { markers: markers.join(", ") })}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -294,13 +294,14 @@ export function CodeTodosPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {scan.data?.truncated && (
             <p className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-              Showing the first {TODO_SCAN_CAP.toLocaleString()} matches —
-              deselect markers to scan fewer, or filter the text below.
+              {t("truncated", {
+                count: TODO_SCAN_CAP.toLocaleString(i18n.resolvedLanguage),
+              })}
             </p>
           )}
           {flatRows.length === 0 ? (
             <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-              No matches for this filter.
+              {t("empty.filtered")}
             </p>
           ) : (
             // Native overflow scroll container (not the Base-UI ScrollArea) so the
@@ -312,7 +313,7 @@ export function CodeTodosPanel({
               onKeyDown={onListKeyDown}
               className="min-h-0 flex-1 overflow-y-auto"
               role="listbox"
-              aria-label="Code TODOs"
+              aria-label={t("title")}
             >
               <div
                 className="relative w-full"
@@ -380,6 +381,7 @@ function TodoRow({
   active: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation("codeTodos");
   return (
     <button
       type="button"
@@ -398,7 +400,9 @@ function TodoRow({
       <MarkerChip marker={item.marker} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         {item.text || (
-          <span className="text-muted-foreground">(no description)</span>
+          <span className="text-muted-foreground">
+            ({t("detail.noDescription")})
+          </span>
         )}
       </span>
       <span className="shrink-0 tabular-nums text-muted-foreground">

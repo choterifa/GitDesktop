@@ -22,6 +22,7 @@ import type { FileDiff } from "@/lib/git/types";
 import { useContainerWidth } from "@/lib/use-container-width";
 import { cn } from "@/lib/utils";
 import { AgentNarration } from "./AgentNarration";
+import { useSessionText } from "./use-session-text";
 
 type GlyphIcon = ComponentType<{ className?: string }>;
 
@@ -77,6 +78,7 @@ function ToolStep({
   target: string | null;
   baseDir?: string;
 }) {
+  const tx = useSessionText();
   const meta = META[tool] ?? META.other;
   const Glyph = meta.icon;
   const shown = target && meta.file ? relativize(target, baseDir) : target;
@@ -89,7 +91,7 @@ function ToolStep({
       title={meta.file && target ? target : undefined}
     >
       <Glyph className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="shrink-0 text-muted-foreground">{meta.verb}</span>
+      <span className="shrink-0 text-muted-foreground">{tx(meta.verb)}</span>
       {shown &&
         // `meta.file` is what makes the target a path; every other tool's
         // target is a command or URL, which has no filename to protect.
@@ -130,6 +132,7 @@ function CommandStep({
   target: string;
   baseDir?: string;
 }) {
+  const tx = useSessionText();
   const [open, setOpen] = useState(false);
   const meta = META[tool] ?? META.other;
   const Glyph = meta.icon;
@@ -149,7 +152,7 @@ function CommandStep({
           )}
         />
         <Glyph className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-muted-foreground">{meta.verb}</span>
+        <span className="shrink-0 text-muted-foreground">{tx(meta.verb)}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-foreground/75">
           {shown}
         </span>
@@ -175,19 +178,20 @@ function InlineDiff({
   repoPath?: string;
   diff: UseQueryResult<FileDiff>;
 }) {
+  const tx = useSessionText();
   // A transcript step's diff sits inside the conversation column, which is
   // narrower than a diff pane at any window size — measure it so split never
   // renders below two legible columns.
   const [paneRef, paneWidth] = useContainerWidth<HTMLDivElement>();
   let body: React.ReactNode;
   if (diff.isPending) {
-    body = <InlineNote>Loading diff…</InlineNote>;
+    body = <InlineNote>{tx("Loading diff…")}</InlineNote>;
   } else if (diff.isError || !diff.data) {
-    body = <InlineNote>Couldn't load the diff for this file.</InlineNote>;
+    body = <InlineNote>{tx("Couldn't load the diff for this file.")}</InlineNote>;
   } else if (diff.data.isBinary) {
-    body = <InlineNote>Binary file — no text diff.</InlineNote>;
+    body = <InlineNote>{tx("Binary file — no text diff.")}</InlineNote>;
   } else if (!diff.data.text.trim()) {
-    body = <InlineNote>No changes to show.</InlineNote>;
+    body = <InlineNote>{tx("No changes to show.")}</InlineNote>;
   } else {
     body = (
       <GitDiffView

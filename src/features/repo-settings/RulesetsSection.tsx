@@ -44,6 +44,7 @@ import {
   type SwapFocusRef,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 const ENFORCEMENTS: { value: RulesetEnforcement; label: string }[] = [
   { value: "active", label: "Active" },
@@ -53,10 +54,6 @@ const ENFORCEMENTS: { value: RulesetEnforcement; label: string }[] = [
 
 /** Trigger labels for the enforcement selects — without them Base UI shows the
  *  raw value ("evaluate"). */
-const ENFORCEMENT_ITEMS: Record<string, string> = Object.fromEntries(
-  ENFORCEMENTS.map((e) => [e.value, e.label]),
-);
-
 /** Labels for the ref-scope select — trigger and popup both render from here. */
 const REF_SCOPE_ITEMS: Record<string, string> = {
   default: "Default branch",
@@ -407,7 +404,7 @@ function RulesetList({
   async function handleDelete(id: number) {
     try {
       await del.mutateAsync(id);
-      toast.success("Ruleset deleted");
+      toast.success(tr("Ruleset deleted"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -429,8 +426,9 @@ function RulesetList({
     <div data-confirm-section className="min-w-0 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          Layered branch protection — the modern replacement for classic
-          protection.
+          {tr(
+            "Layered branch protection — the modern replacement for classic\r\n          protection.",
+          )}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -440,19 +438,19 @@ function RulesetList({
           onClick={onNew}
         >
           <PlusIcon data-icon="inline-start" />
-          New ruleset
+          {tr("New ruleset")}
         </Button>
       </div>
 
       <RemoteListSection
         query={rulesets}
         rowCount={rulesets.data?.length ?? 0}
-        noun="rulesets"
-        loadFailed="Couldn't load rulesets."
-        emptyLabel="No rulesets yet."
+        noun={tr("rulesets")}
+        loadFailed={tr("Couldn't load rulesets.")}
+        emptyLabel={tr("No rulesets yet.")}
         skeletonClassName="h-12 w-full"
-        errorTitle="Couldn't load rulesets."
-        errorHint={ADMIN_HINT}
+        errorTitle={tr("Couldn't load rulesets.")}
+        errorHint={tr(ADMIN_HINT)}
       >
         {rulesets.data?.map((rs) => {
           const org = rs.sourceType === "Organization";
@@ -478,8 +476,8 @@ function RulesetList({
                 </Badge>
               ) : confirming === rs.id ? (
                 <InlineConfirm
-                  prompt="Delete?"
-                  actLabel="Delete"
+                  prompt={tr("Delete?")}
+                  actLabel={tr("Delete")}
                   pending={del.isPending}
                   heldReason={offlineReason}
                   swapFocusRef={swapFocus(rs.id)}
@@ -495,8 +493,10 @@ function RulesetList({
                       handleEnforcement(rs.id, v as RulesetEnforcement)
                     }
                     options={ENFORCEMENTS}
-                    items={ENFORCEMENT_ITEMS}
-                    label={`Enforcement for ${rs.name}`}
+                    items={Object.fromEntries(
+                      ENFORCEMENTS.map((e) => [e.value, tr(e.label)]),
+                    )}
+                    label={tr("Enforcement for {{name}}", { name: rs.name })}
                   />
                   <DisabledReasonButton
                     ref={swapFocus(rowFormSwapKey("edit", rs.id))}
@@ -506,15 +506,17 @@ function RulesetList({
                     reason="Only branch rulesets can be edited here — manage tag and push rulesets on GitHub."
                     onClick={() => onEdit(rs.id)}
                   >
-                    Edit
+                    {tr("Edit")}
                   </DisabledReasonButton>
                   <Button
                     ref={swapFocus(rs.id)}
                     size="sm"
                     variant="ghost"
                     className="text-muted-foreground hover:text-destructive"
-                    title="Delete"
-                    aria-label={`Delete ruleset ${rs.name}`}
+                    title={tr("Delete")}
+                    aria-label={tr("Delete ruleset {{name}}", {
+                      name: rs.name,
+                    })}
                     onClick={() => setConfirming(rs.id)}
                   >
                     <TrashIcon />
@@ -556,10 +558,10 @@ function RulesetEditor({
     ) : (
       <RemoteFormSection
         query={existing}
-        noun="this ruleset"
+        noun={tr("this ruleset")}
         skeleton={<Skeleton className="h-64 w-full" />}
-        errorTitle="Couldn't load this ruleset."
-        errorHint={ADMIN_HINT}
+        errorTitle={tr("Couldn't load this ruleset.")}
+        errorHint={tr(ADMIN_HINT)}
       >
         {(original) => (
           // The fields' own column: the section host spaces tighter.
@@ -585,7 +587,7 @@ function RulesetEditor({
         className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <CaretLeftIcon />
-        Back to rulesets
+        {tr("Back to rulesets")}
       </button>
       {body}
     </div>
@@ -639,7 +641,7 @@ function RulesetForm({
       const body = draftToBody(d, original);
       if (id != null) await update.mutateAsync({ id, body });
       else await create.mutateAsync(body);
-      toast.success(id != null ? "Ruleset updated" : "Ruleset created");
+      toast.success(tr(id != null ? "Ruleset updated" : "Ruleset created"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -652,19 +654,21 @@ function RulesetForm({
     <>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="ruleset-name">Name</Label>
+          <Label htmlFor="ruleset-name">{tr("Name")}</Label>
           <Input
             id="ruleset-name"
             value={d.name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="e.g. Protect main"
+            placeholder={tr("e.g. Protect main")}
             autoComplete="off"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="ruleset-enforcement">Enforcement</Label>
+          <Label htmlFor="ruleset-enforcement">{tr("Enforcement")}</Label>
           <Select
-            items={ENFORCEMENT_ITEMS}
+            items={Object.fromEntries(
+              ENFORCEMENTS.map((e) => [e.value, tr(e.label)]),
+            )}
             value={d.enforcement}
             onValueChange={(v) =>
               v && set("enforcement", v as RulesetEnforcement)
@@ -676,7 +680,7 @@ function RulesetForm({
             <SelectContent>
               {ENFORCEMENTS.map((e) => (
                 <SelectItem key={e.value} value={e.value}>
-                  {e.label}
+                  {tr(e.label)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -685,9 +689,14 @@ function RulesetForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="ruleset-scope">Target branches</Label>
+        <Label htmlFor="ruleset-scope">{tr("Target branches")}</Label>
         <Select
-          items={REF_SCOPE_ITEMS}
+          items={Object.fromEntries(
+            Object.entries(REF_SCOPE_ITEMS).map(([scope, label]) => [
+              scope,
+              tr(label),
+            ]),
+          )}
           value={d.refScope}
           onValueChange={(v) => v && set("refScope", v as Draft["refScope"])}
         >
@@ -697,7 +706,7 @@ function RulesetForm({
           <SelectContent>
             {Object.entries(REF_SCOPE_ITEMS).map(([scope, label]) => (
               <SelectItem key={scope} value={scope}>
-                {label}
+                {tr(label)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -706,7 +715,7 @@ function RulesetForm({
           <Textarea
             value={d.customPatterns}
             onChange={(e) => set("customPatterns", e.target.value)}
-            placeholder={"main\nrelease/*  (one fnmatch pattern per line)"}
+            placeholder={tr("main\nrelease/*  (one fnmatch pattern per line)")}
             rows={2}
             autoComplete="off"
             spellCheck={false}
@@ -714,9 +723,9 @@ function RulesetForm({
         )}
       </div>
 
-      <LabeledGroup label="Rules">
+      <LabeledGroup label={tr("Rules")}>
         <RuleToggle
-          label="Require a pull request before merging"
+          label={tr("Require a pull request before merging")}
           checked={d.requirePr}
           onChange={(v) => set("requirePr", v)}
         />
@@ -724,7 +733,7 @@ function RulesetForm({
           <div className="ml-6 space-y-2 border-l pl-3">
             <div className="flex items-center gap-2">
               <Label htmlFor="ruleset-approvals" className="text-xs">
-                Required approvals
+                {tr("Required approvals")}
               </Label>
               <ApprovalsInput
                 value={d.approvals}
@@ -732,17 +741,17 @@ function RulesetForm({
               />
             </div>
             <RuleToggle
-              label="Dismiss stale approvals on new pushes"
+              label={tr("Dismiss stale approvals on new pushes")}
               checked={d.dismissStale}
               onChange={(v) => set("dismissStale", v)}
             />
             <RuleToggle
-              label="Require review from Code Owners"
+              label={tr("Require review from Code Owners")}
               checked={d.codeOwner}
               onChange={(v) => set("codeOwner", v)}
             />
             <RuleToggle
-              label="Require approval of the most recent push"
+              label={tr("Require approval of the most recent push")}
               checked={d.lastPush}
               onChange={(v) => set("lastPush", v)}
             />
@@ -750,7 +759,7 @@ function RulesetForm({
         )}
 
         <RuleToggle
-          label="Require status checks to pass"
+          label={tr("Require status checks to pass")}
           checked={d.requireChecks}
           onChange={(v) => set("requireChecks", v)}
         />
@@ -759,33 +768,34 @@ function RulesetForm({
             <Textarea
               value={d.checkContexts}
               onChange={(e) => set("checkContexts", e.target.value)}
-              placeholder="check names, one per line"
+              placeholder={tr("check names, one per line")}
               rows={2}
               autoComplete="off"
               spellCheck={false}
             />
             {repeatedChecks && (
               <p className="text-[11px] text-muted-foreground">
-                This ruleset requires the same check more than once — keep every
-                line to keep them all.
+                {tr(
+                  "This ruleset requires the same check more than once — keep every\r\n                line to keep them all.",
+                )}
               </p>
             )}
             {pins.length > 0 && (
               <div className="space-y-0.5 text-[11px] text-muted-foreground">
-                <p>Checks pinned to an app:</p>
+                <p>{tr("Checks pinned to an app:")}</p>
                 <ul className="space-y-0.5">
                   {pins.map((pin, i) => (
                     <li key={`${i}:${pin.integrationId}:${pin.context}`}>
-                      {pin.context} —{" "}
+                      {pin.context} {tr("—")}{" "}
                       {appNames.get(pin.integrationId) ||
-                        `app #${pin.integrationId}`}
+                        tr("app #{{id}}", { id: pin.integrationId })}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
             <RuleToggle
-              label="Require branches to be up to date before merging"
+              label={tr("Require branches to be up to date before merging")}
               checked={d.strictChecks}
               onChange={(v) => set("strictChecks", v)}
             />
@@ -793,22 +803,22 @@ function RulesetForm({
         )}
 
         <RuleToggle
-          label="Block force pushes"
+          label={tr("Block force pushes")}
           checked={d.blockForcePush}
           onChange={(v) => set("blockForcePush", v)}
         />
         <RuleToggle
-          label="Restrict deletions"
+          label={tr("Restrict deletions")}
           checked={d.restrictDeletions}
           onChange={(v) => set("restrictDeletions", v)}
         />
         <RuleToggle
-          label="Require linear history"
+          label={tr("Require linear history")}
           checked={d.linearHistory}
           onChange={(v) => set("linearHistory", v)}
         />
         <RuleToggle
-          label="Require signed commits"
+          label={tr("Require signed commits")}
           checked={d.requireSignatures}
           onChange={(v) => set("requireSignatures", v)}
         />
@@ -822,7 +832,7 @@ function RulesetForm({
           disabled={pending}
           reason={pending ? SAVING_LAST_CHANGE_REASON : undefined}
         >
-          Cancel
+          {tr("Cancel")}
         </DisabledReasonButton>
         <DisabledReasonButton
           ref={swapFocusRef}

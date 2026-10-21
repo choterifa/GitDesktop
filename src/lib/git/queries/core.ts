@@ -73,6 +73,7 @@ export const repoKeys = {
     ["repo", repo, "diff", file, staged] as const,
   commits: (repo: string) => ["repo", repo, "commits"] as const,
   log: (repo: string) => ["repo", repo, "log"] as const,
+  historyGraph: (repo: string) => ["repo", repo, "log", "graph"] as const,
   commitDetails: (repo: string, hash: string) =>
     ["repo", repo, "commit", hash] as const,
   commitFiles: (repo: string, hash: string) =>

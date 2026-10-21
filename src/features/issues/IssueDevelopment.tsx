@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
@@ -29,7 +30,6 @@ import { useRetryFocusRescue } from "@/features/conversations/ConversationListPa
 import { useCreateLinkedBranch, useIssueDevelopment } from "@/lib/git/queries";
 import type { IssueDetails, RemoteLens } from "@/lib/git/types";
 import {
-  pendingWriteReason,
   refuseWhileOffline,
   useOfflineHold,
 } from "@/lib/offline-writes";
@@ -86,6 +86,7 @@ export function IssueDevelopment({
    *  held while the read is out, and says so when it can't load. */
   reserve?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const dev = useIssueDevelopment(repoPath, number, lens);
   const createBranch = useCreateLinkedBranch(repoPath, lens);
   const openPr = useUiStore((s) => s.openPr);
@@ -127,14 +128,13 @@ export function IssueDevelopment({
   const submitReason = (() => {
     switch (true) {
       case createBranch.isPending:
-        return pendingWriteReason(
-          createBranch.isPaused,
-          "Creating the branch…",
-        );
+        return createBranch.isPaused
+          ? t("shared.offlineQueued")
+          : t("development.creatingBranch");
       case !!offlineHold:
         return offlineHold;
       case !branchName.trim():
-        return "Enter a branch name";
+        return t("development.enterBranchName");
       default:
         return undefined;
     }
@@ -151,8 +151,8 @@ export function IssueDevelopment({
       toastError(e);
       return;
     }
-    toast.success(`Created branch ${name}`, {
-      description: "Fetch to check it out locally.",
+    toast.success(t("development.branchCreated", { name }), {
+      description: t("development.fetchToCheckOut"),
     });
     setBranchOpen(false);
   }
@@ -160,7 +160,9 @@ export function IssueDevelopment({
   return (
     <div ref={hostRef} tabIndex={-1} className="space-y-1.5 outline-none">
       <div className="flex items-center gap-2">
-        <p className="text-xs font-medium text-muted-foreground">Development</p>
+        <p className="text-xs font-medium text-muted-foreground">
+          {t("development.title")}
+        </p>
         <span className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -168,7 +170,7 @@ export function IssueDevelopment({
               <Button
                 variant="ghost"
                 size="xs"
-                aria-label="Development actions"
+                aria-label={t("development.actions")}
               />
             }
           >
@@ -185,7 +187,7 @@ export function IssueDevelopment({
                 setBranchOpen(true);
               }}
             >
-              Create a branch…
+              {t("development.createBranchMenu")}
               {disabledReason ? ` — ${disabledReason}` : ""}
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -194,7 +196,7 @@ export function IssueDevelopment({
               onClick={() => openUrl(issue.url)}
             >
               <ArrowSquareOutIcon />
-              Link a pull request or branch on GitHub…
+              {t("development.linkExistingMenu")}
               {linkOutReason ? ` — ${linkOutReason}` : ""}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -235,14 +237,14 @@ export function IssueDevelopment({
         ? reserve && (
             <SectionReadLine
               query={dev}
-              noun="linked pull requests and branches"
+              noun={t("development.linkedPullRequestsAndBranches")}
               retryRef={retryRef}
             />
           )
         : prs.length === 0 &&
           branches.length === 0 && (
             <p className="text-[11px] text-muted-foreground">
-              No linked pull requests or branches.
+              {t("development.noLinkedItems")}
             </p>
           )}
 
@@ -256,17 +258,18 @@ export function IssueDevelopment({
             }}
           >
             <DialogHeader>
-              <DialogTitle>Create a branch</DialogTitle>
+              <DialogTitle>{t("development.createBranchTitle")}</DialogTitle>
               <DialogDescription>
-                Creates a branch off the default branch on GitHub, linked to #
-                {branchFor?.number}. Fetch afterwards to check it out locally.
+                {t("development.createBranchDescription", {
+                  number: branchFor?.number,
+                })}
               </DialogDescription>
             </DialogHeader>
             <Input
               autoFocus
               value={branchName}
               onChange={(e) => setBranchName(e.target.value)}
-              placeholder="branch-name"
+              placeholder={t("development.branchNamePlaceholder")}
               autoComplete="off"
               spellCheck={false}
               className="font-mono"
@@ -277,7 +280,7 @@ export function IssueDevelopment({
                 variant="outline"
                 onClick={() => setBranchOpen(false)}
               >
-                Cancel
+                {t("shared.cancel")}
               </Button>
               <DisabledReasonButton
                 type="submit"
@@ -285,7 +288,7 @@ export function IssueDevelopment({
                 reason={submitReason}
               >
                 {createBranch.isPending && <Spinner data-icon="inline-start" />}
-                Create branch
+                {t("development.createBranchTitle")}
               </DisabledReasonButton>
             </DialogFooter>
           </form>

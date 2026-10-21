@@ -46,6 +46,7 @@ import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
 import { LinkedIssuesField } from "./LinkedIssuesField";
 import { ReviewerNotesField } from "./ReviewerNotesField";
+import { usePullsText } from "./use-pulls-text";
 import { useBranchPickerOptions } from "./useBranchPickerOptions";
 import { useGeneratePrDescription } from "./useGeneratePrDescription";
 import {
@@ -69,6 +70,7 @@ export function CreateLocalPrDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tx = usePullsText();
   const status = useRepoStatus(repoPath);
   const defaultBranch = useDefaultBranch(repoPath);
   const createPr = useCreateLocalPr(repoPath);
@@ -82,8 +84,8 @@ export function CreateLocalPrDialog({
     cancel,
     generating,
     close: () => onOpenChange(false),
-    readyTitle: "PR description ready",
-    readyDescription: "It's waiting in the dialog.",
+    readyTitle: tx("PR description ready"),
+    readyDescription: tx("It's waiting in the dialog."),
     reopen: () => useUiStore.getState().openLocalPrCreate(),
   });
   // Linked issues: real repo issues to reference. A local PR's `Closes #N` lines
@@ -123,7 +125,9 @@ export function CreateLocalPrDialog({
     validators: {
       // Same branch on both sides proposes nothing — gate the submit.
       onChange: ({ value }) =>
-        value.head === value.base ? "Pick two different branches." : undefined,
+        value.head === value.base
+          ? tx("Pick two different branches.")
+          : undefined,
     },
     onSubmit: async ({ value }) => {
       const submitGen = seedGenRef.current;
@@ -187,7 +191,7 @@ export function CreateLocalPrDialog({
         // repo is live now. The toast fires either way, naming its origin.
         const originNote = originNoteFor(repoPath);
         const stillHere = originNote === undefined;
-        toast.success(`Created local PR: ${pr.title}`, {
+        toast.success(tx("Created local PR: {{title}}", { title: pr.title }), {
           description: originNote,
         });
         if (stillHere) {
@@ -376,11 +380,12 @@ export function CreateLocalPrDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>New local pull request</DialogTitle>
+            <DialogTitle>{tx("New local pull request")}</DialogTitle>
             <DialogDescription>
-              Propose merging one branch into another and review it locally.
-              Merge it later with a <span className="font-mono">--no-ff</span>{" "}
-              commit.
+              {tx(
+                "Propose merging one branch into another and review it locally. Merge it later with a",
+              )}{" "}
+              <span className="font-mono">--no-ff</span> {tx("commit.")}
             </DialogDescription>
           </DialogHeader>
 
@@ -391,7 +396,7 @@ export function CreateLocalPrDialog({
                 <form.AppField name="head">
                   {(field) => (
                     <field.SelectField
-                      label="Merge"
+                      label={tx("Merge")}
                       items={items}
                       annotations={annotations}
                       sizeToContent
@@ -400,13 +405,13 @@ export function CreateLocalPrDialog({
                 </form.AppField>
               </div>
               <span className="shrink-0 pb-2 text-xs text-muted-foreground">
-                into
+                {tx("into")}
               </span>
               <div className="min-w-0 flex-initial">
                 <form.AppField name="base">
                   {(field) => (
                     <field.SelectField
-                      label="Base"
+                      label={tx("Base")}
                       items={items}
                       annotations={annotations}
                       sizeToContent
@@ -422,11 +427,16 @@ export function CreateLocalPrDialog({
               </p>
               {sameBranch ? (
                 <p className="text-xs text-warning">
-                  Pick two different branches.
+                  {tx("Pick two different branches.")}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {ahead.length} commit{ahead.length === 1 ? "" : "s"} to merge.
+                  {tx(
+                    ahead.length === 1
+                      ? "{{count}} commit to merge."
+                      : "{{count}} commits to merge.",
+                    { count: ahead.length },
+                  )}
                 </p>
               )}
             </div>
@@ -437,16 +447,16 @@ export function CreateLocalPrDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Title"
-                  placeholder="Summarize the change"
+                  label={tx("Title")}
+                  placeholder={tx("Summarize the change")}
                 />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Description"
-                  placeholder="Describe what changed and why"
+                  label={tx("Description")}
+                  placeholder={tx("Describe what changed and why")}
                   rows={7}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                   actions={
@@ -458,7 +468,7 @@ export function CreateLocalPrDialog({
                         onClick={cancel}
                       >
                         <XIcon data-icon="inline-start" />
-                        Cancel
+                        {tx("Cancel")}
                       </Button>
                     ) : (
                       // Nothing to merge stays a plain disable; a running create
@@ -480,12 +490,12 @@ export function CreateLocalPrDialog({
                         // a disabled Generate's shortcut is dead too.
                         title={
                           !(sameBranch || ahead.length === 0 || isSubmitting)
-                            ? `Generate the title and description with AI${generateHint}`
-                            : "Generate the title and description with AI"
+                            ? `${tx("Generate the title and description with AI")}${generateHint}`
+                            : tx("Generate the title and description with AI")
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Generate
+                        {tx("Generate")}
                       </DisabledReasonButton>
                     )
                   }
@@ -530,11 +540,11 @@ export function CreateLocalPrDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               <form.SubmitButton disabled={submitBlocked} title={SUBMIT_HINT}>
-                Create local PR
+                {tx("Create local PR")}
               </form.SubmitButton>
             </form.AppForm>
           </DialogFooter>

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { ConflictFileView } from "@/features/repository/ConflictFileView";
 import { ConflictResolveView } from "@/features/repository/ConflictResolveView";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import {
   LOCAL_PR_WRITES_KEY,
   pendingWriteMatching,
@@ -30,18 +30,12 @@ import { useConflictResolve } from "@/lib/stores/conflict-resolve";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 const baseName = (path: string) => path.split("/").pop() || path;
 
 /** Local-PR wording: this throws away a paused MERGE into the user's own branch, not a
  *  remote-PR resolution — deliberately NOT shared with the remote surface's copy. */
-const DISCARD_MERGE_CONFIRM = {
-  title: "Discard this merge?",
-  body: "The conflict resolution is thrown away; your branch and working tree are untouched.",
-  confirmLabel: "Discard merge",
-  confirmVariant: "destructive",
-} as const;
-
 /**
  * The isolated-worktree conflict-resolution surface for a paused local-PR merge.
  * The merge lives in a hidden detached worktree at `pr.pendingMerge.worktreePath`
@@ -60,6 +54,7 @@ export function ResolveConflictsView({
   repoPath: string;
   pr: LocalPr;
 }) {
+  const tx = usePullsText();
   const pending = pr.pendingMerge;
   const worktreePath = pending?.worktreePath ?? "";
   const status = useRepoStatus(worktreePath);
@@ -146,7 +141,7 @@ export function ResolveConflictsView({
   async function onFinish() {
     if (!pending) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -171,13 +166,15 @@ export function ResolveConflictsView({
             pendingMerge: undefined,
           }),
         });
-        toast.success(`Merged ${pr.head} into ${pr.base}`);
+        toast.success(
+          tx("Merged {{head}} into {{base}}", { head: pr.head, base: pr.base }),
+        );
         return;
       }
       // A multi-step rebase re-paused on the next commit's conflicts, still
       // in the same worktree. Leave `pendingMerge` untouched — the live
       // worktree status already drives this surface.
-      toast("More conflicts to resolve");
+      toast(tx("More conflicts to resolve"));
     } catch (e) {
       toastError(e);
     }
@@ -185,7 +182,17 @@ export function ResolveConflictsView({
 
   async function onAbort() {
     if (!pending) return;
-    if (!(await useConfirm.getState().ask(DISCARD_MERGE_CONFIRM))) return;
+    if (
+      !(await useConfirm.getState().ask({
+        title: tx("Discard this merge?"),
+        body: tx(
+          "The conflict resolution is thrown away; your branch and working tree are untouched.",
+        ),
+        confirmLabel: tx("Discard merge"),
+        confirmVariant: "destructive",
+      }))
+    )
+      return;
     try {
       await abort.mutateAsync({
         worktreePath: pending.worktreePath,
@@ -197,7 +204,7 @@ export function ResolveConflictsView({
         id: pr.id,
         mutate: (cur) => ({ ...cur, pendingMerge: undefined }),
       });
-      toast.success("Merge discarded");
+      toast.success(tx("Merge discarded"));
     } catch (e) {
       toastError(e);
     }
@@ -219,7 +226,7 @@ export function ResolveConflictsView({
         <span className="flex min-w-0 items-center gap-1.5 text-warning">
           <WarningIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate">
-            Resolving conflicts · <span className="font-mono">{pr.head}</span> →{" "}
+            {tx("Resolving conflicts · {{head}} →", { head: pr.head })}{" "}
             <span className="font-mono">{pr.base}</span>
           </span>
         </span>
@@ -231,17 +238,19 @@ export function ResolveConflictsView({
               onClick={() => startAll(conflictedPaths, worktreePath)}
             >
               <SparkleIcon data-icon="inline-start" />
-              {remaining === 1 ? "Resolve with AI" : "Resolve all with AI"}
+              {remaining === 1
+                ? tx("Resolve with AI")
+                : tx("Resolve all with AI")}
             </Button>
           )}
           <DisabledReasonButton
             variant="outline"
             size="xs"
             disabled={busy}
-            reason={busy ? ACT_PENDING_REASON : undefined}
+            reason={busy ? tx(ACT_PENDING_REASON) : undefined}
             onClick={() => void onAbort()}
           >
-            Abort
+            {tx("Abort")}
           </DisabledReasonButton>
           <DisabledReasonButton
             size="xs"
@@ -249,9 +258,9 @@ export function ResolveConflictsView({
             reason={(() => {
               switch (true) {
                 case busy:
-                  return ACT_PENDING_REASON;
+                  return tx(ACT_PENDING_REASON);
                 case remaining > 0:
-                  return "Resolve every conflict first";
+                  return tx("Resolve every conflict first");
                 default:
                   return undefined;
               }
@@ -259,7 +268,7 @@ export function ResolveConflictsView({
             onClick={() => void onFinish()}
           >
             {finishing && <Spinner data-icon="inline-start" />}
-            Finish merge
+            {tx("Finish merge")}
           </DisabledReasonButton>
         </div>
       </div>
@@ -270,13 +279,13 @@ export function ResolveConflictsView({
           className="w-64 shrink-0 overflow-y-auto border-r"
           onKeyDown={onListKeyDown}
           role="listbox"
-          aria-label="Conflicted files"
+          aria-label={tx("Conflicted files")}
         >
           {done ? (
             <div className="flex items-start gap-1.5 p-3 text-xs text-muted-foreground">
               <CheckCircleIcon className="mt-px size-3.5 shrink-0 text-success" />
               <span>
-                All conflicts resolved — Finish to complete the merge.
+                {tx("All conflicts resolved — Finish to complete the merge.")}
               </span>
             </div>
           ) : (
@@ -310,7 +319,7 @@ export function ResolveConflictsView({
         <div className="min-h-0 flex-1">
           {done ? (
             <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-              All conflicts resolved — Finish to complete the merge.
+              {tx("All conflicts resolved — Finish to complete the merge.")}
             </div>
           ) : selectedPath ? (
             walkActive === selectedPath ? (

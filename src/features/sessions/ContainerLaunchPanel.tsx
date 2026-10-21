@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { stopTestContainer, testContainerRunning } from "@/lib/ai/sandbox";
 import { toastError } from "@/lib/toast";
+import { useSessionText } from "./use-session-text";
 
 /** Vite's default — the most common dev port, pre-filled so one click just works. */
 export const DEFAULT_PORTS = "5173";
@@ -44,6 +45,7 @@ export function ContainerLaunchPanel({
   onReconnect: () => void;
   onOpenExternal?: (ports: string[]) => void;
 }) {
+  const tx = useSessionText();
   const [ports, setPorts] = useState(DEFAULT_PORTS);
   // null = haven't checked yet; otherwise whether a container is already up.
   const [running, setRunning] = useState<boolean | null>(null);
@@ -69,21 +71,18 @@ export function ContainerLaunchPanel({
   };
 
   if (running === null) {
-    return <p className="text-[11px] text-muted-foreground">Checking…</p>;
+    return <p className="text-[11px] text-muted-foreground">{tx("Checking…")}</p>;
   }
 
   if (running) {
     return (
       <>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          A container for this session is{" "}
-          <span className="text-foreground">already running</span> — its server
-          and published ports are still up (closing the shell doesn't stop it).
-          Reconnect a new shell, or stop it to free the ports.
+          {tx("A container for this session is already running — its server and published ports are still up (closing the shell doesn't stop it). Reconnect a new shell, or stop it to free the ports.")}
         </p>
         <div className="mt-2.5 flex gap-2">
           <Button size="sm" className="flex-1" onClick={onReconnect}>
-            Reconnect
+            {tx("Reconnect")}
           </Button>
           <Button
             size="sm"
@@ -92,7 +91,7 @@ export function ContainerLaunchPanel({
             disabled={stopping}
             onClick={stop}
           >
-            {stopping ? "Stopping…" : "Stop container"}
+            {stopping ? tx("Stopping…") : tx("Stop container")}
           </Button>
         </div>
       </>
@@ -102,11 +101,10 @@ export function ContainerLaunchPanel({
   return (
     <>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Opens a shell in the same image with this session's worktree mounted, so
-        its Linux deps and build match.
+        {tx("Opens a shell in the same image with this session's worktree mounted, so its Linux deps and build match.")}
       </p>
       <label className="mt-2.5 block text-[11px] font-medium">
-        Publish ports
+        {tx("Publish ports")}
         <Input
           className="mt-1 font-mono"
           value={ports}
@@ -122,10 +120,9 @@ export function ContainerLaunchPanel({
         />
       </label>
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-        Space/comma separated. Use{" "}
+        {tx("Space/comma separated. Use")}{" "}
         <code className="font-mono">host:container</code> (e.g.{" "}
-        <code className="font-mono">5174:5173</code>) if a host port is busy.
-        Bind your dev server to <code className="font-mono">0.0.0.0</code> (
+        <code className="font-mono">5174:5173</code>) {tx("if a host port is busy.")} {tx("Bind your dev server to")} <code className="font-mono">0.0.0.0</code> (
         <code className="font-mono">pnpm dev --host</code>).
       </p>
       <Button
@@ -133,7 +130,7 @@ export function ContainerLaunchPanel({
         className="mt-2.5 w-full"
         onClick={() => onStart(parsePorts(ports))}
       >
-        Open shell
+        {tx("Open shell")}
       </Button>
       {onOpenExternal && (
         <Button
@@ -141,9 +138,9 @@ export function ContainerLaunchPanel({
           variant="outline"
           className="mt-1.5 w-full"
           onClick={() => onOpenExternal(parsePorts(ports))}
-          title="Open the container shell in an external terminal window"
+          title={tx("Open the container shell in an external terminal window")}
         >
-          Open in external terminal
+          {tx("Open in external terminal")}
         </Button>
       )}
     </>

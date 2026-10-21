@@ -33,6 +33,7 @@ import {
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
 import { isTitleDef, nextVisibleFieldIds } from "./board-model";
+import { useProjectsText } from "./use-projects-text";
 
 /** The layouts a view can be created or saved in, in GitHub's own order. */
 export const VIEW_LAYOUTS: readonly ProjectViewLayout[] = [
@@ -72,6 +73,7 @@ function HeldFooter({
     className: string;
   }) => ReactNode;
 }) {
+  const tx = useProjectsText();
   const { blockedReason, reasonId, wrapperTitle, describedBy } =
     useDisabledReason({
       disabled: heldReason !== null,
@@ -89,7 +91,7 @@ function HeldFooter({
         </span>
       )}
       <Button type="button" variant="outline" onClick={onCancel}>
-        Cancel
+        {tx("Cancel")}
       </Button>
       <span
         className={cn("inline-flex", blockedReason && "cursor-not-allowed")}
@@ -169,6 +171,7 @@ export function NewProjectDialog({
   onOpenChange: (open: boolean) => void;
   onCreate: (title: string) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const form = useAppForm({
     defaultValues: { title: "" },
     onSubmit: ({ value }) => onCreate(value.title.trim()),
@@ -181,7 +184,7 @@ export function NewProjectDialog({
   );
   const heldReason =
     pending || submitting
-      ? pendingWriteReason(paused, SAVING_REASON)
+      ? pendingWriteReason(paused, tx(SAVING_REASON))
       : (offlineHold ?? ownerHeldReason ?? null);
   const submit = heldSubmitHandlers(form, heldReason);
   return (
@@ -192,11 +195,11 @@ export function NewProjectDialog({
           onSubmit={submit.onSubmit}
         >
           <DialogHeader>
-            <DialogTitle>New project</DialogTitle>
+            <DialogTitle>{tx("New project")}</DialogTitle>
             <DialogDescription>
               {target.repository !== null
-                ? `Linked to ${target.repository}, starting with a table view you can build on.`
-                : `Created under ${target.owner ?? "the repository owner"}'s account and not linked to this repository, which couldn't be read.`}
+                ? tx("Linked to {{repository}}, starting with a table view you can build on.", { repository: target.repository })
+                : tx("Created under {{owner}}'s account and not linked to this repository, which couldn't be read.", { owner: target.owner ?? tx("the repository owner") })}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
@@ -205,8 +208,8 @@ export function NewProjectDialog({
           >
             {(field) => (
               <field.TextField
-                label="Title"
-                placeholder="Name the project"
+                label={tx("Title")}
+                placeholder={tx("Name the project")}
                 autoFocus
               />
             )}
@@ -216,7 +219,7 @@ export function NewProjectDialog({
               heldReason={heldReason}
               onCancel={() => onOpenChange(false)}
               submit={(props) => (
-                <form.SubmitButton {...props}>Create project</form.SubmitButton>
+                <form.SubmitButton {...props}>{tx("Create project")}</form.SubmitButton>
               )}
             />
           </form.AppForm>
@@ -249,6 +252,7 @@ export function EditProjectDialog({
   onOpenChange: (open: boolean) => void;
   onSave: (patch: ProjectPatch) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const form = useAppForm({
     defaultValues: { title: "", description: "" },
     onSubmit: ({ value }) => {
@@ -283,11 +287,11 @@ export function EditProjectDialog({
   const heldReason = (() => {
     switch (true) {
       case pending || submitting:
-        return pendingWriteReason(paused, SAVING_REASON);
+        return pendingWriteReason(paused, tx(SAVING_REASON));
       case unchanged:
-        return "Change the title or description to save";
+        return tx("Change the title or description to save");
       case clearing:
-        return "Clear it on github.com, or restore it";
+        return tx("Clear it on github.com, or restore it");
       default:
         return null;
     }
@@ -301,22 +305,22 @@ export function EditProjectDialog({
           onSubmit={submit.onSubmit}
         >
           <DialogHeader>
-            <DialogTitle>Edit project details</DialogTitle>
+            <DialogTitle>{tx("Edit project details")}</DialogTitle>
             <DialogDescription>
-              Changes the project for everyone who can see it.
+              {tx("Changes the project for everyone who can see it.")}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
             name="title"
             validators={{ onChange: ({ value }) => required(value) }}
           >
-            {(field) => <field.TextField label="Title" autoFocus />}
+            {(field) => <field.TextField label={tx("Title")} autoFocus />}
           </form.AppField>
           <form.AppField name="description">
             {(field) => (
               <field.TextField
-                label="Short description"
-                placeholder="What the project is for, in a line"
+                label={tx("Short description")}
+                placeholder={tx("What the project is for, in a line")}
               />
             )}
           </form.AppField>
@@ -325,7 +329,7 @@ export function EditProjectDialog({
               heldReason={heldReason}
               onCancel={() => onOpenChange(false)}
               submit={(props) => (
-                <form.SubmitButton {...props}>Save details</form.SubmitButton>
+                <form.SubmitButton {...props}>{tx("Save details")}</form.SubmitButton>
               )}
             />
           </form.AppForm>
@@ -362,6 +366,7 @@ export function ViewNameDialog({
   onOpenChange: (open: boolean) => void;
   onSubmit: (name: string, layout: ProjectViewLayout) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const [layout, setLayout] = useState<ProjectViewLayout>("table");
   const form = useAppForm({
     defaultValues: { name: "" },
@@ -379,11 +384,11 @@ export function ViewNameDialog({
   const heldReason = (() => {
     switch (true) {
       case pending || submitting:
-        return pendingWriteReason(paused, SAVING_REASON);
+        return pendingWriteReason(paused, tx(SAVING_REASON));
       case mode === "create" && offlineHold !== undefined:
         return offlineHold;
       case unchanged:
-        return "Change the name to save";
+        return tx("Change the name to save");
       default:
         return null;
     }
@@ -398,12 +403,12 @@ export function ViewNameDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              {mode === "create" ? "New view" : "Rename view"}
+              {mode === "create" ? tx("New view") : tx("Rename view")}
             </DialogTitle>
             <DialogDescription>
               {mode === "create"
-                ? "A saved view everyone on the project can pick. It starts with no filter."
-                : "Renames the view for everyone on the project."}
+                ? tx("A saved view everyone on the project can pick. It starts with no filter.")
+                : tx("Renames the view for everyone on the project.")}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
@@ -412,14 +417,14 @@ export function ViewNameDialog({
           >
             {(field) => (
               <field.TextField
-                label="Name"
-                placeholder="Name the view"
+                label={tx("Name")}
+                placeholder={tx("Name the view")}
                 autoFocus
               />
             )}
           </form.AppField>
           {mode === "create" && (
-            <LabeledGroup label="Layout">
+            <LabeledGroup label={tx("Layout")}>
               <RadioGroup
                 className="gap-1"
                 value={layout}
@@ -434,7 +439,7 @@ export function ViewNameDialog({
                     className="flex cursor-pointer items-center gap-2 text-xs"
                   >
                     <Radio value={l} />
-                    {VIEW_LAYOUT_LABEL[l]}
+                    {tx(VIEW_LAYOUT_LABEL[l])}
                   </label>
                 ))}
               </RadioGroup>
@@ -446,7 +451,7 @@ export function ViewNameDialog({
               onCancel={() => onOpenChange(false)}
               submit={(props) => (
                 <form.SubmitButton {...props}>
-                  {mode === "create" ? "Create view" : "Rename view"}
+                  {mode === "create" ? tx("Create view") : tx("Rename view")}
                 </form.SubmitButton>
               )}
             />
@@ -485,6 +490,7 @@ export function ViewFieldsDialog({
   onOpenChange: (open: boolean) => void;
   onSave: (visibleFieldIds: string[]) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const form = useAppForm({
     defaultValues: {},
@@ -503,9 +509,9 @@ export function ViewFieldsDialog({
   // A plain if/else chain: the React Compiler bails on a switch(true) here.
   let heldReason: string | null = null;
   if (pending || submitting)
-    heldReason = pendingWriteReason(paused, SAVING_REASON);
+    heldReason = pendingWriteReason(paused, tx(SAVING_REASON));
   else if (defsHeldReason !== undefined) heldReason = defsHeldReason;
-  else if (unchanged) heldReason = "Check or uncheck a field to save";
+  else if (unchanged) heldReason = tx("Check or uncheck a field to save");
   const submit = heldSubmitHandlers(form, heldReason);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -518,17 +524,16 @@ export function ViewFieldsDialog({
           onSubmit={submit.onSubmit}
         >
           <DialogHeader>
-            <DialogTitle>Fields in {viewName}</DialogTitle>
+            <DialogTitle>{tx("Fields in {{viewName}}", { viewName })}</DialogTitle>
             <DialogDescription>
-              Pick the fields this view shows, for everyone on the project. They
-              follow the project's own field order.
+              {tx("Pick the fields this view shows, for everyone on the project. They follow the project's own field order.")}
             </DialogDescription>
           </DialogHeader>
           {defsHeldReason !== undefined ? (
             <p className="text-xs text-muted-foreground">{defsHeldReason}</p>
           ) : (
             <LabeledGroup
-              label="Shown fields"
+              label={tx("Shown fields")}
               // The bottom padding holds the last checkbox's enlarged hit area
               // (it overhangs its row by 8px), so a list that fits scrolls not at all.
               className="min-h-0 overflow-y-auto pr-1 pb-2"
@@ -573,7 +578,7 @@ export function ViewFieldsDialog({
               heldReason={heldReason}
               onCancel={() => onOpenChange(false)}
               submit={(props) => (
-                <form.SubmitButton {...props}>Save fields</form.SubmitButton>
+                <form.SubmitButton {...props}>{tx("Save fields")}</form.SubmitButton>
               )}
             />
           </form.AppForm>

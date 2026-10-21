@@ -1,0 +1,75 @@
+{
+  "intent": {
+    "brainstorm": "Brainstorm",
+    "deep": "Deep research"
+  },
+  "header": {
+    "defaultTitle": "Research",
+    "agentTitle": "Agent and model running this research",
+    "backTitle": "Back to the agent surface (keeps this research)",
+    "back": "Back",
+    "dismiss": "Dismiss this research"
+  },
+  "picker": {
+    "intent": "Research intent"
+  },
+  "composer": {
+    "brainstorm": {
+      "heading": "Brainstorm directions, grounded in the web and your code",
+      "placeholder": "What do you want to explore? (e.g. “ways to add a LAN companion mode”)…",
+      "note": "Surveys the web and your repo for several directions with prior art. Read-only — nothing is changed."
+    },
+    "deep": {
+      "heading": "Investigate one direction, in depth and cited",
+      "placeholder": "What should I investigate? (e.g. “embedding an axum server in the Tauri process”)…",
+      "note": "Reads primary sources and your repo, then writes a cited report. Read-only — it can run longer and cost more than a plan."
+    },
+    "intro": "A read-only agent searches the web and reads your repo, then streams a cited report here. Nothing is changed; turn it into a plan or save it when you're happy. Start several — they run side by side.",
+    "topicLabel": "Describe a topic to research",
+    "shortcutHint": "to research",
+    "submit": "Research"
+  },
+  "conversation": {
+    "you": "You",
+    "switchedTo": "Switched to {{intent}}"
+  },
+  "status": {
+    "researching": "Researching the web…",
+    "exploring": "Exploring the web and your repo…",
+    "stopped": "Stopped",
+    "starting": "Starting…"
+  },
+  "actions": {
+    "stop": "Stop",
+    "restart": "Restart",
+    "copy": "Copy",
+    "resave": "Re-save",
+    "saveReport": "Save report",
+    "distilling": "Distilling…",
+    "turnIntoPlan": "Turn into a Plan",
+    "send": "Send"
+  },
+  "result": {
+    "estimatedCost": "Estimated cost of this research run",
+    "savedTo": "Saved to",
+    "copyTitle": "Copy the report (with the session history) to the clipboard"
+  },
+  "toast": {
+    "reportCopied": "Report copied"
+  },
+  "notification": {
+    "failed": "Research failed",
+    "ready": "Research ready"
+  },
+  "errors": {
+    "agentReported": "The research agent reported an error.",
+    "noOutput": "The research agent returned nothing — try again.",
+    "noReportToSave": "No report to save yet."
+  },
+  "followUp": {
+    "placeholder": "Dig deeper, or steer the research…",
+    "label": "Continue the research",
+    "agentLocked": "The agent can't change mid-conversation",
+    "keyboardHint": "↵ send · ⇧↵ newline"
+  }
+}

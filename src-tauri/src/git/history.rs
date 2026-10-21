@@ -2,7 +2,8 @@ use crate::error::AppResult;
 use crate::git::diff::parse_numstat_z;
 use crate::git::runner::{run_git, run_git_raw, DEFAULT_TIMEOUT};
 use crate::git::types::{
-    BlameLine, CommitDetails, CommitSummary, DiffStatEntry, FileDiff, StagedDiff,
+    BlameLine, CommitDetails, CommitSummary, DiffStatEntry, FileDiff, HistoryGraphCommit,
+    HistoryGraphRef, HistoryGraphRefKind, StagedDiff,
 };
 
 pub fn validate_hash(hash: &str) -> AppResult<()> {
@@ -58,10 +59,137 @@ pub async fn git_log(
     Ok(parse_commit_log(&out.stdout_lossy()))
 }
 
+/// Paged commit graph across branches, remote-tracking refs, tags, and HEAD.
+#[tauri::command]
+pub async fn git_history_graph(
+    repo_path: String,
+    limit: u32,
+    skip: u32,
+) -> AppResult<Vec<HistoryGraphCommit>> {
+    let head_exists = run_git_raw(
+        Some(&repo_path),
+        &["rev-parse", "--verify", "--quiet", "HEAD"],
+        DEFAULT_TIMEOUT,
+    )
+    .await?
+    .code
+        == 0;
+    if !head_exists {
+        let refs = run_git_raw(
+            Some(&repo_path),
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--format=%(objectname)",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ],
+            DEFAULT_TIMEOUT,
+        )
+        .await?;
+        if refs.stdout_lossy().trim().is_empty() {
+            return Ok(Vec::new());
+        }
+    }
+    let limit_arg = limit.to_string();
+    let skip_arg = skip.to_string();
+    let mut args: Vec<&str> = vec![
+        "log",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "--topo-order",
+        "--decorate=full",
+        "-n",
+        &limit_arg,
+        "--skip",
+        &skip_arg,
+        HISTORY_GRAPH_FORMAT,
+    ];
+    if head_exists {
+        args.push("HEAD");
+    }
+    let out = run_git(Some(&repo_path), &args, DEFAULT_TIMEOUT).await?;
+    Ok(parse_history_graph(&out.stdout_lossy()))
+}
+
 /// The `%H%x00%s%x00%an%x00%ae%x00%cI%x00%D%x00%P` log format, one commit per line.
 /// Paired with `parse_commit_log` — the history and compare listings share both,
 /// so those paths can't drift into reporting empty tags or merge flags.
 pub(crate) const LOG_FORMAT: &str = "--format=%H%x00%s%x00%an%x00%ae%x00%cI%x00%D%x00%P";
+
+const HISTORY_GRAPH_FORMAT: &str = "--format=%H%x00%P%x00%cI%x00%s%x00%D";
+
+fn parse_history_graph(text: &str) -> Vec<HistoryGraphCommit> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\0');
+            Some(HistoryGraphCommit {
+                hash: parts.next()?.to_string(),
+                parents: parts
+                    .next()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+                date: parts.next()?.to_string(),
+                subject: parts.next()?.to_string(),
+                refs: parse_history_graph_refs(parts.next().unwrap_or("")),
+            })
+        })
+        .collect()
+}
+
+fn parse_history_graph_refs(decorations: &str) -> Vec<HistoryGraphRef> {
+    let mut refs = Vec::new();
+    for decoration in decorations.split(", ").filter(|s| !s.is_empty()) {
+        if let Some((symbolic_ref, target)) = decoration.split_once(" -> ") {
+            if symbolic_ref == "HEAD" {
+                push_history_graph_ref(&mut refs, "HEAD", HistoryGraphRefKind::Head);
+            } else {
+                push_named_history_graph_ref(&mut refs, symbolic_ref);
+            }
+            push_named_history_graph_ref(&mut refs, target);
+        } else if decoration == "HEAD" {
+            push_history_graph_ref(&mut refs, "HEAD", HistoryGraphRefKind::Head);
+        } else {
+            push_named_history_graph_ref(&mut refs, decoration);
+        }
+    }
+    refs
+}
+
+fn push_named_history_graph_ref(refs: &mut Vec<HistoryGraphRef>, name: &str) {
+    if let Some(tag) = name.strip_prefix("tag: ") {
+        push_history_graph_ref(
+            refs,
+            tag.strip_prefix("refs/tags/").unwrap_or(tag),
+            HistoryGraphRefKind::Tag,
+        );
+    } else if let Some(local) = name.strip_prefix("refs/heads/") {
+        push_history_graph_ref(refs, local, HistoryGraphRefKind::Local);
+    } else if let Some(remote) = name.strip_prefix("refs/remotes/") {
+        push_history_graph_ref(refs, remote, HistoryGraphRefKind::Remote);
+    } else if let Some(tag) = name.strip_prefix("refs/tags/") {
+        push_history_graph_ref(refs, tag, HistoryGraphRefKind::Tag);
+    } else {
+        push_history_graph_ref(refs, name, HistoryGraphRefKind::Other);
+    }
+}
+
+fn push_history_graph_ref(
+    refs: &mut Vec<HistoryGraphRef>,
+    name: &str,
+    kind: HistoryGraphRefKind,
+) {
+    if !refs.iter().any(|r| r.name == name && r.kind == kind) {
+        refs.push(HistoryGraphRef {
+            name: name.to_string(),
+            kind,
+        });
+    }
+}
 
 pub(crate) fn parse_commit_log(text: &str) -> Vec<CommitSummary> {
     text.lines()

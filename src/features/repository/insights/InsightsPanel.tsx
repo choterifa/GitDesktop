@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { DiffStat } from "@/components/diff-stat";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -28,6 +29,7 @@ export function InsightsPanel({
   repoPath: string;
   active: boolean;
 }) {
+  const { t } = useTranslation("repository");
   // useRepoStats/useBranchStats are heavy scans; gate them on the Insights tab
   // being visible (<Activity> keeps this mounted but doesn't defer fetches).
   const stats = useRepoStats(repoPath, active);
@@ -44,7 +46,7 @@ export function InsightsPanel({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center border-b p-2">
         <h2 className="px-1 text-xs font-medium text-muted-foreground">
-          Overview
+          {t("insights.overview")}
         </h2>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -56,56 +58,67 @@ export function InsightsPanel({
         ) : stats.isError ? (
           <div className="py-4 text-center text-xs">
             <p className="font-medium text-destructive">
-              Couldn't gather statistics.
+              {t("insights.couldntGatherStatistics")}
             </p>
             <p className="mt-1 text-muted-foreground">
               {stats.error instanceof Error
                 ? stats.error.message
-                : "Reopen Insights to try again."}
+                : t("insights.reopenToTryAgain")}
             </p>
           </div>
         ) : data ? (
           <div className="space-y-5">
             <section>
-              <SectionTitle>Overview</SectionTitle>
+              <SectionTitle>{t("insights.overview")}</SectionTitle>
               <dl className="grid grid-cols-1 gap-x-8">
-                <Stat label="Commits">{fmt(data.commitCount)}</Stat>
-                <Stat label="Contributors">
+                <Stat label={t("insights.commits")}>
+                  {fmt(data.commitCount)}
+                </Stat>
+                <Stat label={t("insights.contributors")}>
                   <span
                     title={data.topContributors
-                      .map((c) => `${c.name} — ${fmt(c.commits)} commits`)
+                      .map(
+                        (c) =>
+                          `${c.name} — ${t("insights.commitCount", { count: c.commits })}`,
+                      )
                       .join("\n")}
                   >
                     {fmt(data.contributorCount)}
                   </span>
                 </Stat>
-                <Stat label="Branches">{fmt(data.branchCount)}</Stat>
-                <Stat label="Tags">{fmt(data.tagCount)}</Stat>
-                <Stat label="Tracked files">{fmt(data.trackedFiles)}</Stat>
-                <Stat label="Lines of text">{fmt(data.totalLines)}</Stat>
-                <Stat label="Working tree size">
+                <Stat label={t("insights.branches")}>
+                  {fmt(data.branchCount)}
+                </Stat>
+                <Stat label={t("insights.tags")}>{fmt(data.tagCount)}</Stat>
+                <Stat label={t("insights.trackedFiles")}>
+                  {fmt(data.trackedFiles)}
+                </Stat>
+                <Stat label={t("insights.linesOfText")}>
+                  {fmt(data.totalLines)}
+                </Stat>
+                <Stat label={t("insights.workingTreeSize")}>
                   {formatBytes(data.trackedBytes)}
                 </Stat>
-                <Stat label="Git data (.git)">
+                <Stat label={t("insights.gitData")}>
                   {formatBytes(data.gitDirBytes)}
                 </Stat>
-                <Stat label="First commit">
+                <Stat label={t("insights.firstCommit")}>
                   <DateValue date={data.firstCommitDate} />
                 </Stat>
-                <Stat label="Last commit">
+                <Stat label={t("insights.lastCommit")}>
                   <DateValue date={data.lastCommitDate} />
                 </Stat>
               </dl>
             </section>
 
             <section>
-              <SectionTitle>Code makeup</SectionTitle>
+              <SectionTitle>{t("insights.codeMakeup")}</SectionTitle>
               <LanguageMakeup languages={data.languages} />
             </section>
 
             {data.topContributors.length > 0 && (
               <section>
-                <SectionTitle>Top contributors</SectionTitle>
+                <SectionTitle>{t("insights.topContributors")}</SectionTitle>
                 <ul className="space-y-0.5">
                   {data.topContributors.map((c) => (
                     <li
@@ -114,8 +127,7 @@ export function InsightsPanel({
                     >
                       <span className="truncate">{c.name}</span>
                       <span className="tabular-nums text-muted-foreground">
-                        {fmt(c.commits)}{" "}
-                        {c.commits === 1 ? "commit" : "commits"}
+                        {t("insights.commitCount", { count: c.commits })}
                       </span>
                     </li>
                   ))}
@@ -128,39 +140,39 @@ export function InsightsPanel({
                 <SectionTitle>
                   <span className="font-mono">{currentBranch}</span>{" "}
                   <span className="font-normal text-muted-foreground">
-                    vs {base}
+                    {t("insights.versus")} {base}
                   </span>
                 </SectionTitle>
                 {branchStats.isPending ? (
                   <Skeleton className="h-16 w-full" />
                 ) : branchStats.data ? (
                   <dl className="grid grid-cols-1 gap-x-8">
-                    <Stat label="Commits ahead">
+                    <Stat label={t("insights.commitsAhead")}>
                       {fmt(branchStats.data.commitCount)}
                     </Stat>
-                    <Stat label="Contributors">
+                    <Stat label={t("insights.contributors")}>
                       {fmt(branchStats.data.contributorCount)}
                     </Stat>
-                    <Stat label="Files changed">
+                    <Stat label={t("insights.filesChanged")}>
                       {fmt(branchStats.data.filesChanged)}
                     </Stat>
-                    <Stat label="Lines changed">
+                    <Stat label={t("insights.linesChanged")}>
                       <DiffStat
                         added={branchStats.data.additions}
                         deleted={branchStats.data.deletions}
                         format={fmt}
                       />
                     </Stat>
-                    <Stat label="First branch commit">
+                    <Stat label={t("insights.firstBranchCommit")}>
                       <DateValue date={branchStats.data.firstCommitDate} />
                     </Stat>
-                    <Stat label="Latest branch commit">
+                    <Stat label={t("insights.latestBranchCommit")}>
                       <DateValue date={branchStats.data.lastCommitDate} />
                     </Stat>
                   </dl>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Couldn't compare against {base}.
+                    {t("insights.couldntCompareAgainst", { base })}
                   </p>
                 )}
               </section>

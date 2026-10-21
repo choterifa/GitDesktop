@@ -63,6 +63,7 @@ import { useAiConfigured, useAiEnabled } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { useRetained } from "@/lib/use-retained";
 import { cn } from "@/lib/utils";
+import { useScriptsText } from "./use-scripts-text";
 import { useAnalyzeScript } from "./useAnalyzeScript";
 import { useGenerateScript } from "./useGenerateScript";
 
@@ -89,48 +90,43 @@ const toRows = (docs: ArgDoc[]): ArgDocRow[] =>
  * names no repository to open, so its copy points at the repair — pick a scope —
  * rather than at a repo that doesn't exist.
  */
-function elsewhereScopeCopy(scope: string): {
+function elsewhereScopeCopy(
+  scope: string,
+  tx: ReturnType<typeof useScriptsText>,
+): {
   optionLabel: string;
   chooseReason: string;
   analyzeReason: string;
 } {
   if (scope === TASK_SCOPE_UNKNOWN) {
     // Both controls clear the same way, so they share one sentence.
-    const repair =
-      "This task's saved scope is unreadable — choose where it's available first";
+    const repair = tx(
+      "This task's saved scope is unreadable — choose where it's available first",
+    );
     return {
-      optionLabel: "Unreadable saved scope",
+      optionLabel: tx("Unreadable saved scope"),
       chooseReason: repair,
       analyzeReason: repair,
     };
   }
   const label = scopeRepoLabel(scope);
   return {
-    optionLabel: `${label} — other repository`,
-    chooseReason: `Scoped to "${label}" — open that repository to pick a script from it`,
-    analyzeReason: `Scoped to "${label}" — open that repository to read its script`,
+    optionLabel: tx("{{repo}} — other repository", { repo: label }),
+    chooseReason: tx(
+      'Scoped to "{{repo}}" — open that repository to pick a script from it',
+      { repo: label },
+    ),
+    analyzeReason: tx(
+      'Scoped to "{{repo}}" — open that repository to read its script',
+      { repo: label },
+    ),
   };
 }
-
-/** What the **Script file** field means in each scope: a repo-scoped task keeps a
- *  path relative to its own root, while one offered everywhere has no root to
- *  resolve against, so a typed relative path follows whichever repo is open. */
-const PATH_HINT: Record<"repo" | "global", string> = {
-  repo: "Relative to the repository root — runs the live file, so edits to it take effect on the next run.",
-  global:
-    "Choosing a file saves its full path; a path you type resolves against whichever repository is open. Either way it runs the live file, so edits to it take effect on the next run.",
-};
 
 /** The note a switch to all repositories leaves under **Script file**. `sig` is
  *  the path it was produced for: the note (and the flip-back restore and **Keep
  *  relative** a "repaired" one arms) retires once the path or global scope moves. */
 type FlipNote = Exclude<FlipOutcome, { kind: "none" }> & { sig: string };
-
-const FLIP_NOTE: Record<FlipNote["kind"], string> = {
-  repaired: "Saved as the full path so this file runs from every repository.",
-  unrepairable:
-    "This path is relative, so it resolves against whichever repository is open. Choose the file to save its full path.",
-};
 
 /** A scope value as the path repair and the dialog's scope locals read it: only
  *  "this repository" names a root (the open checkout) to make a path full. */
@@ -181,6 +177,7 @@ export function TaskDialog({
   onSave: (task: TaskDef) => void;
   onDelete: (id: string) => void;
 }) {
+  const tx = useScriptsText();
   const editing = task !== "new" && task !== null ? task : null;
   const shownTask = useRetained(task);
   const shownEditing =
@@ -239,14 +236,16 @@ export function TaskDialog({
     flipNote && flipNote.sig === path && isGlobalDraft ? flipNote : null;
   // One source for every string a foreign scope produces here — the option label
   // and both file-control reasons — so they can't disagree about what it is.
-  const elsewhereCopy = elsewhereScopeCopy(scope);
+  const elsewhereCopy = elsewhereScopeCopy(scope, tx);
   const scopeOptions: { value: string; label: string }[] = [
-    { value: TASK_SCOPE_GLOBAL, label: "All repositories" },
+    { value: TASK_SCOPE_GLOBAL, label: tx("All repositories") },
   ];
   if (repoPath && thisRepoKey)
     scopeOptions.push({
       value: thisRepoKey,
-      label: `This repository — ${scopeRepoLabel(repoPath)}`,
+      label: tx("This repository — {{repo}}", {
+        repo: scopeRepoLabel(repoPath),
+      }),
     });
   // A scope pointing at a DIFFERENT repo needs an option of its own: without one
   // the Select can't represent its own value, and saving an untouched edit would
@@ -337,8 +336,8 @@ export function TaskDialog({
     sourceKind === "file" ? path.trim() !== "" : body.trim() !== "";
   const analyzeEmptyReason =
     sourceKind === "file"
-      ? "Choose a script file first"
-      : "Write or generate a script first";
+      ? tx("Choose a script file first")
+      : tx("Write or generate a script first");
   // The file-source controls read the OPEN repo's tree — the picker relativizes
   // against it and the analyzer reads through it — so on a task scoped elsewhere
   // they would resolve a foreign relative path against the wrong checkout. An
@@ -355,7 +354,7 @@ export function TaskDialog({
 
   async function choose() {
     const picked = await openDialog({
-      title: "Choose a script to run",
+      title: tx("Choose a script to run"),
       defaultPath: repoPath ?? undefined,
     });
     if (typeof picked !== "string") return;
@@ -485,30 +484,34 @@ export function TaskDialog({
         onKeyDown={generateChord.onKeyDown}
       >
         <DialogHeader>
-          <DialogTitle>{shownEditing ? "Edit task" : "New task"}</DialogTitle>
+          <DialogTitle>
+            {shownEditing ? tx("Edit task") : tx("New task")}
+          </DialogTitle>
           <DialogDescription>
-            A saved script you can run from here without a terminal. Point it at
-            an existing script in the repo, or write one inline. Either way it
-            runs in the repository's folder.
+            {tx(
+              "A saved script you can run from here without a terminal. Point it at an existing script in the repo, or write one inline. Either way it runs in the repository's folder.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-[1fr_auto] gap-3">
           <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="task-name">Name</Label>
+            <Label htmlFor="task-name">{tx("Name")}</Label>
             <Input
               id="task-name"
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Release"
+              placeholder={tx("Release")}
               autoComplete="off"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="task-interpreter">Run with</Label>
+            <Label htmlFor="task-interpreter">{tx("Run with")}</Label>
             <Select
-              items={INTERPRETER_LABELS}
+              items={Object.fromEntries(
+                INTERPRETERS.map((i) => [i.id, tx(i.label)]),
+              )}
               value={interpreter}
               onValueChange={(v) => v && setInterpreter(v as Interpreter)}
             >
@@ -539,7 +542,7 @@ export function TaskDialog({
                           {i.label}
                           {missing && (
                             <span className="text-[10px] text-muted-foreground">
-                              · not detected
+                              · {tx("not detected")}
                             </span>
                           )}
                         </span>
@@ -553,11 +556,11 @@ export function TaskDialog({
                           />
                         ) : isSelected && selectedResolving ? (
                           <span className="text-[11px] text-muted-foreground">
-                            Checking your shell…
+                            {tx("Checking your shell…")}
                           </span>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">
-                            {i.hint}
+                            {tx(i.hint)}
                           </span>
                         )}
                       </span>
@@ -572,30 +575,34 @@ export function TaskDialog({
         {selectedResolving && (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Spinner className="size-3" />
-            Checking your shell for{" "}
-            {INTERPRETER_LABELS[interpreter] ?? interpreter}…
+            {tx("Checking your shell for {{interpreter}}…", {
+              interpreter: tx(INTERPRETER_LABELS[interpreter] ?? interpreter),
+            })}
           </p>
         )}
         {selectedMissing && (
           <p className="text-xs text-warning">
-            {INTERPRETER_LABELS[interpreter] ?? interpreter} isn't installed, or
-            GitDesktop can't find it — install it, or make sure it's on your
-            shell's PATH.
+            {tx(
+              "{{interpreter}} isn't installed, or GitDesktop can't find it — install it, or make sure it's on your shell's PATH.",
+              {
+                interpreter: tx(INTERPRETER_LABELS[interpreter] ?? interpreter),
+              },
+            )}
           </p>
         )}
 
         <div className="space-y-1.5">
           <Label htmlFor="task-description">
-            Description{" "}
+            {tx("Description")}{" "}
             <span className="font-normal text-muted-foreground">
-              (optional)
+              ({tx("optional")})
             </span>
           </Label>
           <Input
             id="task-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What running this does, in a sentence"
+            placeholder={tx("What running this does, in a sentence")}
             autoComplete="off"
           />
         </div>
@@ -603,7 +610,7 @@ export function TaskDialog({
         {/* No repo open means no choice to offer — the task stays global. */}
         {repoPath && (
           <div className="space-y-1.5">
-            <Label htmlFor="task-scope">Available in</Label>
+            <Label htmlFor="task-scope">{tx("Available in")}</Label>
             <Select
               // Without `items`, Base UI's SelectValue renders the RAW value —
               // for an identity-keyed scope that's a bare "…/.git" path. The map
@@ -624,8 +631,9 @@ export function TaskDialog({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              A task is offered in the repository it belongs to. Choose all
-              repositories to reach it from every repo you open.
+              {tx(
+                "A task is offered in the repository it belongs to. Choose all repositories to reach it from every repo you open.",
+              )}
             </p>
           </div>
         )}
@@ -636,8 +644,8 @@ export function TaskDialog({
           <div className="inline-flex w-fit rounded-md border p-0.5 text-xs">
             {(
               [
-                ["file", "Existing file"],
-                ["inline", "Inline script"],
+                ["file", tx("Existing file")],
+                ["inline", tx("Inline script")],
               ] as const
             ).map(([kind, label]) => (
               <button
@@ -668,7 +676,7 @@ export function TaskDialog({
                 onClick={scriptAnalyze.cancel}
               >
                 <Spinner data-icon="inline-start" />
-                Analyzing…
+                {tx("Analyzing…")}
               </Button>
             ) : (
               <DisabledReasonButton
@@ -678,18 +686,20 @@ export function TaskDialog({
                 className="text-muted-foreground"
                 disabled={!canAnalyze || analyzeBlockedReason !== null}
                 reason={analyzeBlockedReason ?? analyzeEmptyReason}
-                title="Read the script and fill in the name, description, and documented arguments"
+                title={tx(
+                  "Read the script and fill in the name, description, and documented arguments",
+                )}
                 onClick={runAnalyze}
               >
                 <SparkleIcon data-icon="inline-start" />
-                Analyze with AI
+                {tx("Analyze with AI")}
               </DisabledReasonButton>
             ))}
         </div>
 
         {sourceKind === "file" ? (
           <div className="space-y-1.5">
-            <Label htmlFor="task-path">Script file</Label>
+            <Label htmlFor="task-path">{tx("Script file")}</Label>
             <div className="flex gap-2">
               <Input
                 ref={pathInputRef}
@@ -708,7 +718,7 @@ export function TaskDialog({
                 reason={chooseBlockedReason}
                 onClick={choose}
               >
-                Choose…
+                {tx("Choose…")}
               </DisabledReasonButton>
             </div>
             {/* Mounted empty whenever the file source shows: a live region
@@ -723,14 +733,18 @@ export function TaskDialog({
             >
               {shownFlipNote?.kind === "repaired" && (
                 <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-                  <span>{FLIP_NOTE.repaired}</span>
+                  <span>
+                    {tx(
+                      "Saved as the full path so this file runs from every repository.",
+                    )}
+                  </span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="xs"
                     onClick={keepRelative}
                   >
-                    Keep relative
+                    {tx("Keep relative")}
                   </Button>
                 </p>
               )}
@@ -741,17 +755,27 @@ export function TaskDialog({
                     weight="fill"
                     className="mt-0.5 size-3.5 shrink-0"
                   />
-                  <span className="min-w-0">{FLIP_NOTE.unrepairable}</span>
+                  <span className="min-w-0">
+                    {tx(
+                      "This path is relative, so it resolves against whichever repository is open. Choose the file to save its full path.",
+                    )}
+                  </span>
                 </p>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {PATH_HINT[isGlobalDraft ? "global" : "repo"]}
+              {isGlobalDraft
+                ? tx(
+                    "Choosing a file saves its full path; a path you type resolves against whichever repository is open. Either way it runs the live file, so edits to it take effect on the next run.",
+                  )
+                : tx(
+                    "Relative to the repository root — runs the live file, so edits to it take effect on the next run.",
+                  )}
             </p>
           </div>
         ) : (
           <LabeledGroup
-            label="Script"
+            label={tx("Script")}
             className="space-y-1.5"
             actions={
               <>
@@ -763,14 +787,14 @@ export function TaskDialog({
                       variant="ghost"
                       size="xs"
                       className="text-muted-foreground"
-                      title="Connect an AI provider to generate scripts"
+                      title={tx("Connect an AI provider to generate scripts")}
                       onClick={() => {
                         onOpenChange(false);
                         openSettings("ai");
                       }}
                     >
                       <SparkleIcon data-icon="inline-start" />
-                      Set up AI to generate
+                      {tx("Set up AI to generate")}
                     </Button>
                   ))}
                 {aiEnabled && aiConfigured && scriptGen.generating && (
@@ -782,7 +806,7 @@ export function TaskDialog({
                     onClick={scriptGen.cancel}
                   >
                     <Spinner data-icon="inline-start" />
-                    Generating…
+                    {tx("Generating…")}
                   </Button>
                 )}
               </>
@@ -801,7 +825,7 @@ export function TaskDialog({
                       runGenerate();
                     }
                   }}
-                  placeholder="Describe what the script should do…"
+                  placeholder={tx("Describe what the script should do…")}
                   autoComplete="off"
                 />
                 <Button
@@ -812,13 +836,13 @@ export function TaskDialog({
                   // disabled Generate's shortcut is dead too.
                   title={
                     describe.trim() !== ""
-                      ? `Write the script with AI${generateChord.hint}`
-                      : "Write the script with AI"
+                      ? tx("Write the script with AI") + generateChord.hint
+                      : tx("Write the script with AI")
                   }
                   onClick={runGenerate}
                 >
                   <SparkleIcon data-icon="inline-start" />
-                  Generate
+                  {tx("Generate")}
                 </Button>
               </div>
             )}
@@ -827,7 +851,7 @@ export function TaskDialog({
               <Suspense
                 fallback={
                   <LazyPanelFallback
-                    name="the script editor"
+                    name={tx("script editor")}
                     className="p-0"
                     rows={["h-full w-full"]}
                   />
@@ -837,17 +861,18 @@ export function TaskDialog({
               </Suspense>
             </div>
             <p className="text-xs text-muted-foreground">
-              The script's contents, run by the selected interpreter — shell
-              commands for PowerShell or bash, JavaScript for Node, and so on.
+              {tx(
+                "The script's contents, run by the selected interpreter — shell commands for PowerShell or bash, JavaScript for Node, and so on.",
+              )}
             </p>
           </LabeledGroup>
         )}
 
         <div className="space-y-1.5">
           <Label htmlFor="task-args">
-            Arguments{" "}
+            {tx("Arguments")}{" "}
             <span className="font-normal text-muted-foreground">
-              (optional)
+              ({tx("optional")})
             </span>
           </Label>
           <Input
@@ -860,8 +885,9 @@ export function TaskDialog({
             spellCheck={false}
           />
           <p className="text-xs text-muted-foreground">
-            The default arguments; a run that asks for confirmation can adjust
-            them per run. Quote values with spaces, e.g.{" "}
+            {tx(
+              "The default arguments; a run that asks for confirmation can adjust them per run. Quote values with spaces, for example:",
+            )}{" "}
             <span className="font-mono">--message "two words"</span>.
           </p>
         </div>
@@ -872,9 +898,9 @@ export function TaskDialog({
           className="space-y-1.5"
         >
           <Label id="task-argdocs-label">
-            Documented arguments{" "}
+            {tx("Documented arguments")}{" "}
             <span className="font-normal text-muted-foreground">
-              (optional — shown as a reference when running)
+              ({tx("optional — shown as a reference when running")})
             </span>
           </Label>
           {argDocs.map((row, index) => (
@@ -886,7 +912,7 @@ export function TaskDialog({
                 placeholder="--flag"
                 autoComplete="off"
                 spellCheck={false}
-                aria-label={`Argument ${index + 1}`}
+                aria-label={tx("Argument {{number}}", { number: index + 1 })}
               />
               <Input
                 className="min-w-0 flex-1"
@@ -894,9 +920,11 @@ export function TaskDialog({
                 onChange={(e) =>
                   updateRow(row.key, { description: e.target.value })
                 }
-                placeholder="What it does"
+                placeholder={tx("What it does")}
                 autoComplete="off"
-                aria-label={`Argument ${index + 1} description`}
+                aria-label={tx("Argument {{number}} description", {
+                  number: index + 1,
+                })}
               />
               <Button
                 type="button"
@@ -906,8 +934,12 @@ export function TaskDialog({
                 onClick={() =>
                   setArgDocs((rows) => rows.filter((r) => r.key !== row.key))
                 }
-                title={`Remove ${row.arg.trim() || "this argument"}`}
-                aria-label={`Remove argument ${index + 1}`}
+                title={tx("Remove {{argument}}", {
+                  argument: row.arg.trim() || tx("this argument"),
+                })}
+                aria-label={tx("Remove argument {{number}}", {
+                  number: index + 1,
+                })}
               >
                 <XIcon />
               </Button>
@@ -926,7 +958,7 @@ export function TaskDialog({
             }
           >
             <PlusIcon data-icon="inline-start" />
-            Add argument
+            {tx("Add argument")}
           </Button>
         </div>
 
@@ -935,7 +967,7 @@ export function TaskDialog({
             checked={confirmBeforeRun}
             onCheckedChange={setConfirmBeforeRun}
           />
-          <span>Ask for confirmation before running</span>
+          <span>{tx("Ask for confirmation before running")}</span>
         </label>
 
         <div className="flex items-center gap-2">
@@ -950,22 +982,24 @@ export function TaskDialog({
             }}
             disabled={!canSave}
           >
-            {shownEditing ? "Save" : "Create task"}
+            {shownEditing ? tx("Save") : tx("Create task")}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <span className="flex-1" />
           {shownEditing &&
             (confirmDelete ? (
               <>
-                <span className="text-xs text-muted-foreground">Delete?</span>
+                <span className="text-xs text-muted-foreground">
+                  {tx("Delete?")}
+                </span>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setConfirmDelete(false)}
                 >
-                  Keep
+                  {tx("Keep")}
                 </Button>
                 <Button
                   size="sm"
@@ -974,7 +1008,7 @@ export function TaskDialog({
                     if (editing) onDelete(editing.id);
                   }}
                 >
-                  Delete
+                  {tx("Delete")}
                 </Button>
               </>
             ) : (
@@ -983,7 +1017,7 @@ export function TaskDialog({
                 variant="ghost"
                 onClick={() => setConfirmDelete(true)}
               >
-                Delete…
+                {tx("Delete…")}
               </Button>
             ))}
         </div>

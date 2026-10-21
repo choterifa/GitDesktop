@@ -2,6 +2,7 @@ import { CopyIcon, DotsThreeVerticalIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CommitAuthorAvatar } from "@/components/commit-author-avatar";
 import { DetailRail, DetailRailRow } from "@/components/detail-rail";
 import { DiffStat } from "@/components/diff-stat";
@@ -30,7 +31,7 @@ import {
   useCommitLineAnchors,
 } from "@/features/pulls/CommitComments";
 import { usePrCapabilities } from "@/features/pulls/usePrCapabilities";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { copyText } from "@/lib/clipboard";
 import type { CommitParent } from "@/lib/git/api";
 import { splitUnifiedDiff } from "@/lib/git/diff-split";
@@ -61,11 +62,9 @@ import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn, PLACEHOLDER_FADE } from "@/lib/utils";
 import {
-  CHERRY_PICK_ALREADY_APPLIED,
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
-  HISTORY_REFRESHING_HINT,
   type MergeParentOp,
   revertCommitConfirm,
 } from "./commit-confirms";
@@ -93,6 +92,7 @@ export function CommitDetailView({
   repoPath: string;
   hash: string;
 }) {
+  const { t } = useTranslation("history");
   const details = useCommitDetails(repoPath, hash);
   const files = useCommitFiles(repoPath, hash);
   // Batch-resolve commit-author avatars (GitHub-only; deduped by react-query).
@@ -284,7 +284,7 @@ export function CommitDetailView({
     );
   }
   if (details.isError || files.isError) {
-    return <DiffPlaceholder message="Could not load this commit" />;
+    return <DiffPlaceholder message={t("detail.loadError")} />;
   }
 
   const commit = details.data;
@@ -305,9 +305,9 @@ export function CommitDetailView({
   async function copyHash() {
     try {
       await navigator.clipboard.writeText(hash);
-      toast.success("Commit hash copied");
+      toast.success(t("toast.commitHashCopied"));
     } catch {
-      toast.error("Could not copy to clipboard");
+      toast.error(t("toast.copyFailed"));
     }
   }
 
@@ -315,11 +315,11 @@ export function CommitDetailView({
   // menu. All three act on the `hash` PROP for the same reason `copyHash` does.
   async function doCheckoutCommit() {
     const checkoutIn = repoPath;
-    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash, t)))) return;
     if (refuseIfSwitched(checkoutIn, "nothing was checked out")) return;
     // Below the confirm: a promote can start while the prompt is open.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -328,7 +328,7 @@ export function CommitDetailView({
       onError(e);
       return;
     }
-    toast.success(checkoutCommitSuccessToast(hash));
+    toast.success(checkoutCommitSuccessToast(hash, t));
   }
 
   // This view's commit carries no merge flag, so the parents are read on demand:
@@ -357,10 +357,10 @@ export function CommitDetailView({
   async function doRevertCommit() {
     if ((await routeMergeCommit("revert")) !== "plain") return;
     const revertIn = repoPath;
-    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash, t)))) return;
     if (refuseIfSwitched(revertIn, "nothing was reverted")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     void revertCommit.mutateAsync({ hash }).catch(onError);
@@ -371,10 +371,10 @@ export function CommitDetailView({
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
-      .ask(cherryPickCommitConfirm(hash, head?.name ?? null));
+      .ask(cherryPickCommitConfirm(hash, head?.name ?? null, t));
     if (!ok || refuseIfSwitched(pickIn, "nothing was cherry-picked")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     let applied: boolean;
@@ -385,9 +385,9 @@ export function CommitDetailView({
       return;
     }
     if (applied) {
-      toast.success(`Cherry-picked ${hash.slice(0, 7)}`);
+      toast.success(t("toast.cherryPicked", { hash: hash.slice(0, 7) }));
     } else {
-      toast.info(CHERRY_PICK_ALREADY_APPLIED);
+      toast.info(t("toast.nothingToCherryPick"));
     }
   }
 
@@ -399,7 +399,7 @@ export function CommitDetailView({
   // when the local diff actually has that path; otherwise say so instead.
   const selectFileFromComments = (path: string) => {
     if (fileList.some((f) => f.path === path)) setSelectedPath(path);
-    else toast.info(`${path} isn't in this commit's local diff`);
+    else toast.info(t("detail.pathNotInDiff", { path }));
   };
   // Arrow keys walk the file list; the diff loads off a deferred path (above),
   // so rapid arrowing never fetches a diff per file passed — only the one
@@ -453,7 +453,7 @@ export function CommitDetailView({
             type="button"
             className="inline-flex items-center gap-1 font-mono hover:text-foreground"
             onClick={copyHash}
-            title="Copy full hash"
+            title={t("detail.copyFullHash")}
           >
             {hash.slice(0, 7)}
             <CopyIcon className="size-3" />
@@ -474,7 +474,7 @@ export function CommitDetailView({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Commit actions"
+                  aria-label={t("detail.commitActions")}
                 />
               }
             >
@@ -486,21 +486,21 @@ export function CommitDetailView({
                 disabled={!isHead}
                 onClick={() => requestAmend(hash)}
               >
-                Amend commit…
-                {isLatest && !isHead && HISTORY_REFRESHING_HINT}
+                {t("menu.amendCommit")}
+                {isLatest && !isHead && t("menu.historyRefreshing")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={doCheckoutCommit}>
-                Checkout commit
+                {t("menu.checkoutCommit")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={doRevertCommit}>
-                Revert changes in commit
+                {t("menu.revertCommit")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={doCherryPick}>
-                Cherry-pick commit
+                {t("menu.cherryPickCommit")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => copyText(hash, "SHA copied")}>
-                Copy SHA
+              <DropdownMenuItem onClick={() => copyText(hash, t("toast.shaCopied"))}>
+                {t("menu.copySha")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -520,8 +520,8 @@ export function CommitDetailView({
           <JiraRefRow
             repoPath={repoPath}
             sources={[
-              { label: "commit subject", text: commit.subject },
-              { label: "commit message body", text: commit.body },
+              { label: t("detail.commitSubject"), text: commit.subject },
+              { label: t("detail.commitMessageBody"), text: commit.body },
             ]}
           />
         </div>
@@ -529,12 +529,11 @@ export function CommitDetailView({
 
       <DetailRailRow>
         <DetailRail
-          ariaLabel="Changed files"
+          ariaLabel={t("detail.changedFiles")}
           className={cn(PLACEHOLDER_FADE, staleDim)}
           header={
             <p className="truncate text-xs text-muted-foreground">
-              {files.data.length} changed file
-              {files.data.length === 1 ? "" : "s"}
+              {t("detail.fileCount", { count: files.data.length })}
             </p>
           }
         >
@@ -588,7 +587,7 @@ export function CommitDetailView({
               lineWidget={lineWidget}
             />
           ) : (
-            <DiffPlaceholder message="Select a file to see its changes" />
+            <DiffPlaceholder message={t("detail.selectFile")} />
           )}
         </main>
       </DetailRailRow>
@@ -626,7 +625,7 @@ export function CommitDetailView({
             verdictHeld && "opacity-80 delay-100",
           )}
         >
-          This commit isn't on {remoteLabel} yet — push it to comment.
+          {t("detail.notOnRemote", { remote: remoteLabel })}
         </p>
       ) : null}
 

@@ -6,11 +6,27 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 import * as api from "../api";
-import type { DiffStatEntry } from "../types";
+import type { DiffStatEntry, HistoryGraphCommit } from "../types";
 import { keepPreviousDataForRepo, repoKeys } from "./core";
 import { commitCommentsOptions, commitOnRemoteOptions } from "./prs";
 
 export const HISTORY_PAGE_SIZE = 200;
+export const HISTORY_GRAPH_PAGE_SIZE = 200;
+
+export function useHistoryGraph(repo: string, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: repoKeys.historyGraph(repo),
+    queryFn: ({ pageParam }) =>
+      api.gitHistoryGraph(repo, HISTORY_GRAPH_PAGE_SIZE, pageParam),
+    networkMode: "always",
+    initialPageParam: 0,
+    enabled: enabled && Boolean(repo),
+    getNextPageParam: (lastPage: HistoryGraphCommit[], allPages) =>
+      lastPage.length < HISTORY_GRAPH_PAGE_SIZE
+        ? undefined
+        : allPages.reduce((count, page) => count + page.length, 0),
+  });
+}
 
 /** Paged commit log; `data.pages.flat()` is the loaded history. */
 export function useLog(repo: string) {

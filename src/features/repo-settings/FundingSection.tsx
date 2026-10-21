@@ -23,6 +23,7 @@ import {
   stampSent,
   type TouchedEdit,
 } from "./touched-draft";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 const GITHUB_KEY = "github";
 const CUSTOM_KEY = "custom";
@@ -130,7 +131,7 @@ export function FundingSection({
   return (
     <RemoteFormSection
       query={funding}
-      noun="funding links"
+      noun={tr("funding links")}
       skeleton={
         <div className="min-w-0 space-y-3">
           <Skeleton className="h-9 w-full" />
@@ -138,7 +139,7 @@ export function FundingSection({
           <Skeleton className="h-20 w-full" />
         </div>
       }
-      errorTitle="Couldn't load funding."
+      errorTitle={tr("Couldn't load funding.")}
     >
       {(content) => (
         // `null` is a loaded answer: there's no FUNDING.yml yet.
@@ -234,7 +235,7 @@ function FundingForm({
         Object.keys(edit ?? {}).map((k) => [k, saved[k]]),
       );
       setPending((p) => stampSent(p, at, sent));
-      toast.success("Wrote .github/FUNDING.yml — commit it to publish");
+      toast.success(tr("Wrote .github/FUNDING.yml — commit it to publish"));
     } catch (e) {
       toastError(e);
     }
@@ -248,7 +249,7 @@ function FundingForm({
       // reappear over the emptied form as an unsaved edit.
       setEdit(null);
       setPending(null);
-      toast.success("Removed .github/FUNDING.yml — commit it to publish");
+      toast.success(tr("Removed .github/FUNDING.yml — commit it to publish"));
       setConfirmingRemove(false);
     } catch (e) {
       toastError(e);
@@ -258,21 +259,24 @@ function FundingForm({
   return (
     <div className="min-w-0 space-y-4">
       <p className="text-xs text-muted-foreground">
-        These links power the <span className="font-medium">Sponsor</span>{" "}
-        button on your repo. Saving writes{" "}
-        <span className="font-mono">.github/FUNDING.yml</span> to your working
-        tree — review and commit it like any other change to publish.
+        {tr("These links power the")}{" "}
+        <span className="font-medium">{tr("Sponsor")}</span>{" "}
+        {tr("button on your repo. Saving writes")}{" "}
+        <span className="font-mono">{tr(".github/FUNDING.yml")}</span>{" "}
+        {tr(
+          "to your working\r\n        tree — review and commit it like any other change to publish.",
+        )}
       </p>
 
       <div className="space-y-1.5">
-        <Label htmlFor="funding-github">GitHub Sponsors</Label>
+        <Label htmlFor="funding-github">{tr("GitHub Sponsors")}</Label>
         {/* Where focus lands once removing the file takes its confirm away. */}
         <Input
           data-confirm-fallback
           id="funding-github"
           value={fields[GITHUB_KEY] ?? ""}
           onChange={(e) => setField(GITHUB_KEY, e.target.value)}
-          placeholder="username (up to 4, comma-separated)"
+          placeholder={tr("username (up to 4, comma-separated)")}
           autoComplete="off"
           spellCheck={false}
         />
@@ -281,12 +285,12 @@ function FundingForm({
       <div className="grid grid-cols-2 gap-x-4 gap-y-3">
         {SINGLE_PLATFORMS.map((p) => (
           <div key={p.key} className="space-y-1.5">
-            <Label htmlFor={`funding-${p.key}`}>{p.label}</Label>
+            <Label htmlFor={`funding-${p.key}`}>{tr(p.label)}</Label>
             <Input
               id={`funding-${p.key}`}
               value={fields[p.key] ?? ""}
               onChange={(e) => setField(p.key, e.target.value)}
-              placeholder={p.placeholder}
+              placeholder={tr(p.placeholder)}
               autoComplete="off"
               spellCheck={false}
             />
@@ -295,12 +299,12 @@ function FundingForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="funding-custom">Custom URLs</Label>
+        <Label htmlFor="funding-custom">{tr("Custom URLs")}</Label>
         <Textarea
           id="funding-custom"
           value={fields[CUSTOM_KEY] ?? ""}
           onChange={(e) => setField(CUSTOM_KEY, e.target.value)}
-          placeholder="https://example.com/donate (one per line)"
+          placeholder={tr("https://example.com/donate (one per line)")}
           rows={2}
           autoComplete="off"
           spellCheck={false}
@@ -311,10 +315,10 @@ function FundingForm({
         {exists &&
           (confirmingRemove ? (
             <InlineConfirm
-              prompt="Remove the Sponsor button?"
+              prompt={tr("Remove the Sponsor button?")}
               promptClassName="mr-auto text-xs"
               cancelVariant="outline"
-              actLabel="Remove"
+              actLabel={tr("Remove")}
               pending={del.isPending}
               swapFocusRef={swapFocus()}
               onCancel={() => setConfirmingRemove(false)}
@@ -328,7 +332,7 @@ function FundingForm({
               className="mr-auto text-muted-foreground"
               onClick={() => setConfirmingRemove(true)}
             >
-              Remove sponsor button
+              {tr("Remove sponsor button")}
             </Button>
           ))}
         <DisabledReasonButton

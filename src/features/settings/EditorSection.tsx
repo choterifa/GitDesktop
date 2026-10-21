@@ -17,6 +17,7 @@ import { withForm } from "@/lib/form";
 import { detectEditors } from "@/lib/git/api";
 import { isWindows, type Platform, platform } from "@/lib/hotkeys/binding";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 const CUSTOM = "__custom__";
 const NONE = "__none__";
@@ -31,6 +32,7 @@ const CUSTOM_PLACEHOLDER = CUSTOM_PLACEHOLDERS[platform];
 export const EditorSection = withForm({
   ...settingsFormOpts,
   render: function EditorSectionRender({ form }) {
+    const tx = useSettingsText();
     const detected = useQuery({
       queryKey: ["detected-editors"],
       queryFn: detectEditors,
@@ -58,8 +60,8 @@ export const EditorSection = withForm({
 
     // Base UI's Select.Value renders the raw value unless given value→label items
     const selectItems: Record<string, string> = {
-      [NONE]: "None",
-      [CUSTOM]: "Custom…",
+      [NONE]: tx("None"),
+      [CUSTOM]: tx("Custom…"),
       ...Object.fromEntries(editors.map((e) => [e.path, e.name])),
     };
 
@@ -70,11 +72,11 @@ export const EditorSection = withForm({
 
     async function choose() {
       const picked = await openDialog({
-        title: "Choose a program",
+        title: tx("Choose a program"),
         // macOS editors are `.app` bundles and Linux ones are bare binaries;
         // only Windows uses .exe/.cmd/.bat, so don't filter elsewhere.
         filters: isWindows
-          ? [{ name: "Programs", extensions: ["exe", "cmd", "bat"] }]
+          ? [{ name: tx("Programs"), extensions: ["exe", "cmd", "bat"] }]
           : undefined,
       });
       if (picked) setEditor(picked, programLabel(picked));
@@ -83,14 +85,13 @@ export const EditorSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">External editor</h2>
+          <h2 className="text-sm font-medium">{tx("External editor")}</h2>
           <p className="text-xs text-muted-foreground">
-            Adds an "Open in …" entry to the file context menu. Installed
-            editors are detected automatically.
+            {tx('Adds an "Open in …" entry to the file context menu. Installed editors are detected automatically.')}
           </p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="editor-select">Editor</Label>
+          <Label htmlFor="editor-select">{tx("Editor")}</Label>
           <Select
             items={selectItems}
             value={selectValue}
@@ -113,17 +114,17 @@ export const EditorSection = withForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>None</SelectItem>
+              <SelectItem value={NONE}>{tx("None")}</SelectItem>
               {editors.map((editor) => (
                 <SelectItem key={editor.path} value={editor.path}>
                   {editor.name}
                 </SelectItem>
               ))}
-              <SelectItem value={CUSTOM}>Custom…</SelectItem>
+              <SelectItem value={CUSTOM}>{tx("Custom…")}</SelectItem>
             </SelectContent>
           </Select>
           {detected.isPending && (
-            <p className="text-xs text-muted-foreground">Detecting editors…</p>
+            <p className="text-xs text-muted-foreground">{tx("Detecting editors…")}</p>
           )}
           {!showCustom && matched && (
             <PathText
@@ -134,7 +135,7 @@ export const EditorSection = withForm({
         </div>
         {showCustom && (
           <div className="space-y-2">
-            <Label htmlFor="external-editor">Program path</Label>
+            <Label htmlFor="external-editor">{tx("Program path")}</Label>
             <div className="flex gap-2">
               <Input
                 id="external-editor"
@@ -147,7 +148,7 @@ export const EditorSection = withForm({
                 }
               />
               <Button type="button" variant="outline" onClick={choose}>
-                Choose…
+                {tx("Choose…")}
               </Button>
             </div>
           </div>

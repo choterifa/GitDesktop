@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { track } from "@/lib/analytics";
 import { triggerAutomations } from "@/lib/automations/runner";
@@ -51,6 +52,7 @@ export function useCommitSubmit(
     onCommitted?: () => void;
   } = {},
 ) {
+  const { t } = useTranslation("commit");
   const queryClient = useQueryClient();
   const status = useRepoStatus(repoPath);
   const commit = useCommit(repoPath);
@@ -141,26 +143,29 @@ export function useCommitSubmit(
   const commitDisabledReason = ((): string | null => {
     switch (true) {
       case rulesSettling:
-        return "Checking branch protection rules…";
+        return t("disabled.checkingRules");
       case locked:
-        return "This branch requires changes via a pull request";
+        return t("disabled.pullRequestRequired");
       case headMoved:
-        return "The latest commit changed since you started amending";
+        return t("disabled.commitMoved");
       case branchMoved:
-        return "The checked-out branch changed since you started amending";
+        return t("disabled.branchMoved");
       case title.trim().length === 0:
-        return "Enter a commit title first";
+        return t("disabled.enterTitle");
       case stagedCount === 0 && !amending:
-        return "Stage changes to commit";
+        return t("disabled.stageChanges");
       default:
         return null;
     }
   })();
   const commitLabel = amending
-    ? "Amend last commit"
-    : `Commit${stagedCount > 0 ? ` (${stagedCount})` : ""}${
-        branchName ? ` to ${branchName}` : ""
-      }`;
+    ? t("actions.amendLastCommit")
+    : t(stagedCount > 0 ? "actions.commitWithFiles" : "actions.commit", {
+        count: stagedCount,
+        branch: branchName
+          ? ` ${t("actions.toBranch", { branch: branchName })}`
+          : "",
+      });
 
   // The commit hotkey (Ctrl+Enter by default) fires through the global
   // dispatcher even from the title/body fields — modifier combos are
@@ -237,7 +242,9 @@ export function useCommitSubmit(
         });
       }
       toast.success(
-        `${wasAmending ? "Amended" : "Committed"} ${result.hash.slice(0, 7)}`,
+        t(wasAmending ? "toast.amended" : "toast.committed", {
+          hash: result.hash.slice(0, 7),
+        }),
       );
       // Amending rewrites an existing commit; only new commits fire
       // on-commit automations.

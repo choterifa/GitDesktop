@@ -18,6 +18,7 @@ import {
 } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ElapsedTime } from "@/components/elapsed-time";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
@@ -148,6 +149,7 @@ function visibleNotifications(
 }
 
 function ActivityBell({ variant }: { variant: "header" | "strip" }) {
+  const { t } = useTranslation("components");
   const tasks = useReviewTasks();
   const notifs = useNotifications();
   const aiEnabled = useAiEnabled();
@@ -164,17 +166,17 @@ function ActivityBell({ variant }: { variant: "header" | "strip" }) {
   const live = liveTasks(tasks).length;
   const stopped = stoppedTasks(tasks, aiEnabled).length;
 
-  const label = `Activity & notifications${
-    unread > 0 ? ` · ${unread} unread` : ""
-  }${live > 0 ? ` · ${live} in progress` : ""}${
-    stopped > 0 ? ` · ${stopped} stopped` : ""
-  }`;
+  const label = t("activity.bellLabel", {
+    unread: unread ? t("activity.unreadCount", { count: unread }) : "",
+    live: live ? t("activity.inProgressCount", { count: live }) : "",
+    stopped: stopped ? t("activity.stoppedCount", { count: stopped }) : "",
+  });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         className="inline-flex h-7 items-center gap-1 rounded-none px-1.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 aria-expanded:bg-muted aria-expanded:text-foreground"
-        aria-label={`${label}. Open the list.`}
+        aria-label={t("activity.openList", { label })}
         title={label}
       >
         {live > 0 ? (
@@ -342,6 +344,7 @@ async function resolveLiveTarget(
 }
 
 function ActivityPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("components");
   const tasks = useReviewTasks();
   const notifs = useNotifications();
   const repoPath = useUiStore((s) => s.repoPath);
@@ -539,7 +542,7 @@ function ActivityPanel({ onClose }: { onClose: () => void }) {
       {live.length > 0 && (
         <div className="border-b">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-medium">In progress</span>
+            <span className="text-xs font-medium">{t("activity.inProgress")}</span>
             <span className="text-[11px] text-muted-foreground tabular-nums">
               {live.length}
             </span>
@@ -562,7 +565,7 @@ function ActivityPanel({ onClose }: { onClose: () => void }) {
       {stopped.length > 0 && (
         <div className="border-b">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-medium">Stopped</span>
+            <span className="text-xs font-medium">{t("activity.stopped")}</span>
             <span className="text-[11px] text-muted-foreground tabular-nums">
               {stopped.length}
             </span>
@@ -581,14 +584,14 @@ function ActivityPanel({ onClose }: { onClose: () => void }) {
       )}
 
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-medium">Notifications</span>
+        <span className="text-xs font-medium">{t("activity.notifications")}</span>
         {visible.length > 0 && (
           <div className="-mr-1 flex items-center gap-0.5">
             <Button variant="ghost" size="xs" onClick={markAllVisibleRead}>
-              Mark all read
+              {t("activity.markAllRead")}
             </Button>
             <Button variant="ghost" size="xs" onClick={clearAllVisible}>
-              Clear all
+              {t("activity.clearAll")}
             </Button>
           </div>
         )}
@@ -596,11 +599,11 @@ function ActivityPanel({ onClose }: { onClose: () => void }) {
 
       {visible.length === 0 ? (
         <div className="px-3 pt-1 pb-6 text-center">
-          <p className="text-xs font-medium">You're all caught up</p>
+          <p className="text-xs font-medium">{t("activity.allCaughtUp")}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
             {aiEnabled
-              ? "Finished reviews, PR activity, checks, and completed runs show up here so you never miss one."
-              : "PR activity, checks, and completed runs show up here so you never miss one."}
+              ? t("activity.emptyWithAi")
+              : t("activity.empty")}
           </p>
         </div>
       ) : (
@@ -645,7 +648,7 @@ function ActivityPanel({ onClose }: { onClose: () => void }) {
             openHistory(repoPath);
           }}
         >
-          Automation history
+          {t("activity.automationHistory")}
           <CaretRightIcon />
         </Button>
       )}
@@ -663,21 +666,22 @@ function LiveTaskRow({
   /** 1-based place in the run queue when queued, else 0. */
   queuePosition: number;
 }) {
+  const { t } = useTranslation("components");
   const ModeIcon = task.mode === "security" ? ShieldCheckIcon : SparkleIcon;
-  const modeName = task.mode === "security" ? "Security audit" : "Review";
+  const modeName = task.mode === "security" ? t("activity.securityAudit") : t("activity.review");
   const stateWord =
     task.phase === "queued"
       ? queuePosition <= 1
-        ? "Queued · next"
-        : `Queued · #${queuePosition}`
-      : task.status.trim() || "Running…";
+        ? t("activity.queuedNext")
+        : t("activity.queuedPosition", { position: queuePosition })
+      : task.status.trim() || t("activity.running");
 
   return (
     <div className="flex items-start gap-2 px-3 py-2 not-last:border-b">
       <ModeIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium" title={task.title}>
-          {task.title || "Pull request"}
+          {task.title || t("activity.pullRequest")}
         </p>
         <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
           <span className="flex min-w-0 items-center gap-1 truncate">
@@ -698,7 +702,7 @@ function LiveTaskRow({
         className="shrink-0"
         onClick={() => cancelReview(task.key)}
       >
-        Cancel
+        {t("activity.cancel")}
       </Button>
     </div>
   );
@@ -723,10 +727,11 @@ function StoppedTaskRow({
   /** Show a long error in the ErrorDialog, headed by `summary`. */
   onOpenDetails: (summary: string, detail: string) => void;
 }) {
+  const { t } = useTranslation("components");
   const ModeIcon = task.mode === "security" ? ShieldCheckIcon : SparkleIcon;
-  const modeName = task.mode === "security" ? "Security audit" : "Review";
+  const modeName = task.mode === "security" ? t("activity.securityAudit") : t("activity.review");
   const failed = task.phase === "error";
-  const title = task.title || "Pull request";
+  const title = task.title || t("activity.pullRequest");
   const detailId = useId();
   const detail = failed && task.error.trim() ? task.error : undefined;
   const [expanded, setExpanded] = useState(false);
@@ -748,11 +753,11 @@ function StoppedTaskRow({
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {modeName} ·{" "}
             {failed ? (
-              <span className="text-destructive">Failed</span>
+              <span className="text-destructive">{t("activity.failed")}</span>
             ) : (
-              "Cancelled"
+              t("activity.cancelled")
             )}
-            {ranFor ? ` · ran ${ranFor}` : ""}
+            {ranFor ? ` · ${t("activity.ranFor", { duration: ranFor })}` : ""}
             {crossRepo ? ` · ${task.target.repoName}` : ""}
           </p>
         </div>
@@ -763,8 +768,8 @@ function StoppedTaskRow({
             className="shrink-0 self-start text-muted-foreground"
             aria-expanded={expanded}
             aria-controls={detailId}
-            aria-label={`Full error — ${title}`}
-            title={expanded ? "Hide full error" : "Show full error"}
+            aria-label={t("activity.fullError", { title })}
+            title={expanded ? t("activity.hideFullError") : t("activity.showFullError")}
             onClick={() => setExpanded((open) => !open)}
           >
             <CaretDownIcon
@@ -779,19 +784,19 @@ function StoppedTaskRow({
           variant="ghost"
           size="xs"
           className="shrink-0"
-          aria-label={`Re-run ${title}`}
+          aria-label={t("activity.rerunTitle", { title })}
           // The row itself isn't focusable, so the error describes the action
           // it bears on.
           aria-describedby={detail ? detailId : undefined}
           onClick={() => task.rerun?.()}
         >
-          Re-run
+          {t("activity.rerun")}
         </Button>
         <Button
           variant="ghost"
           size="icon-xs"
           className="shrink-0 self-start text-muted-foreground"
-          aria-label={`Dismiss "${title}"`}
+          aria-label={t("activity.dismissTitle", { title })}
           onClick={() => resetReview(task.key)}
         >
           <XIcon />
@@ -815,7 +820,7 @@ function StoppedTaskRow({
             size="xs"
             onClick={() => onOpenDetails(title, detail)}
           >
-            Open in Details
+            {t("activity.openInDetails")}
           </Button>
         </div>
       )}
@@ -836,6 +841,7 @@ function NotificationRow({
   /** Show a long detail in the ErrorDialog. */
   onOpenDetails: (detail: string) => void;
 }) {
+  const { t } = useTranslation("components");
   const Glyph = glyphFor(n);
   const detailId = useId();
   // A one-line failure's full text IS its subtitle, already in the accessible name.
@@ -946,8 +952,8 @@ function NotificationRow({
             className="my-1.5 shrink-0 self-start text-muted-foreground"
             aria-expanded={expanded}
             aria-controls={detailId}
-            aria-label={`Full text — ${n.title}`}
-            title={expanded ? "Hide full text" : "Show full text"}
+            aria-label={t("activity.fullText", { title: n.title })}
+            title={expanded ? t("activity.hideFullText") : t("activity.showFullText")}
             onClick={() => setExpanded((open) => !open)}
           >
             <CaretDownIcon
@@ -980,7 +986,7 @@ function NotificationRow({
           variant="ghost"
           size="icon-xs"
           className="mt-0 my-1.5 mr-1 shrink-0 self-start text-muted-foreground"
-          aria-label={`Clear "${n.title}"`}
+          aria-label={t("activity.clearTitle", { title: n.title })}
           onClick={() => clearNotification(n.id)}
         >
           <XIcon />

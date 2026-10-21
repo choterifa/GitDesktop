@@ -1,6 +1,7 @@
 import { useSelector } from "@tanstack/react-store";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffectEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,7 @@ export function ExploreCloneDialog({
   target: ExploreCloneTarget | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("explore");
   const openRecorded = useOpenRecordedRepo();
   const settings = useSettings();
 
@@ -91,7 +93,10 @@ export function ExploreCloneDialog({
   const isSubmitting = useSelector(form.store, (s) => s.isSubmitting);
 
   async function pickDestination() {
-    const path = await openDialog({ directory: true, title: "Local path" });
+    const path = await openDialog({
+      directory: true,
+      title: t("clone.localPath"),
+    });
     if (path) form.setFieldValue("destination", path);
   }
 
@@ -99,7 +104,7 @@ export function ExploreCloneDialog({
   const { blockedReason, reasonId, wrapperTitle, describedBy } =
     useDisabledReason({
       disabled: !canClone,
-      reason: "Choose a local path to clone into",
+      reason: t("clone.choosePathReason"),
     });
 
   return (
@@ -113,10 +118,11 @@ export function ExploreCloneDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Clone {target?.name}</DialogTitle>
+            <DialogTitle>
+              {t("clone.title", { name: target?.name })}
+            </DialogTitle>
             <DialogDescription>
-              Choose a folder to clone into. Clones over HTTPS or SSH using your
-              system git credentials.
+              {t("clone.description")}
             </DialogDescription>
           </DialogHeader>
 
@@ -126,20 +132,20 @@ export function ExploreCloneDialog({
                 <form.AppField name="destination">
                   {(field) => (
                     <field.TextField
-                      label="Local path"
-                      placeholder="Choose a folder to clone into…"
+                      label={t("clone.localPath")}
+                      placeholder={t("clone.pathPlaceholder")}
                     />
                   )}
                 </form.AppField>
               </div>
               <Button type="button" variant="outline" onClick={pickDestination}>
-                Choose…
+                {t("clone.choose")}
               </Button>
             </div>
             {values.destination.trim() && target && (
               // gap-1, not a trailing label space — flex line boxes trim those.
               <p className="flex min-w-0 gap-1 text-[11px] text-muted-foreground">
-                <span className="shrink-0">Clones into</span>
+                <span className="shrink-0">{t("clone.destinationLabel")}</span>
                 <PathText
                   path={`${values.destination.trim().replace(/[\\/]$/, "")}${
                     values.destination.includes("/") ? "/" : "\\"
@@ -154,13 +160,13 @@ export function ExploreCloneDialog({
             <form.AppField name="recurseSubmodules">
               {(field) => (
                 <field.CheckboxField
-                  label="Clone submodules"
+                  label={t("clone.submodules")}
                   className="flex cursor-pointer items-center gap-2 text-xs"
                 />
               )}
             </form.AppField>
             <p className="text-[11px] text-muted-foreground">
-              Initializes every submodule, including nested ones, after cloning.
+              {t("clone.submodulesDescription")}
             </p>
           </div>
 
@@ -171,7 +177,7 @@ export function ExploreCloneDialog({
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -187,7 +193,7 @@ export function ExploreCloneDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Clone
+                  {t("clone.submit")}
                 </form.SubmitButton>
                 {blockedReason ? (
                   <span id={reasonId} className="sr-only">

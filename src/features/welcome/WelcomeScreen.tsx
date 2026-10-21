@@ -9,6 +9,7 @@ import {
   TrayIcon,
 } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +32,7 @@ const RECENT_REPOS_RESERVE = {
 } as CSSProperties;
 
 export function WelcomeScreen() {
+  const { t } = useTranslation("welcome");
   const openSettings = useUiStore((s) => s.openSettings);
   const openHelp = useUiStore((s) => s.openHelp);
   const openExplore = useUiStore((s) => s.openExplore);
@@ -63,21 +65,21 @@ export function WelcomeScreen() {
   }[] = [
     {
       id: "add-local-repository",
-      label: "Open repository",
+      label: t("actions.openRepository"),
       icon: FolderOpenIcon,
       variant: "default",
       onClick: () => dispatchAction("add-local-repository"),
     },
     {
       id: "clone-repository",
-      label: "Clone repository",
+      label: t("actions.cloneRepository"),
       icon: GitForkIcon,
       variant: "outline",
       onClick: () => dispatchAction("clone-repository"),
     },
     {
       id: "new-repository",
-      label: "Create repository",
+      label: t("actions.createRepository"),
       icon: FolderPlusIcon,
       variant: "outline",
       onClick: () => dispatchAction("new-repository"),
@@ -86,14 +88,14 @@ export function WelcomeScreen() {
     // least-frequent (discovery) action, anchors the bottom.
     {
       id: "open-my-work",
-      label: "My work",
+      label: t("actions.myWork"),
       icon: TrayIcon,
       variant: "outline",
       onClick: openMyWork,
     },
     {
       id: "open-explore",
-      label: "Explore repositories",
+      label: t("actions.exploreRepositories"),
       icon: CompassIcon,
       variant: "outline",
       onClick: openExplore,
@@ -111,8 +113,8 @@ export function WelcomeScreen() {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="User guide"
-            title="User guide (F1)"
+            aria-label={t("actions.userGuide")}
+            title={t("actions.userGuideShortcut")}
             onClick={openHelp}
           >
             <QuestionIcon />
@@ -122,9 +124,9 @@ export function WelcomeScreen() {
             size="icon-sm"
             className="relative"
             aria-label={
-              updateAvailable ? "Settings — update available" : "Settings"
+              updateAvailable ? t("actions.settingsUpdateAvailable") : t("actions.settings")
             }
-            title={updateAvailable ? "Settings — update available" : "Settings"}
+            title={updateAvailable ? t("actions.settingsUpdateAvailable") : t("actions.settings")}
             onClick={() => openSettings()}
           >
             <GearIcon />
@@ -158,15 +160,14 @@ export function WelcomeScreen() {
                   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border bg-muted/40 px-3 py-2">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
                       <BookOpenIcon className="size-4 shrink-0 text-foreground" />
-                      New to GitDesktop? The built-in guide walks through the
-                      whole workflow.
+                      {t("guideNudge.message")}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <Button size="xs" variant="ghost" onClick={dismissNudge}>
-                        Dismiss
+                        {t("guideNudge.dismiss")}
                       </Button>
                       <Button size="xs" onClick={openGuide}>
-                        Open guide
+                        {t("guideNudge.open")}
                       </Button>
                     </span>
                   </div>
@@ -179,15 +180,13 @@ export function WelcomeScreen() {
                   <div className="flex flex-col gap-6 md:pr-10">
                     <div className="space-y-2">
                       <h1 className="font-heading text-2xl font-semibold tracking-tight text-balance">
-                        The whole loop,
-                        <br className="hidden sm:block" /> one window.
+                        {t("hero.titleLineOne")}
+                        <br className="hidden sm:block" /> {t("hero.titleLineTwo")}
                       </h1>
                       <p className="text-xs/relaxed text-muted-foreground">
-                        Open a repository to start reviewing, committing, and
-                        shipping
                         {aiEnabled
-                          ? " — with AI in the loop when you want it."
-                          : "."}
+                          ? t("hero.descriptionWithAi")
+                          : t("hero.description")}
                       </p>
                     </div>
 
@@ -218,7 +217,7 @@ export function WelcomeScreen() {
                         )}
                       </div>
                       <p className="pt-1 text-[11px] text-muted-foreground">
-                        …or drag a repo folder anywhere onto the window.
+                        {t("hero.dragHint")}
                       </p>
                     </div>
                   </div>

@@ -7,10 +7,9 @@
 //! its path with the same `dirs::data_dir()/<identifier>` rule the Tauri path layer
 //! uses (see the storage-dir contract in `local_prs.rs`).
 //!
-//! Only the AI-generation fields the MCP recipe tools need are surfaced. Every
-//! consumed field is type-checked (untrusted-JSON discipline); a missing file,
-//! missing key, or wrong-typed value yields the empty default for that field —
-//! never an error. Reading settings must never fail a recipe tool.
+//! The MCP recipe tools read only their AI-generation fields. The native desktop
+//! menus also read the UI language so they can match the frontend. Every consumed
+//! field is type-checked; absent or invalid UI language defaults to Mexican Spanish.
 
 use std::path::{Path, PathBuf};
 
@@ -105,6 +104,20 @@ fn read_settings_object(path: &Path) -> Option<Value> {
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     // Top-level shape is `{ "settings": { … } }` (the plugin's keyed store).
     value.get("settings").cloned().filter(Value::is_object)
+}
+
+/// Reads the saved UI language for native menus. Mirrors the frontend settings
+/// default, so new installs and older stores without the field start in Spanish.
+pub(crate) fn read_ui_language() -> crate::app_menu::NativeLanguage {
+    store_path()
+        .and_then(|path| read_settings_object(&path))
+        .and_then(|settings| {
+            settings
+                .get("language")
+                .and_then(Value::as_str)
+                .map(crate::app_menu::NativeLanguage::from_code)
+        })
+        .unwrap_or(crate::app_menu::NativeLanguage::Spanish)
 }
 
 /// Parse the newline-delimited `aiIgnorePatterns` string into a pattern list,

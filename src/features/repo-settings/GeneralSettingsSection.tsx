@@ -52,6 +52,7 @@ import {
   RemoteFormSection,
 } from "./parts";
 import { GITHUB_TOPIC_RULES, TopicsField } from "./TopicsField";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 import { useGenerateRepoDescription } from "./useGenerateRepoDescription";
 
 export function GeneralSettingsSection({
@@ -67,7 +68,7 @@ export function GeneralSettingsSection({
   return (
     <RemoteFormSection
       query={settings}
-      noun="repository settings"
+      noun={tr("repository settings")}
       skeleton={
         <div className="min-w-0 space-y-3">
           <Skeleton className="h-9 w-full" />
@@ -75,7 +76,7 @@ export function GeneralSettingsSection({
           <Skeleton className="h-20 w-full" />
         </div>
       }
-      errorTitle="Couldn't load settings."
+      errorTitle={tr("Couldn't load settings.")}
     >
       {(data) => (
         // Keyed by repo: a cache-warm switch would otherwise reconcile the form in
@@ -150,7 +151,7 @@ function GhScopesNote() {
   if (!scopes.data?.classic || scopes.data.scopes.length === 0) return null;
   return (
     <p className="text-[11px] text-muted-foreground">
-      Your GitHub sign-in grants:{" "}
+      {tr("Your GitHub sign-in grants:")}{" "}
       <span className="font-mono">{scopes.data.scopes.join(", ")}</span>
     </p>
   );
@@ -177,15 +178,18 @@ function CommitMessageSelect({
 }) {
   const value = `${title}/${message}`;
   const opts = options.some((o) => o.value === value)
-    ? options
-    : [{ value, label: `${title} / ${message}` }, ...options];
+    ? options.map((o) => ({ ...o, label: tr(o.label) }))
+    : [
+        { value, label: `${title} / ${message}` },
+        ...options.map((o) => ({ ...o, label: tr(o.label) })),
+      ];
   // Trigger labels, built per render because `opts` carries the synthesized
   // current pair — without them Base UI shows the raw "title/message" value.
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className={disabled ? "text-muted-foreground" : ""}>
-        {label}
+        {tr(label)}
       </Label>
       <Select
         items={items}
@@ -334,7 +338,7 @@ function GeneralForm({
   async function handleSave() {
     try {
       await update.mutateAsync(form);
-      toast.success("Repository settings saved");
+      toast.success(tr("Repository settings saved"));
     } catch (e) {
       toastError(e);
     }
@@ -346,7 +350,7 @@ function GeneralForm({
         id="repo-description"
         value={form.description}
         onChange={(v) => set("description", v)}
-        placeholder="Short description of this repository"
+        placeholder={tr("Short description of this repository")}
         generate={
           aiEnabled &&
           (!aiConfigured ? (
@@ -358,7 +362,7 @@ function GeneralForm({
               onClick={() => openSettings("ai")}
             >
               <SparkleIcon data-icon="inline-start" />
-              Set up AI
+              {tr("Set up AI")}
             </Button>
           ) : busy ? (
             <Button
@@ -372,18 +376,18 @@ function GeneralForm({
               }}
             >
               <Spinner data-icon="inline-start" />
-              Cancel
+              {tr("Cancel")}
             </Button>
           ) : (
             <Button
               type="button"
               variant="ghost"
               size="xs"
-              title={`Suggest a description + topics from the README with AI${generateHint}`}
+              title={`${tr("Suggest a description + topics from the README with AI")}${generateHint}`}
               onClick={runGenerate}
             >
               <SparkleIcon data-icon="inline-start" />
-              Generate
+              {tr("Generate")}
             </Button>
           ))
         }
@@ -391,9 +395,9 @@ function GeneralForm({
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor="repo-topics">Topics</Label>
+          <Label htmlFor="repo-topics">{tr("Topics")}</Label>
           <span className="text-[11px] text-muted-foreground tabular-nums">
-            {form.topics.length} / 20
+            {form.topics.length} {tr("/ 20")}
           </span>
         </div>
         <TopicsField
@@ -406,7 +410,7 @@ function GeneralForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="repo-homepage">Homepage URL</Label>
+          <Label htmlFor="repo-homepage">{tr("Homepage URL")}</Label>
           <Input
             id="repo-homepage"
             value={form.homepage}
@@ -417,7 +421,7 @@ function GeneralForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="repo-default-branch">Default branch</Label>
+          <Label htmlFor="repo-default-branch">{tr("Default branch")}</Label>
           <Select
             value={form.defaultBranch}
             onValueChange={(v) => {
@@ -438,67 +442,67 @@ function GeneralForm({
         </div>
       </div>
 
-      <LabeledGroup label="Features">
+      <LabeledGroup label={tr("Features")}>
         <div className="grid grid-cols-2 gap-2">
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.hasIssues}
               onCheckedChange={(c) => set("hasIssues", c === true)}
             />
-            Issues
+            {tr("Issues")}
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.hasProjects}
               onCheckedChange={(c) => set("hasProjects", c === true)}
             />
-            Projects
+            {tr("Projects")}
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.hasWiki}
               onCheckedChange={(c) => set("hasWiki", c === true)}
             />
-            Wiki
+            {tr("Wiki")}
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.hasDiscussions}
               onCheckedChange={(c) => set("hasDiscussions", c === true)}
             />
-            Discussions
+            {tr("Discussions")}
           </label>
         </div>
       </LabeledGroup>
 
-      <LabeledGroup label="Pull request merges">
+      <LabeledGroup label={tr("Pull request merges")}>
         <div className="grid grid-cols-3 gap-2">
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.allowMergeCommit}
               onCheckedChange={(c) => set("allowMergeCommit", c === true)}
             />
-            Merge commits
+            {tr("Merge commits")}
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.allowSquashMerge}
               onCheckedChange={(c) => set("allowSquashMerge", c === true)}
             />
-            Squash merging
+            {tr("Squash merging")}
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-xs">
             <Checkbox
               checked={form.allowRebaseMerge}
               onCheckedChange={(c) => set("allowRebaseMerge", c === true)}
             />
-            Rebase merging
+            {tr("Rebase merging")}
           </label>
         </div>
         <div className="grid grid-cols-2 gap-4 pt-1">
           <CommitMessageSelect
             id="squash-default"
-            label="Squash merge message"
+            label={tr("Squash merge message")}
             disabled={!form.allowSquashMerge}
             options={SQUASH_DEFAULTS}
             title={form.squashMergeCommitTitle}
@@ -513,7 +517,7 @@ function GeneralForm({
           />
           <CommitMessageSelect
             id="merge-default"
-            label="Merge commit message"
+            label={tr("Merge commit message")}
             disabled={!form.allowMergeCommit}
             options={MERGE_DEFAULTS}
             title={form.mergeCommitTitle}
@@ -532,41 +536,41 @@ function GeneralForm({
             checked={form.allowUpdateBranch}
             onCheckedChange={(c) => set("allowUpdateBranch", c)}
           />
-          Always suggest updating pull request branches
+          {tr("Always suggest updating pull request branches")}
         </label>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch
             checked={form.allowAutoMerge}
             onCheckedChange={(c) => set("allowAutoMerge", c)}
           />
-          Allow auto-merge
+          {tr("Allow auto-merge")}
         </label>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch
             checked={form.deleteBranchOnMerge}
             onCheckedChange={(c) => set("deleteBranchOnMerge", c)}
           />
-          Automatically delete head branches after merge
+          {tr("Automatically delete head branches after merge")}
         </label>
       </LabeledGroup>
 
-      <LabeledGroup label="Commits">
+      <LabeledGroup label={tr("Commits")}>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch
             checked={form.webCommitSignoffRequired}
             onCheckedChange={(c) => set("webCommitSignoffRequired", c)}
           />
-          Require contributors to sign off on web-based commits
+          {tr("Require contributors to sign off on web-based commits")}
         </label>
       </LabeledGroup>
 
-      <LabeledGroup label="Repository">
+      <LabeledGroup label={tr("Repository")}>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch
             checked={form.isTemplate}
             onCheckedChange={(c) => set("isTemplate", c)}
           />
-          Template repository
+          {tr("Template repository")}
         </label>
         {/* GitHub only allows changing this on org-owned private repos. */}
         {settings.canChangeForking && (
@@ -575,15 +579,17 @@ function GeneralForm({
               checked={form.allowForking ?? false}
               onCheckedChange={(c) => set("allowForking", c)}
             />
-            Allow forking
+            {tr("Allow forking")}
           </label>
         )}
       </LabeledGroup>
 
       {settings.htmlUrl && (
-        <LabeledGroup label="Only on GitHub">
+        <LabeledGroup label={tr("Only on GitHub")}>
           <p className="text-xs text-muted-foreground">
-            GitHub doesn't expose these to apps — manage them in your browser.
+            {tr(
+              "GitHub doesn't expose these to apps — manage them in your browser.",
+            )}
           </p>
           <ul className="space-y-1">
             {WEB_ONLY_SETTINGS.map((label) => (
@@ -593,7 +599,7 @@ function GeneralForm({
                   className="flex cursor-pointer items-center gap-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline"
                   onClick={() => openUrl(`${settings.htmlUrl}/settings`)}
                 >
-                  {label}
+                  {tr(label)}
                   <ArrowSquareOutIcon className="size-3 shrink-0" />
                 </button>
               </li>
@@ -607,7 +613,7 @@ function GeneralForm({
       <div className="flex items-center justify-end gap-3 pt-2">
         {!mergeValid && (
           <span className="mr-auto text-xs text-destructive">
-            Enable at least one merge method.
+            {tr("Enable at least one merge method.")}
           </span>
         )}
         <DisabledReasonButton
@@ -616,7 +622,7 @@ function GeneralForm({
           onClick={handleSave}
         >
           {update.isPending && <Spinner data-icon="inline-start" />}
-          Save changes
+          {tr("Save changes")}
         </DisabledReasonButton>
       </div>
     </div>

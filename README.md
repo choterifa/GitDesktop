@@ -225,7 +225,10 @@ default's name), and a PR badge.
 
 ### History
 
-Paged, filterable history with rich commit detail, commit-author avatars, and
+The main History pane opens to a paged commit graph spanning HEAD, local and
+remote branches, and tags. Select a node to inspect its commit; branch labels
+are informational and never switch branches. The sidebar keeps its paged,
+filterable current-branch history with rich commit detail, author avatars, and
 an at-a-glance marker on every commit that hasn't been pushed yet. Per-file
 history and line blame are reachable from any file list (History, pull
 requests, Compare) or the command palette, pinned at that commit or branch

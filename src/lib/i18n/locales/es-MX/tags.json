@@ -1,0 +1,180 @@
+{
+  "badges": {
+    "latest": "Más reciente",
+    "prerelease": "Versión preliminar",
+    "draft": "Borrador"
+  },
+  "common": {
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "save": "Guardar",
+    "view": "Ver"
+  },
+  "probe": {
+    "checking": "Comprobando si se puede {{action}}…",
+    "unreachable": "No se puede {{action}} ahora: el proveedor no está listo.",
+    "actions": {
+      "publishRelease": "publicar una versión",
+      "manageRelease": "administrar esta versión",
+      "publishTagRelease": "publicar una versión para esta etiqueta"
+    }
+  },
+  "panel": {
+    "signInGitLabCli": "Inicia sesión en GitLab CLI para administrar versiones.",
+    "installGitLabCli": "Instala y conecta GitLab CLI para administrar versiones.",
+    "connectForge": "Conecta una plataforma Git para administrar versiones.",
+    "title": "Etiquetas y versiones",
+    "new": "Nuevo",
+    "newRelease": "Nueva versión",
+    "noCommitToTag": "No hay un commit actual para etiquetar.",
+    "newTagOnCurrentCommit": "Crear una etiqueta en el commit actual",
+    "filterTags": "Filtrar etiquetas y versiones…",
+    "noTagsMatch": "Ninguna etiqueta o versión coincide.",
+    "noTagsYet": "Todavía no hay etiquetas ni versiones.",
+    "releaseLabel": "Versión",
+    "tagLabel": "Etiqueta",
+    "newTag": "Crear una etiqueta",
+    "newTagDescriptionBeforeHash": "Crea una etiqueta ligera en el commit actual",
+    "newTagDescriptionAfterHash": "Súbela o crea una versión desde los detalles de la etiqueta.",
+    "createTag": "Crear etiqueta"
+  },
+  "access": {
+    "requiresWrite": "Necesitas acceso de escritura a {{repo}} para administrar versiones.",
+    "thisRepository": "este repositorio"
+  },
+  "states": {
+    "offlineUnavailable": "Estás sin conexión. Esta acción estará disponible cuando vuelvas a conectarte.",
+    "applying": "Aplicando este cambio…",
+    "deletingAsset": "Eliminando este archivo de la versión…",
+    "generating": "Generando…",
+    "generatedNotesPending": "Espera a que termine la generación de notas",
+    "aiDraftPending": "Espera a que termine el borrador de IA",
+    "generatePending": "Espera a que termine la generación de notas de la versión"
+  },
+  "detail": {
+    "signInGitLabManage": "Inicia sesión en GitLab CLI para cargar esta versión.",
+    "installGitLabManage": "Instala y conecta GitLab CLI para cargar esta versión.",
+    "connectForgeManage": "Conecta una plataforma Git para cargar esta versión.",
+    "loadingTagRelease": "Cargando la versión de esta etiqueta…",
+    "signInGitLabPublish": "Inicia sesión en GitLab CLI para publicar una versión.",
+    "installGitLabPublish": "Instala y conecta GitLab CLI para publicar una versión.",
+    "connectForgePublish": "Conecta una plataforma Git para publicar una versión.",
+    "publish": "Publicar versión",
+    "edit": "Editar versión",
+    "released": "Publicada",
+    "noReleaseNotes": "Esta versión no tiene notas.",
+    "assetCount_one": "{{count}} archivo",
+    "assetCount_other": "{{count}} archivos",
+    "upload": "Subir archivo",
+    "noAssets": "No hay archivos adjuntos a esta versión.",
+    "downloadAsset": "Descargar {{name}}",
+    "deleteAsset": "Eliminar {{name}}",
+    "openAsset": "Abrir {{name}}",
+    "editRelease": "Editar versión",
+    "updatesTagOn": "Actualiza la etiqueta {{tag}} en {{provider}}.",
+    "titlePlaceholder": "Título de la versión",
+    "releaseNotes": "Notas de la versión",
+    "notesPlaceholder": "Escribe las notas de la versión…",
+    "latestRelease": "Marcar como la versión más reciente",
+    "latestDraftExplanation": "Este borrador será la versión más reciente cuando lo publiques.",
+    "updateUpdaterManifest": "Actualizar el manifiesto del actualizador",
+    "updaterManifestExplanation": "También actualiza latest.json con estas notas.",
+    "createRelease": "Crear versión",
+    "annotated": "Anotada",
+    "noTagDescription": "Esta etiqueta no tiene descripción.",
+    "checkout": "Cambiar a esta referencia",
+    "pushTag": "Subir etiqueta",
+    "deleteTag": "Eliminar etiqueta"
+  },
+  "confirm": {
+    "deleteAsset": {
+      "title": "¿Eliminar {{name}}?",
+      "binaryBody": "Este archivo adjunto a la versión se eliminará permanentemente.",
+      "linkBody": "Este enlace al archivo se eliminará permanentemente."
+    },
+    "deleteRelease": {
+      "title": "¿Eliminar la versión {{name}}?",
+      "description": "Se quitará la versión de {{provider}}. Esta acción no se puede deshacer.",
+      "cleanupTagBefore": "También eliminar la etiqueta",
+      "cleanupTagAfter": ""
+    },
+    "deleteTag": {
+      "title": "¿Eliminar la etiqueta {{name}}?",
+      "description": "Se eliminará la etiqueta local. Esta acción no se puede deshacer.",
+      "remoteBeforeOrigin": "También eliminarla de"
+    }
+  },
+  "toasts": {
+    "tagCreated": "Se creó la etiqueta {{name}}.",
+    "assetUploaded": "Se subió el archivo de la versión.",
+    "assetDownloaded": "Se descargó {{name}}.",
+    "assetDeleted": "Se eliminó el archivo de la versión.",
+    "tagPushed": "Se subió la etiqueta {{name}}.",
+    "tagDeleted": "Se eliminó la etiqueta {{name}}.",
+    "releasePublished": "Se publicó la versión.",
+    "releaseUpdated": "Se actualizó la versión.",
+    "releaseDeleted": "Se eliminó la versión.",
+    "notesReadyTitle": "Las notas de la versión están listas",
+    "notesReadyDescription": "Te esperan en el cuadro de diálogo.",
+    "notesDiscardedOnSwitch": "Esas notas eran para {{name}} y se descartaron al cambiar de etiqueta.",
+    "notesNoLongerAvailable": "Las notas de {{name}} ya no están disponibles.",
+    "draftSaved": "Se guardó el borrador",
+    "released": "Se publicó {{name}}"
+  },
+  "errors": {
+    "generateNotesFailed": "No se pudieron generar las notas. Inténtalo de nuevo.",
+    "offlineManifestNotUploaded": "Se actualizó la versión, pero no se subió el manifiesto del actualizador porque no tienes conexión.",
+    "manifestNotUploadedAfterSwitch": "Se actualizó la versión, pero no se subió el manifiesto del actualizador después de que el repositorio {{action}} ({{away}}).",
+    "closedRepository": "se cerró",
+    "switchedRepositories": "cambió",
+    "releaseUpdatedManifestMayBeMissing": "Se actualizó la versión, pero puede que falte su manifiesto del actualizador."
+  },
+  "create": {
+    "summarizeWithAiHint": "Resumir con IA{{hint}}",
+    "enableAiInSettings": "Primero activa la IA en Configuración.",
+    "releaseTitle": "Versión {{name}}",
+    "newRelease": "Nueva versión",
+    "description": "Publica una versión en {{provider}}. Al publicarla, se crea una etiqueta nueva a partir del destino.",
+    "tag": "Etiqueta",
+    "noMatchingTags": "No hay etiquetas que coincidan.",
+    "createNewTagPrefix": "Crear etiqueta nueva",
+    "createNewTagSuffix": "para la versión",
+    "target": "Destino",
+    "titleOptional": "Título (opcional)",
+    "releaseTitlePlaceholder": "Título de la versión",
+    "releaseNotes": "Notas de la versión",
+    "previousTag": "Etiqueta anterior",
+    "automatic": "Automática",
+    "previousTagNotFound": "Esta etiqueta no existe, así que las notas generadas la ignorarán y usarán el rango predeterminado.",
+    "notesPlaceholder": "¿Qué cambió?… (o genera las notas arriba)",
+    "generateNotes": "Generar notas",
+    "fromGitHubNotes": "Desde GitHub (commits y PRs)",
+    "summarizeWithAi": "Resumir con IA",
+    "setLatest": "Marcar como la versión más reciente",
+    "saveDraft": "Guardar borrador",
+    "publishRelease": "Publicar versión",
+    "chooseTarget": "Elige un destino",
+    "filterBranches": "Filtrar ramas…",
+    "filterRecentCommits": "Filtrar commits recientes…",
+    "branches": "Ramas",
+    "recentCommits": "Commits recientes",
+    "noMatches": "No hay coincidencias."
+  },
+  "validation": {
+    "empty": "Escribe un nombre para la etiqueta",
+    "spaces": "Los nombres de etiqueta no pueden contener espacios",
+    "startsDash": "Los nombres de etiqueta no pueden empezar con \"-\"",
+    "endsDot": "Los nombres de etiqueta no pueden terminar en \".\"",
+    "startsSlash": "Los nombres de etiqueta no pueden empezar con \"/\"",
+    "endsSlash": "Los nombres de etiqueta no pueden terminar en \"/\"",
+    "doubleSlash": "Los nombres de etiqueta no pueden contener \"//\"",
+    "startsDot": "Los nombres de etiqueta no pueden empezar con \".\"",
+    "partStartsDot": "La parte \"{{part}}\" del nombre de etiqueta no puede empezar con \".\"",
+    "endsLock": "Los nombres de etiqueta no pueden terminar en \".lock\"",
+    "partEndsLock": "La parte \"{{part}}\" del nombre de etiqueta no puede terminar en \".lock\"",
+    "doubleDot": "Los nombres de etiqueta no pueden contener \"..\"",
+    "atBrace": "Los nombres de etiqueta no pueden contener \"@{\"",
+    "controlCharacters": "Los nombres de etiqueta no pueden contener caracteres de control",
+    "forbiddenCharacter": "Los nombres de etiqueta no pueden contener \"{{character}}\""
+  }
+}

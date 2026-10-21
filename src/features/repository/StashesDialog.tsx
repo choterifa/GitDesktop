@@ -1,5 +1,6 @@
 import { TrashIcon } from "@phosphor-icons/react";
 import { useDeferredValue, useEffectEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DiffStat } from "@/components/diff-stat";
@@ -47,22 +48,6 @@ type FileSource =
   | { kind: "stash"; index: number }
   | { kind: "orphaned"; sha: string };
 
-/** Apply and pop differ only in what becomes of the stash afterward. The pop
- *  wording is kept in step BY HAND with the branch menu's "Pop latest stash"
- *  prompt (BranchSwitcher) — edit both or hoist a shared prompt. */
-const STASH_APPLY_COPY = {
-  apply: {
-    verb: "Apply",
-    fate: "leaves it in the stash list, so you can apply it again.",
-    confirmLabel: "Apply stash",
-  },
-  pop: {
-    verb: "Pop",
-    fate: "removes it from the stash list. If applying conflicts, the stash is kept.",
-    confirmLabel: "Pop stash",
-  },
-} as const;
-
 /** A pending apply/pop, plus the stash's identity as it was when the prompt
  *  opened — `stash@{n}` is a SLOT, not an identity. */
 interface PendingApply {
@@ -71,16 +56,6 @@ interface PendingApply {
   message: string;
   date: string;
 }
-
-const stashApplyPrompt = ({ index, pop }: PendingApply) => {
-  const slot = `stash@{${index}}`;
-  const copy = STASH_APPLY_COPY[pop ? "pop" : "apply"];
-  return {
-    title: `${copy.verb} ${slot}?`,
-    body: `Applies ${slot} to your working tree and ${copy.fate}`,
-    confirmLabel: copy.confirmLabel,
-  };
-};
 
 /**
  * Browse the stash stack: pick a stash, see the files it holds, inspect each
@@ -99,6 +74,7 @@ export function StashesDialog({
   onOpenChange: (open: boolean) => void;
   initialView?: StashesView;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const stashes = useStashList(repoPath, open);
   const apply = useStashApply(repoPath);
   const drop = useStashDrop(repoPath);
@@ -146,20 +122,32 @@ export function StashesDialog({
     // on the entry is the real identity if this guard ever needs tightening.
     const current = list.find((s) => s.index === index);
     if (!current || current.message !== message || current.date !== date) {
-      toast.info("The stash list changed — nothing was applied.");
+      toast.info(t("stash.listChanged"));
       return;
     }
     // A conflict here must not read as a recorded reapply's.
     useStashReapplyMarker.getState().clearFor(repoPath);
     try {
       await apply.mutateAsync({ index, pop });
-      toast.success(pop ? "Stash applied and dropped" : "Stash applied");
+      toast.success(t(pop ? "stash.appliedAndDropped" : "stash.applied"));
     } catch (e) {
       onError(e);
     }
   }
 
-  const applyPrompt = shownApply ? stashApplyPrompt(shownApply) : null;
+  const applyPrompt = shownApply
+    ? {
+        title: t(shownApply.pop ? "stash.popTitle" : "stash.applyTitle", {
+          slot: `stash@{${shownApply.index}}`,
+        }),
+        body: t(shownApply.pop ? "stash.popBody" : "stash.applyBody", {
+          slot: `stash@{${shownApply.index}}`,
+        }),
+        confirmLabel: t(
+          shownApply.pop ? "stash.popAction" : "stash.applyAction",
+        ),
+      }
+    : null;
 
   // Arrow keys walk the stash list, mirroring the app's other lists.
   const onStashesKeyDown = listKeyboardNav({
@@ -174,18 +162,18 @@ export function StashesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[70vh] flex-col sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Stashes</DialogTitle>
+          <DialogTitle>{t("stash.title")}</DialogTitle>
           <DialogDescription>
             {view === "recoverable"
-              ? "Lost, uncommitted work that fell out of the stash list — often left by an interrupted operation. Restore re-applies it to the working tree."
-              : "Changes set aside with stash. Apply re-applies a stash to the working tree; pop also removes it from the stack."}
+              ? t("stash.recoverableDescription")
+              : t("stash.description")}
           </DialogDescription>
         </DialogHeader>
 
         {/* Segmented source toggle — keyboard-focusable native buttons. */}
         <div
           role="group"
-          aria-label="Stash source"
+          aria-label={t("stash.source")}
           className="flex shrink-0 gap-1"
         >
           <Button
@@ -194,7 +182,7 @@ export function StashesDialog({
             aria-pressed={view === "stashes"}
             onClick={() => setView("stashes")}
           >
-            Stashes
+            {t("stash.title")}
           </Button>
           <Button
             variant={view === "recoverable" ? "default" : "outline"}
@@ -202,7 +190,7 @@ export function StashesDialog({
             aria-pressed={view === "recoverable"}
             onClick={() => setView("recoverable")}
           >
-            Recoverable
+            {t("stash.recoverable")}
           </Button>
         </div>
 
@@ -210,8 +198,7 @@ export function StashesDialog({
           <RecoverableView repoPath={repoPath} open={open} />
         ) : list.length === 0 ? (
           <p className="flex-1 py-8 text-center text-xs text-muted-foreground">
-            No stashes. "Stash all changes" in the branch menu sets the working
-            tree aside here.
+            {t("stash.empty")}
           </p>
         ) : (
           <div className="flex min-h-0 flex-1 border">
@@ -251,12 +238,12 @@ export function StashesDialog({
                     variant="ghost"
                     size="xs"
                     className="text-destructive"
-                    aria-label="Drop stash"
+                    aria-label={t("stash.drop")}
                     disabled={busy}
                     onClick={() => setConfirmDrop(effectiveIndex)}
                   >
                     <TrashIcon data-icon="inline-start" />
-                    Drop…
+                    {t("stash.dropEllipsis")}
                   </Button>
                   <Button
                     variant="outline"
@@ -264,14 +251,14 @@ export function StashesDialog({
                     disabled={busy}
                     onClick={() => askApply(effectiveIndex, false)}
                   >
-                    Apply
+                    {t("stash.apply")}
                   </Button>
                   <Button
                     size="xs"
                     disabled={busy}
                     onClick={() => askApply(effectiveIndex, true)}
                   >
-                    Pop
+                    {t("stash.pop")}
                   </Button>
                 </div>
               )}
@@ -305,16 +292,14 @@ export function StashesDialog({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Drop this stash?</DialogTitle>
+              <DialogTitle>{t("stash.dropTitle")}</DialogTitle>
               <DialogDescription>
-                Permanently deletes stash@{"{"}
-                {shownDrop}
-                {"}"} and the changes it holds. This cannot be undone.
+                {t("stash.dropDescription", { slot: `stash@{${shownDrop}}` })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmDrop(null)}>
-                Cancel
+                {t("stash.cancel")}
               </Button>
               <Button
                 variant="destructive"
@@ -324,7 +309,7 @@ export function StashesDialog({
                   try {
                     await drop.mutateAsync(confirmDrop);
                     setConfirmDrop(null);
-                    toast.success("Stash dropped");
+                    toast.success(t("stash.dropped"));
                   } catch (e) {
                     setConfirmDrop(null);
                     onError(e);
@@ -332,7 +317,7 @@ export function StashesDialog({
                 }}
               >
                 {drop.isPending && <Spinner data-icon="inline-start" />}
-                Drop stash
+                {t("stash.drop")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -351,6 +336,7 @@ function RecoverableView({
   repoPath: string;
   open: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   // Auto-scan whenever this view is shown; `enabled` gates the slow fsck so it
   // never runs on the Stashes view.
   const orphaned = useOrphanedStashes(repoPath, open);
@@ -377,7 +363,7 @@ function RecoverableView({
     useStashReapplyMarker.getState().clearFor(repoPath);
     try {
       await restore.mutateAsync(sha);
-      toast.success("Restored to working tree");
+      toast.success(t("stash.restored"));
     } catch (e) {
       onError(e);
     }
@@ -404,7 +390,7 @@ function RecoverableView({
     return (
       <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
         <Spinner className="size-4" />
-        Scanning for recoverable work…
+        {t("stash.scanning")}
       </div>
     );
   }
@@ -413,10 +399,10 @@ function RecoverableView({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
         <p className="text-center text-xs text-muted-foreground">
-          No recoverable work found.
+          {t("stash.noRecoverable")}
         </p>
         <Button variant="outline" size="xs" onClick={() => orphaned.refetch()}>
-          Rescan
+          {t("stash.rescan")}
         </Button>
       </div>
     );
@@ -442,8 +428,8 @@ function RecoverableView({
               >
                 <p className="truncate text-xs font-medium">{o.message}</p>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  <RelativeTime date={o.date} /> · {o.fileCount} file
-                  {o.fileCount === 1 ? "" : "s"}
+                  <RelativeTime date={o.date} /> ·{" "}
+                  {t("stash.fileCount", { count: o.fileCount })}
                 </p>
               </button>
             ))}
@@ -458,7 +444,7 @@ function RecoverableView({
               disabled={restore.isPending}
               onClick={() => onRestoreClick(effectiveSha)}
             >
-              Restore to working tree
+              {t("stash.restore")}
             </Button>
           </div>
         )}
@@ -474,9 +460,9 @@ function RecoverableView({
       <ConfirmDialog
         open={confirmRestore !== null}
         onCancel={() => setConfirmRestore(null)}
-        title="Restore over your changes?"
-        body="You have uncommitted changes — restoring may conflict. Continue?"
-        confirmLabel="Restore"
+        title={t("stash.restoreOverChangesTitle")}
+        body={t("stash.restoreOverChangesDescription")}
+        confirmLabel={t("stash.restore")}
         pending={restore.isPending}
         onConfirm={() => {
           if (confirmRestore === null) return;
@@ -499,6 +485,7 @@ function StashFiles({
   repoPath: string;
   source: FileSource;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const stashIndex = source.kind === "stash" ? source.index : null;
   const orphanSha = source.kind === "orphaned" ? source.sha : null;
   // The commit-ish the file lives under: a live stash's slot, or the raw sha.
@@ -540,7 +527,7 @@ function StashFiles({
   if (files.isError || !files.data) {
     return (
       <div className="flex-1">
-        <DiffPlaceholder message="Could not load this stash" />
+        <DiffPlaceholder message={t("stash.loadError")} />
       </div>
     );
   }
@@ -559,7 +546,7 @@ function StashFiles({
     <>
       <aside className="flex w-60 shrink-0 flex-col border-r">
         <p className="border-b px-3 py-1.5 text-xs text-muted-foreground">
-          {fileList.length} changed file{fileList.length === 1 ? "" : "s"}
+          {t("stash.changedFileCount", { count: fileList.length })}
         </p>
         <ScrollArea className="min-h-0 flex-1">
           <div onKeyDown={onFilesKeyDown}>
@@ -603,7 +590,7 @@ function StashFiles({
             }
           />
         ) : (
-          <DiffPlaceholder message="This stash has no files" />
+          <DiffPlaceholder message={t("stash.noFiles")} />
         )}
       </main>
     </>

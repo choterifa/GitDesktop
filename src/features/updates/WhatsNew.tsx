@@ -1,5 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,7 @@ function changelogSection(version: string): string {
  * run and when the running version has no changelog section.
  */
 export function WhatsNew() {
+  const { t } = useTranslation("updates");
   const settings = useSettings();
   const saveSettings = useSaveSettings();
   const [open, setOpen] = useState(false);
@@ -72,13 +74,13 @@ export function WhatsNew() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>What's new in v{version}</DialogTitle>
+          <DialogTitle>{t("whatsNew", { version })}</DialogTitle>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Markdown>{notes}</Markdown>
         </div>
         <DialogFooter>
-          <Button onClick={() => setOpen(false)}>Got it</Button>
+          <Button onClick={() => setOpen(false)}>{t("gotIt")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

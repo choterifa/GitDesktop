@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useSecurityFindingsText } from "./use-security-findings-text";
 
 /** GitHub's advisory severity ladder plus GitLab's `Info` rung, and the bucket a
  *  missing or unrecognized value falls into (repo advisories may carry no
@@ -43,7 +44,7 @@ export const SEVERITY_RANK: Record<SeverityLevel, number> = {
   unknown: 5,
 };
 
-export const SEVERITY_LABEL: Record<SeverityLevel, string> = {
+const SEVERITY_SOURCE: Record<SeverityLevel, string> = {
   critical: "Critical",
   high: "High",
   medium: "Medium",
@@ -90,12 +91,13 @@ export function severityLevel(severity: string | null): SeverityLevel {
  * distinct from high, which shares its tone.
  */
 export function SeverityChip({ severity }: { severity: string | null }) {
+  const tx = useSecurityFindingsText();
   const level = severityLevel(severity);
   const Icon = SEVERITY_ICON[level];
   return (
     <Badge variant="outline" className={cn("gap-1", SEVERITY_TONE[level])}>
       <Icon weight={level === "critical" ? "fill" : "regular"} />
-      {SEVERITY_LABEL[level]}
+      {tx(SEVERITY_SOURCE[level])}
     </Badge>
   );
 }
@@ -107,7 +109,7 @@ export function SeverityChip({ severity }: { severity: string | null }) {
  *  "Critical" or "High" — only *ranked* alongside them. */
 export type SarifLevel = "error" | "warning" | "note" | "unknown";
 
-const SARIF_LABEL: Record<SarifLevel, string> = {
+const SARIF_SOURCE: Record<SarifLevel, string> = {
   error: "Error",
   warning: "Warning",
   note: "Note",
@@ -115,7 +117,7 @@ const SARIF_LABEL: Record<SarifLevel, string> = {
 };
 
 /** The severity rung a SARIF level shares for ordering and visual weight. Sort
- *  and tone only — `SARIF_LABEL` is what names the level to the user. */
+ *  and tone only — `SARIF_SOURCE` is what names the level to the user. */
 const SARIF_AS_SEVERITY: Record<SarifLevel, SeverityLevel> = {
   error: "high",
   warning: "medium",
@@ -162,6 +164,7 @@ export function CodeScanningChip({
   securitySeverity,
   severity,
 }: CodeScanningLevels) {
+  const tx = useSecurityFindingsText();
   if (securitySeverity) return <SeverityChip severity={securitySeverity} />;
   const level = sarifLevel(severity);
   const rung = SARIF_AS_SEVERITY[level];
@@ -169,7 +172,7 @@ export function CodeScanningChip({
   return (
     <Badge variant="outline" className={cn("gap-1", SEVERITY_TONE[rung])}>
       <Icon />
-      {SARIF_LABEL[level]}
+      {tx(SARIF_SOURCE[level])}
     </Badge>
   );
 }
@@ -181,7 +184,7 @@ export function CodeScanningChip({
  *  never "inactive". */
 export type ValidityLevel = "active" | "inactive" | "unknown";
 
-const VALIDITY_LABEL: Record<ValidityLevel, string> = {
+const VALIDITY_SOURCE: Record<ValidityLevel, string> = {
   active: "Active",
   inactive: "Inactive",
   unknown: "Unknown",
@@ -220,17 +223,20 @@ export function validityLevel(validity: string | null): ValidityLevel {
 }
 
 /** The user-facing name for a validity, normalized exactly as the chip does. */
-export const validityLabel = (validity: string | null): string =>
-  VALIDITY_LABEL[validityLevel(validity)];
+export const validityLabel = (
+  validity: string | null,
+  translate: (source: string) => string = (source) => source,
+): string => translate(VALIDITY_SOURCE[validityLevel(validity)]);
 
 /** A secret's validity chip — **Active** / **Inactive** / **Unknown**. */
 export function ValidityChip({ validity }: { validity: string | null }) {
+  const tx = useSecurityFindingsText();
   const level = validityLevel(validity);
   const Icon = VALIDITY_ICON[level];
   return (
     <Badge variant="outline" className={cn("gap-1", VALIDITY_TONE[level])}>
       <Icon weight={level === "active" ? "fill" : "regular"} />
-      {VALIDITY_LABEL[level]}
+      {tx(VALIDITY_SOURCE[level])}
     </Badge>
   );
 }
@@ -248,7 +254,7 @@ export type CqLevel =
   | "info"
   | "unknown";
 
-const CQ_LABEL: Record<CqLevel, string> = {
+const CQ_SOURCE: Record<CqLevel, string> = {
   blocker: "Blocker",
   critical: "Critical",
   major: "Major",
@@ -258,7 +264,7 @@ const CQ_LABEL: Record<CqLevel, string> = {
 };
 
 /** The severity rung a CodeClimate level shares for ordering and visual weight.
- *  Sort and tone only — `CQ_LABEL` is what names the level to the user. */
+ *  Sort and tone only — `CQ_SOURCE` is what names the level to the user. */
 const CQ_AS_SEVERITY: Record<CqLevel, SeverityLevel> = {
   blocker: "critical",
   critical: "high",
@@ -292,13 +298,14 @@ export const cqRank = (severity: string | null): number =>
 /** The chip for a code quality finding, labeled in CodeClimate's own words so
  *  nothing is promoted to a severity the report never assigned. */
 export function CqChip({ severity }: { severity: string | null }) {
+  const tx = useSecurityFindingsText();
   const level = cqLevel(severity);
   const rung = CQ_AS_SEVERITY[level];
   const Icon = SEVERITY_ICON[rung];
   return (
     <Badge variant="outline" className={cn("gap-1", SEVERITY_TONE[rung])}>
       <Icon weight={rung === "critical" ? "fill" : "regular"} />
-      {CQ_LABEL[level]}
+      {tx(CQ_SOURCE[level])}
     </Badge>
   );
 }

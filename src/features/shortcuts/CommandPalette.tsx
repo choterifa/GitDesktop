@@ -7,10 +7,11 @@ import {
   useAvailableActions,
   useEffectiveBindings,
 } from "@/lib/hotkeys/hotkeys";
-import { ACTIONS, type ActionId } from "@/lib/hotkeys/registry";
+import { ACTIONS, actionCategoryKey, actionLabelKey, type ActionId } from "@/lib/hotkeys/registry";
 import { matchesActionText, queryTokens } from "@/lib/hotkeys/search";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 import { PALETTE_DIALOG_CLASS } from "./palette-dialog";
 
 /**
@@ -25,6 +26,7 @@ export function CommandPalette({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("hotkeys");
   const available = useAvailableActions();
   const bindings = useEffectiveBindings();
   const [query, setQuery] = useState("");
@@ -40,7 +42,10 @@ export function CommandPalette({
   const tokens = queryTokens(query);
   const items = ACTIONS.filter((a) => {
     if (a.id === "command-palette" || !available.has(a.id)) return false;
-    return matchesActionText(tokens, a.label, a.category);
+    return (
+      matchesActionText(tokens, a.label, a.category) ||
+      matchesActionText(tokens, t(actionLabelKey(a.id)), t(actionCategoryKey(a.category)))
+    );
   });
   const highlighted = items[Math.min(highlight, items.length - 1)];
 
@@ -75,7 +80,7 @@ export function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={PALETTE_DIALOG_CLASS} showCloseButton={false}>
-        <DialogTitle className="sr-only">Command palette</DialogTitle>
+        <DialogTitle className="sr-only">{t("palette.title")}</DialogTitle>
         <div className="shrink-0 border-b p-2">
           <Input
             autoFocus
@@ -85,13 +90,13 @@ export function CommandPalette({
               setHighlight(0);
             }}
             onKeyDown={onKeyDown}
-            placeholder="Type a command…"
-            aria-label="Search commands"
+            placeholder={t("palette.placeholder")}
+            aria-label={t("palette.search")}
           />
         </div>
         {items.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground break-all">
-            No matching commands here.
+            {t("palette.noMatches")}
           </p>
         ) : (
           <ul ref={listRef} className="max-h-80 min-h-0 overflow-y-auto py-1">
@@ -112,10 +117,10 @@ export function CommandPalette({
                     onClick={() => run(action.id)}
                   >
                     <span className="min-w-0 flex-1 truncate">
-                      {action.label}
+                      {t(actionLabelKey(action.id))}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {action.category}
+                      {t(actionCategoryKey(action.category))}
                     </span>
                     {binding && (
                       <kbd className="shrink-0 rounded-none border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">

@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 
 /**
  * "Delete comment?" confirmation, shared by every PR/issue/discussion view.
@@ -24,8 +25,8 @@ export function DeleteCommentDialog({
   commentId,
   onClose,
   onConfirm,
-  title = "Delete comment?",
-  description = "This permanently deletes the comment on GitHub. This cannot be undone.",
+  title,
+  description,
   pending,
   reason,
 }: {
@@ -37,6 +38,27 @@ export function DeleteCommentDialog({
   pending?: boolean;
   reason?: string;
 }) {
+  const tx = useCommonText();
+  const resolvedTitle =
+    typeof title === "string"
+      ? tx(title)
+      : (title ?? tx("Delete comment?"));
+  const remoteDescription =
+    typeof description === "string"
+      ? /^This permanently deletes the comment on (.+)\. This cannot be undone\.$/.exec(
+          description,
+        )
+      : null;
+  const resolvedDescription =
+    typeof description === "string"
+      ? remoteDescription
+        ? tx(
+            "This permanently deletes the comment on {{remoteLabel}}. This cannot be undone.",
+            { remoteLabel: remoteDescription[1] },
+          )
+        : tx(description)
+      : (description ??
+        tx("This permanently deletes the comment on GitHub. This cannot be undone."));
   return (
     <Dialog
       open={commentId !== null}
@@ -46,12 +68,12 @@ export function DeleteCommentDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogTitle>{resolvedTitle}</DialogTitle>
+          <DialogDescription>{resolvedDescription}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <DisabledReasonButton
             variant="destructive"
@@ -61,7 +83,7 @@ export function DeleteCommentDialog({
               if (commentId) onConfirm(commentId);
             }}
           >
-            Delete
+            {tx("Delete")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

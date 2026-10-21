@@ -1,7 +1,9 @@
 import { SparkleIcon } from "@phosphor-icons/react";
 import { useSelector } from "@tanstack/react-store";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import type { TFunction } from "i18next";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -43,10 +45,13 @@ import { useGenerateRepoDescription } from "../repo-settings/useGenerateRepoDesc
 /** Bitbucket repo slugs must start alphanumeric, then allow dot/underscore/hyphen.
  *  A blank name is caught by the `required` validator, so don't double-flag it. */
 const BB_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-function bbSlugWarning(value: string): string | null {
+function bbSlugWarning(
+  value: string,
+  t: TFunction<"repositoryOperations">,
+): string | null {
   const name = value.trim();
   if (!name || BB_SLUG_RE.test(name)) return null;
-  return "Only letters, numbers, and . _ - are allowed, starting with a letter or number.";
+  return t("dialogs.publish.slugWarning");
 }
 
 /** Whether any `/`-separated segment leads with a dash. A whole-string leading
@@ -69,12 +74,15 @@ function malformedOwnerName(value: string): boolean {
 /** Why a GitHub name is refused, or null. Every publish path shares these, so
  *  the message a blocked Publish needs is available whether or not the owner
  *  picker rendered. */
-function ghNameRefusal(value: string): string | null {
+function ghNameRefusal(
+  value: string,
+  t: TFunction<"repositoryOperations">,
+): string | null {
   if (hasDashLedSegment(value)) {
-    return "A repository name can't start with a dash.";
+    return t("dialogs.publish.dashNameWarning");
   }
   if (malformedOwnerName(value)) {
-    return "Type owner/name.";
+    return t("dialogs.publish.ownerNameWarning");
   }
   return null;
 }
@@ -82,18 +90,24 @@ function ghNameRefusal(value: string): string | null {
 /** Names GitHub refuses: blank, or anything `ghNameRefusal` names. Blank blocks
  *  silently, matching the `required` validator's no-inline-text style. Sharing
  *  the refusal set with the hint keeps blocked-implies-explained structural. */
-function ghNameBlocked(value: string): boolean {
-  return value.trim() === "" || ghNameRefusal(value) !== null;
+function ghNameBlocked(
+  value: string,
+  t: TFunction<"repositoryOperations">,
+): boolean {
+  return value.trim() === "" || ghNameRefusal(value, t) !== null;
 }
 
 /** The picker arm's hints: the refusals, plus a note that a typed `owner/name`
  *  wins over the select — that's how an org the listing can't reach (the 100-org
  *  cap, a token without `read:org`) stays publishable. */
-function ghNameWarning(value: string): string | null {
-  const refusal = ghNameRefusal(value);
+function ghNameWarning(
+  value: string,
+  t: TFunction<"repositoryOperations">,
+): string | null {
+  const refusal = ghNameRefusal(value, t);
   if (refusal) return refusal;
   if (value.includes("/")) {
-    return "Publishing under the owner typed here, not the Owner select.";
+    return t("dialogs.publish.typedOwnerWarning");
   }
   return null;
 }
@@ -101,15 +115,6 @@ function ghNameWarning(value: string): string | null {
 /** Provider-specific inline hints on Name; GitLab's namespace needs none. The
  *  GitHub entry is the refusals alone — the dialog swaps in `ghNameWarning`
  *  where a picker exists for the advisory to point at. */
-const NAME_WARNINGS: Record<
-  "github" | "gitlab" | "bitbucket",
-  ((value: string) => string | null) | undefined
-> = {
-  github: ghNameRefusal,
-  gitlab: undefined,
-  bitbucket: bbSlugWarning,
-};
-
 /** A field label with a muted second line — carries the reason a picker (and
  *  with it Publish) is disabled, which a disabled control can't hold itself. */
 function StackedLabel({ label, hint }: { label: string; hint: string }) {
@@ -136,8 +141,6 @@ function parseTopics(text: string): string[] {
 
 /** Why Generate holds while the publish runs: the description it would revise
  *  has already been sent. */
-const PUBLISH_PENDING_GENERATE_REASON = "Wait for the publish to finish";
-
 export function PublishDialog({
   repoPath,
   provider,
@@ -153,6 +156,7 @@ export function PublishDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const publish = usePublishRepo(repoPath);
   const aiEnabled = useAiEnabled();
   const descGen = useGenerateRepoDescription(repoPath);
@@ -163,8 +167,8 @@ export function PublishDialog({
     cancel: descGen.cancel,
     generating: descGen.generating,
     close: () => onOpenChange(false),
-    readyTitle: "Repository description ready",
-    readyDescription: "It's waiting in the dialog.",
+    readyTitle: t("dialogs.publish.descriptionReady"),
+    readyDescription: t("dialogs.publish.readyDescription"),
     reopen: () => onOpenChange(true),
   });
   // Which repo's draft the form holds — stamped on every open transition, ahead
@@ -263,9 +267,12 @@ export function PublishDialog({
         // dialog mounted across one, so the close below answers to the draft's
         // repo. The toast fires either way, naming the repo that was published.
         const originNote = originNoteFor(repoPath);
-        toast.success(`Published ${target}`, {
+        toast.success(t("dialogs.publish.published", { target }), {
           description: originNote ? `${originNote} · ${url}` : url,
-          action: { label: "View", onClick: () => openUrl(url) },
+          action: {
+            label: t("dialogs.publish.view"),
+            onClick: () => openUrl(url),
+          },
         });
         // Closed whenever the form still holds THIS submit's draft — leaving an
         // already-published draft open is a duplicate factory.
@@ -291,17 +298,25 @@ export function PublishDialog({
   // happen once the picker seeds, but guard it so submit never fires half-formed.
   const bbBlocked =
     isBitbucket &&
-    (bbSlugWarning(nameVal) !== null || nameVal.trim() === "" || !workspaceVal);
+    (bbSlugWarning(nameVal, t) !== null ||
+      nameVal.trim() === "" ||
+      !workspaceVal);
   // Refused names are refused on every GitHub path; only the picker adds the
   // unseeded-owner gate, and a typed owner exempts a name from it.
   const ghBlocked =
     isGitHub &&
-    (ghNameBlocked(nameVal) ||
+    (ghNameBlocked(nameVal, t) ||
       (ghPickerActive && !ownerVal && !nameVal.includes("/")));
   // The refusals ride every arm so a refused name is explained wherever it
   // blocks (blank and the unseeded-owner gate stay deliberately silent); the
   // advisory names the Owner select, so it rides only the arm that renders one.
-  const nameWarning = ghPickerActive ? ghNameWarning : NAME_WARNINGS[provider];
+  const nameWarning =
+    provider === "github"
+      ? (value: string) =>
+          ghPickerActive ? ghNameWarning(value, t) : ghNameRefusal(value, t)
+      : provider === "bitbucket"
+        ? (value: string) => bbSlugWarning(value, t)
+        : undefined;
 
   const seedOnOpen = useEffectEvent(() => {
     draftRepoRef.current = repoPath;
@@ -413,14 +428,15 @@ export function PublishDialog({
 
   const githubScope = ghPickerActive ? (
     <>
-      It's created under the selected owner; typing{" "}
-      <span className="font-mono">owner/name</span> publishes under that owner
-      instead.
+      {t("dialogs.publish.githubScopeSelected")}{" "}
+      <span className="font-mono">owner/name</span>{" "}
+      {t("dialogs.publish.githubScopeOverride")}
     </>
   ) : (
     <>
-      Use <span className="font-mono">owner/name</span> to publish under an
-      organization.
+      {t("dialogs.publish.githubScopePrefix")}{" "}
+      <span className="font-mono">owner/name</span>{" "}
+      {t("dialogs.publish.githubScopeOrganization")}
     </>
   );
 
@@ -439,23 +455,22 @@ export function PublishDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Publish to {remoteLabel}</DialogTitle>
+            <DialogTitle>
+              {t("dialogs.publish.title", { provider: remoteLabel })}
+            </DialogTitle>
             <DialogDescription>
-              Creates a{" "}
+              {t("dialogs.publish.description", {
+                type: isBitbucket
+                  ? t("dialogs.publish.bitbucketRepository")
+                  : isGitLab
+                    ? t("dialogs.publish.gitlabProject")
+                    : t("dialogs.publish.githubRepository"),
+              })}{" "}
               {isBitbucket
-                ? "Bitbucket repository"
+                ? t("dialogs.publish.bitbucketScope")
                 : isGitLab
-                  ? "GitLab project"
-                  : "GitHub repository"}
-              , adds it as <span className="font-mono">origin</span>, and pushes
-              the current branch.{" "}
-              {isBitbucket ? (
-                <>It's created under the selected workspace.</>
-              ) : isGitLab ? (
-                <>It lands in your namespace (groups aren't supported yet).</>
-              ) : (
-                githubScope
-              )}
+                  ? t("dialogs.publish.gitlabScope")
+                  : githubScope}
             </DialogDescription>
           </DialogHeader>
           {/* Fields scroll; header and submit footer stay pinned. */}
@@ -468,11 +483,11 @@ export function PublishDialog({
                     label={
                       owners.isPending ? (
                         <StackedLabel
-                          label="Owner"
-                          hint="Loading your account and organizations…"
+                          label={t("dialogs.publish.owner")}
+                          hint={t("dialogs.publish.loadingOwners")}
                         />
                       ) : (
-                        "Owner"
+                        t("dialogs.publish.owner")
                       )
                     }
                     items={ownerItems}
@@ -493,11 +508,11 @@ export function PublishDialog({
                     label={
                       workspaces.isPending ? (
                         <StackedLabel
-                          label="Workspace"
-                          hint="Loading your workspaces…"
+                          label={t("dialogs.publish.workspace")}
+                          hint={t("dialogs.publish.loadingWorkspaces")}
                         />
                       ) : (
-                        "Workspace"
+                        t("dialogs.publish.workspace")
                       )
                     }
                     items={workspaceItems}
@@ -516,11 +531,11 @@ export function PublishDialog({
                   label={
                     isBitbucket ? (
                       <StackedLabel
-                        label="Name"
-                        hint="Becomes the repository URL slug on Bitbucket"
+                        label={t("dialogs.publish.name")}
+                        hint={t("dialogs.publish.bitbucketNameHint")}
                       />
                     ) : (
-                      "Name"
+                      t("dialogs.publish.name")
                     )
                   }
                   placeholder="my-project"
@@ -548,18 +563,18 @@ export function PublishDialog({
                     variant="ghost"
                     size="xs"
                     disabled={isSubmitting}
-                    reason={PUBLISH_PENDING_GENERATE_REASON}
+                    reason={t("dialogs.publish.waitForPublish")}
                     onClick={runGenerate}
                     title={
                       isBitbucket
-                        ? `Suggest a description from the README with AI${generateChord.hint}`
-                        : `Suggest a description + topics from the README with AI${generateChord.hint}`
+                        ? `${t("dialogs.publish.suggestDescription")}${generateChord.hint}`
+                        : `${t("dialogs.publish.suggestDescriptionTopics")}${generateChord.hint}`
                     }
                   >
                     <SparkleIcon data-icon="inline-start" />
                     {isBitbucket
-                      ? "Generate description"
-                      : "Generate description & topics"}
+                      ? t("dialogs.publish.generateDescription")
+                      : t("dialogs.publish.generateDescriptionTopics")}
                   </DisabledReasonButton>
                 )}
               </div>
@@ -568,8 +583,8 @@ export function PublishDialog({
             <form.AppField name="description">
               {(field) => (
                 <field.TextField
-                  label="Description (optional)"
-                  placeholder="What is this project?"
+                  label={t("dialogs.publish.descriptionLabel")}
+                  placeholder={t("dialogs.publish.descriptionPlaceholder")}
                 />
               )}
             </form.AppField>
@@ -578,7 +593,7 @@ export function PublishDialog({
               <form.AppField name="topics">
                 {(field) => (
                   <field.TextField
-                    label="Topics (optional, separate with spaces)"
+                    label={t("dialogs.publish.topicsLabel")}
                     placeholder="react typescript cli"
                   />
                 )}
@@ -591,7 +606,9 @@ export function PublishDialog({
                 {(field) => (
                   <field.TextField
                     label={
-                      isBitbucket ? "Website (optional)" : "Homepage (optional)"
+                      isBitbucket
+                        ? t("dialogs.publish.websiteLabel")
+                        : t("dialogs.publish.homepageLabel")
                     }
                     placeholder="https://…"
                   />
@@ -604,7 +621,7 @@ export function PublishDialog({
             <form.AppField name="isPrivate">
               {(field) => (
                 <field.CheckboxField
-                  label="Keep this code private"
+                  label={t("dialogs.publish.private")}
                   className="mr-auto flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
                 />
               )}
@@ -614,7 +631,7 @@ export function PublishDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <form.AppForm>
               <span

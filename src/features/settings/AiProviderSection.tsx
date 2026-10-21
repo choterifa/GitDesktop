@@ -81,6 +81,7 @@ import { cn } from "@/lib/utils";
 import { AgentSandboxField } from "./AgentSandboxField";
 import { HostAllowNote } from "./HostAllowNote";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 /** Typical key shapes per provider; used for a soft warning, never to block. */
 const KEY_HINTS: Partial<
@@ -93,12 +94,16 @@ const KEY_HINTS: Partial<
   // auth keys, so any single-prefix hint false-warns on a working key.
 };
 
-function keyShapeWarning(provider: AiProviderId, value: string): string | null {
+function keyShapeWarning(
+  provider: AiProviderId,
+  value: string,
+  tx: ReturnType<typeof useSettingsText>,
+): string | null {
   const hint = KEY_HINTS[provider];
   if (!hint || !value.trim()) return null;
   const v = value.trim();
   if (v.startsWith(hint.prefix) && v.length >= hint.minLength) return null;
-  return `Doesn't look like a ${PROVIDER_LABELS[provider]} key (expected "${hint.prefix}…"). You can still save it.`;
+  return tx("Doesn't look like a {{provider}} key (expected \"{{prefix}}…\"). You can still save it.", { provider: PROVIDER_LABELS[provider], prefix: hint.prefix });
 }
 
 /**
@@ -119,6 +124,7 @@ function ModelPicker({
   providerIds: AiProviderId[];
   allowedHosts: string[];
 }) {
+  const tx = useSettingsText();
   const keyPreview = useSecretPreview(value.provider);
   const isCli = isCliProvider(value.provider);
   // Listing a CLI's catalog spawns it, so a CLI provider's probe waits for the
@@ -151,26 +157,26 @@ function ModelPicker({
         catalog?.live !== true &&
         catalog?.cause !== "failed" &&
         !availableModels.isFetching:
-        return "Model passed to the CLI — leave blank for its default";
+        return tx("Model passed to the CLI — leave blank for its default");
       // A settled live list outranks an in-flight refetch: an HTTP provider's
       // background refetch (staleTime + focus refetch) keeps its `live` data, so
       // "Loading…" must not flash over the shown count. First load and a provider
       // switch both change the query key, so `live` is false on the placeholder
       // and the loading case still wins there.
       case catalog?.live === true:
-        return `${models.length} models from ${PROVIDER_LABELS[value.provider]}`;
+        return tx("{{count}} models from {{provider}}", { count: models.length, provider: PROVIDER_LABELS[value.provider] });
       case availableModels.isFetching:
-        return "Loading models…";
+        return tx("Loading models…");
       case failureReason !== undefined:
-        return `Suggestions only — couldn't load the live list: ${failureReason}`;
+        return tx("Suggestions only — couldn't load the live list: {{reason}}", { reason: failureReason });
       case catalog?.cause === "empty":
-        return "Suggestions only — the provider returned no models";
+        return tx("Suggestions only — the provider returned no models");
       case catalog?.cause === "no-base":
-        return "Suggestions only — set a base URL to load the live list";
+        return tx("Suggestions only — set a base URL to load the live list");
       case catalog?.cause === "no-key":
-        return "Suggestions only — save an API key to load the live list";
+        return tx("Suggestions only — save an API key to load the live list");
       default:
-        return "Suggestions only — provider list unavailable";
+        return tx("Suggestions only — provider list unavailable");
     }
   })();
 
@@ -186,7 +192,7 @@ function ModelPicker({
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-provider`}>Provider</Label>
+        <Label htmlFor={`${idPrefix}-provider`}>{tx("Provider")}</Label>
         <Select
           items={PROVIDER_LABELS}
           value={value.provider}
@@ -208,7 +214,7 @@ function ModelPicker({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-model`}>Model</Label>
+        <Label htmlFor={`${idPrefix}-model`}>{tx("Model")}</Label>
         <Combobox
           items={models}
           inputValue={value.model}
@@ -229,13 +235,13 @@ function ModelPicker({
             id={`${idPrefix}-model`}
             className="w-full"
             placeholder={
-              defaultModelForProvider(value.provider) || "Account default"
+              defaultModelForProvider(value.provider) || tx("Account default")
             }
             onFocus={() => setModelsWanted(true)}
           />
           <ComboboxContent>
             <ComboboxEmpty>
-              {modelPickerEmptyText(availableModels.isFetching)}
+              {tx(modelPickerEmptyText(availableModels.isFetching))}
             </ComboboxEmpty>
             <ComboboxList>
               {(item: string) => (
@@ -279,6 +285,7 @@ function CliProviderConfig({
   onChange: (next: AiSettings) => void;
   description: ReactNode;
 }) {
+  const tx = useSettingsText();
   const kind = providerKind(value.provider);
   const detect = useQuery({
     queryKey: ["agent-detect", value.provider, value.cliPath ?? ""],
@@ -294,38 +301,38 @@ function CliProviderConfig({
   return (
     <div className="space-y-2">
       <Label htmlFor={`${idPrefix}-cli-path`}>
-        CLI path{" "}
-        <span className="font-normal text-muted-foreground">(optional)</span>
+        {tx("CLI path")}{" "}
+        <span className="font-normal text-muted-foreground">({tx("optional")})</span>
       </Label>
       <Input
         id={`${idPrefix}-cli-path`}
         autoComplete="off"
-        placeholder="Auto-detect on PATH"
+        placeholder={tx("Auto-detect on PATH")}
         value={value.cliPath ?? ""}
         onChange={(e) => onChange({ ...value, cliPath: e.target.value })}
       />
       <div className="text-xs">
         {detect.isPending ? (
           <span className="text-muted-foreground">
-            Checking for {PROVIDER_LABELS[value.provider]}…
+            {tx("Checking for {{provider}}…", { provider: PROVIDER_LABELS[value.provider] })}
           </span>
         ) : info?.found && info.authed === "notAuthed" ? (
           <span className="flex items-center gap-1 text-warning">
             <XCircleIcon className="size-4 shrink-0" />
-            Found{version} but not signed in — run{" "}
+            {tx("Found{{version}} but not signed in — run", { version })}{" "}
             <code className="font-mono">{LOGIN_COMMAND[kind ?? "claude"]}</code>
             .
           </span>
         ) : info?.found ? (
           <span className="flex items-center gap-1 text-success">
             <CheckCircleIcon className="size-4 shrink-0" />
-            Found{version}
-            {info.authed === "authed" ? " — signed in" : ""}
+            {tx("Found{{version}}", { version })}
+            {info.authed === "authed" ? ` — ${tx("signed in")}` : ""}
           </span>
         ) : (
           <span className="flex items-center gap-1 text-destructive">
             <XCircleIcon className="size-4 shrink-0" />
-            Not found — install it or set the path above.
+            {tx("Not found — install it or set the path above.")}
           </span>
         )}
       </div>
@@ -400,9 +407,10 @@ function OllamaConfig({
   allowedHosts: string[];
   onAllowHost: (url: string) => void;
 }) {
+  const tx = useSettingsText();
   return (
     <div className="space-y-2">
-      <Label htmlFor={`${idPrefix}-ollama-url`}>Ollama URL</Label>
+      <Label htmlFor={`${idPrefix}-ollama-url`}>{tx("Ollama URL")}</Label>
       <Input
         id={`${idPrefix}-ollama-url`}
         autoComplete="off"
@@ -414,7 +422,7 @@ function OllamaConfig({
         url={value.ollamaBaseUrl}
         allowedHosts={allowedHosts}
         onAllowHost={onAllowHost}
-        defaultNote="Point at a local or LAN Ollama server."
+        defaultNote={tx("Point at a local or LAN Ollama server.")}
       />
     </div>
   );
@@ -438,6 +446,8 @@ function OpenAiCompatibleConfig({
   allowedHosts: string[];
   onAllowHost: (url: string) => void;
 }) {
+  const tx = useSettingsText();
+  const presetItems = Object.fromEntries(Object.entries(PRESET_ITEMS).map(([id, label]) => [id, tx(label)]));
   const base = value.openaiCompatibleBaseUrl.replace(/\/$/, "");
   const current = OPENAI_COMPATIBLE_PRESETS.find((p) => p.baseUrl === base);
   const presetId = current?.id ?? "custom";
@@ -445,9 +455,9 @@ function OpenAiCompatibleConfig({
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-oai-compat-preset`}>Service</Label>
+        <Label htmlFor={`${idPrefix}-oai-compat-preset`}>{tx("Service")}</Label>
         <Select
-          items={PRESET_ITEMS}
+          items={presetItems}
           value={presetId}
           onValueChange={(id) => {
             const p = OPENAI_COMPATIBLE_PRESETS.find((x) => x.id === id);
@@ -464,10 +474,10 @@ function OpenAiCompatibleConfig({
             id={`${idPrefix}-oai-compat-preset`}
             className="w-full"
           >
-            <SelectValue placeholder="Custom" />
+            <SelectValue placeholder={tx("Custom")} />
           </SelectTrigger>
           <SelectContent>
-            {Object.entries(PRESET_ITEMS).map(([id, label]) => (
+            {Object.entries(presetItems).map(([id, label]) => (
               <SelectItem key={id} value={id}>
                 {label}
               </SelectItem>
@@ -477,7 +487,7 @@ function OpenAiCompatibleConfig({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-oai-compat-url`}>Base URL</Label>
+        <Label htmlFor={`${idPrefix}-oai-compat-url`}>{tx("Base URL")}</Label>
         <Input
           id={`${idPrefix}-oai-compat-url`}
           autoComplete="off"
@@ -496,10 +506,10 @@ function OpenAiCompatibleConfig({
           onAllowHost={onAllowHost}
           defaultNote={
             <>
-              Any OpenAI-compatible{" "}
-              <code className="font-mono">/chat/completions</code> endpoint.{" "}
+              {tx("Any OpenAI-compatible")}{" "}
+              <code className="font-mono">/chat/completions</code> {tx("endpoint.")}{" "}
               {current?.keysUrl
-                ? `Get an API key at ${current.keysUrl}.`
+                ? `${tx("Get an API key at")} ${current.keysUrl}.`
                 : null}
             </>
           }
@@ -567,6 +577,7 @@ function AllowedHostsField({
   activeUrls: string[];
   onChange: (next: string[]) => void;
 }) {
+  const tx = useSettingsText();
   const [draft, setDraft] = useState("");
   const [warn, setWarn] = useState<{ text: string; sig: string } | null>(null);
   /** A warning is valid on two axes. The hosts-draft axis rides this signature —
@@ -584,13 +595,13 @@ function AllowedHostsField({
   function add() {
     const host = normalizeHost(draft);
     if (!host) {
-      setWarn({ text: "Enter a host like 192.168.1.50:11434", sig: hostsSig });
+      setWarn({ text: tx("Enter a host like 192.168.1.50:11434"), sig: hostsSig });
       return;
     }
     // isHostAllowed also covers built-in/local hosts and a port already covered
     // by a no-port entry, so this blocks adding a redundant or always-allowed one.
     if (isHostAllowed(`http://${host}`, hosts)) {
-      setWarn({ text: `${host} is already allowed`, sig: hostsSig });
+      setWarn({ text: tx("{{host}} is already allowed", { host }), sig: hostsSig });
       return;
     }
     onChange([...hosts, host]);
@@ -600,18 +611,17 @@ function AllowedHostsField({
   return (
     <div className="space-y-3 border-t pt-4">
       <div>
-        <h3 className="text-sm font-medium">Allowed hosts</h3>
+        <h3 className="text-sm font-medium">{tx("Allowed hosts")}</h3>
         <p className="text-xs text-muted-foreground">
-          Hosts GitDesktop may reach for AI inference, beyond the built-in
-          providers and localhost — add a LAN or self-hosted Ollama /
-          OpenAI-compatible server as <code className="font-mono">host</code> or{" "}
+          {tx("Hosts GitDesktop may reach for AI inference, beyond the built-in providers and localhost — add a LAN or self-hosted Ollama or OpenAI-compatible server as")}{" "}
+          <code className="font-mono">host</code> {tx("or")}{" "}
           <code className="font-mono">host:port</code>.
         </p>
       </div>
       <div className="flex items-start gap-2">
         <div className="flex-1 space-y-1">
           <Input
-            aria-label="Host to allow"
+            aria-label={tx("Host to allow")}
             autoComplete="off"
             placeholder="192.168.1.50:11434"
             value={draft}
@@ -638,7 +648,7 @@ function AllowedHostsField({
           disabled={!draft.trim()}
         >
           <PlusIcon data-icon="inline-start" />
-          Add
+          {tx("Add")}
         </Button>
       </div>
       {hosts.length > 0 ? (
@@ -654,7 +664,7 @@ function AllowedHostsField({
                   <span className="truncate font-mono text-xs">{h}</span>
                   {inUse && (
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      in use
+                      {tx("in use")}
                     </span>
                   )}
                 </span>
@@ -662,7 +672,7 @@ function AllowedHostsField({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={`Remove ${h}`}
+                  aria-label={tx("Remove {{host}}", { host: h })}
                   onClick={() => onChange(hosts.filter((x) => x !== h))}
                 >
                   <XIcon />
@@ -673,8 +683,7 @@ function AllowedHostsField({
         </ul>
       ) : (
         <p className="text-xs text-muted-foreground">
-          No custom hosts yet — built-in providers and localhost are always
-          allowed.
+          {tx("No custom hosts yet — built-in providers and localhost are always allowed.")}
         </p>
       )}
     </div>
@@ -684,6 +693,19 @@ function AllowedHostsField({
 export const AiProviderSection = withForm({
   ...settingsFormOpts,
   render: function AiProviderSectionRender({ form }) {
+    const tx = useSettingsText();
+    const reviewContextItems = Object.fromEntries(
+      Object.entries(REVIEW_CONTEXT_ITEMS).map(([id, label]) => [id, tx(label)]),
+    ) as typeof REVIEW_CONTEXT_ITEMS;
+    const reviewTimeoutItems = Object.fromEntries(
+      Object.entries(REVIEW_TIMEOUT_ITEMS).map(([id, label]) => [id, tx(label)]),
+    ) as typeof REVIEW_TIMEOUT_ITEMS;
+    const reviewEffortItems = Object.fromEntries(
+      Object.entries(REVIEW_EFFORT_ITEMS).map(([id, label]) => [id, tx(label)]),
+    ) as typeof REVIEW_EFFORT_ITEMS;
+    const defaultAgentItems = Object.fromEntries(
+      Object.entries(DEFAULT_AGENT_ITEMS).map(([id, label]) => [id, tx(label)]),
+    ) as typeof DEFAULT_AGENT_ITEMS;
     const queryClient = useQueryClient();
     const ai = useSelector(form.store, (s) => s.values.ai);
     const reviewAi = useSelector(form.store, (s) => s.values.reviewAi);
@@ -792,9 +814,7 @@ export const AiProviderSection = withForm({
           // when a bad key is replaced — without this the picker keeps serving the
           // failed fetch's suggestions for the rest of its 5-minute staleTime.
           queryClient.invalidateQueries({ queryKey: ["models"] });
-          toast.success(
-            `${PROVIDER_LABELS[provider]} key saved to OS keychain`,
-          );
+          toast.success(tx("{{provider}} key saved to OS keychain", { provider: PROVIDER_LABELS[provider] }));
         } catch (e) {
           toastError(e);
         }
@@ -823,7 +843,7 @@ export const AiProviderSection = withForm({
         queryClient.invalidateQueries({ queryKey: ["models"] });
         setConfirmClear(false);
         discardTestResult();
-        toast.success("Key removed");
+        toast.success(tx("Key removed"));
       } catch (e) {
         toastError(e);
       }
@@ -876,10 +896,9 @@ export const AiProviderSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">AI provider</h2>
+            <h2 className="text-sm font-medium">{tx("AI provider")}</h2>
           <p className="text-xs text-muted-foreground">
-            Powers commit message and pull request generation. API keys are
-            stored in the OS keychain, never in app files.
+            {tx("Powers commit message and pull request generation. API keys are stored in the OS keychain, never in app files.")}
           </p>
         </div>
 
@@ -906,11 +925,7 @@ export const AiProviderSection = withForm({
             onChange={setAi}
             description={
               <>
-                Uses the CLI's own subscription login — no API key needed.
-                Generation runs the agent CLI per request, so it's noticeably
-                slower than an HTTP provider and draws on your plan's quota. The
-                agent only completes the prepared prompt; it doesn't explore the
-                repository.
+                {tx("Uses the CLI's own subscription login — no API key needed. Generation runs the agent CLI per request, so it's noticeably slower than an HTTP provider and draws on your plan's quota. The agent only completes the prepared prompt; it doesn't explore the repository.")}
               </>
             }
           />
@@ -925,11 +940,11 @@ export const AiProviderSection = withForm({
           >
             <div className="space-y-2">
               <Label htmlFor="ai-api-key">
-                API key{" "}
+                {tx("API key")}{" "}
                 <span className="font-normal text-muted-foreground">
                   {keyPreview.data
-                    ? `(saved: ${keyPreview.data.masked}, ${keyPreview.data.length} chars)`
-                    : "(no key saved)"}
+                    ? tx("(saved: {{masked}}, {{length}} chars)", { masked: keyPreview.data.masked, length: keyPreview.data.length })
+                    : tx("(no key saved)")}
                 </span>
               </Label>
               <div className="flex items-start gap-2">
@@ -944,16 +959,16 @@ export const AiProviderSection = withForm({
                         type="password"
                         placeholder={
                           keyPreview.data
-                            ? "Enter a new key to replace the saved one"
-                            : "Paste your API key"
+                            ? tx("Enter a new key to replace the saved one")
+                            : tx("Paste your API key")
                         }
-                        warning={(value) => keyShapeWarning(provider, value)}
+                        warning={(value) => keyShapeWarning(provider, value, tx)}
                       />
                     )}
                   </keyForm.AppField>
                 </div>
                 <keyForm.AppForm>
-                  <keyForm.SubmitButton>Save</keyForm.SubmitButton>
+                  <keyForm.SubmitButton>{tx("Save")}</keyForm.SubmitButton>
                 </keyForm.AppForm>
                 {keyPreview.data && (
                   <Button
@@ -961,16 +976,15 @@ export const AiProviderSection = withForm({
                     variant="destructive"
                     onClick={() => setConfirmClear(true)}
                   >
-                    Clear
+                    {tx("Clear")}
                   </Button>
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                Keys apply immediately and are shared by every feature using
-                this provider.{" "}
+                {tx("Keys apply immediately and are shared by every feature using this provider.")}{" "}
                 {provider === "google" && (
                   <>
-                    Get an API key at{" "}
+                    {tx("Get an API key at")}{" "}
                     <button
                       type="button"
                       className="cursor-pointer underline underline-offset-2"
@@ -994,11 +1008,11 @@ export const AiProviderSection = withForm({
             disabled={testing}
           >
             {testing && <Spinner data-icon="inline-start" />}
-            Test connection
+            {tx("Test connection")}
           </Button>
           {testResult?.ok && testResult.config === testConfig && (
             <span className="flex items-center gap-1 text-xs text-success">
-              <CheckCircleIcon className="size-4" /> Connected
+              <CheckCircleIcon className="size-4" /> {tx("Connected")}
             </span>
           )}
           {testResult && !testResult.ok && testResult.config === testConfig && (
@@ -1007,8 +1021,8 @@ export const AiProviderSection = withForm({
               <span className="line-clamp-2">{testResult.message}</span>
               <CopyIconButton
                 text={testResult.fullText ?? testResult.message ?? ""}
-                label="Copy error message"
-                toast="Error message copied"
+                label={tx("Copy error message")}
+                toast={tx("Error message copied")}
               />
             </span>
           )}
@@ -1016,10 +1030,9 @@ export const AiProviderSection = withForm({
 
         <div className="space-y-4 border-t pt-4">
           <div>
-            <h3 className="text-sm font-medium">Review model</h3>
+            <h3 className="text-sm font-medium">{tx("Review model")}</h3>
             <p className="text-xs text-muted-foreground">
-              Used by AI code review on pull requests. Can differ from the
-              generation model above; shares the same per-provider API keys.
+              {tx("Used by AI code review on pull requests. Can differ from the generation model above; shares the same per-provider API keys.")}
             </p>
           </div>
           <ModelPicker
@@ -1036,8 +1049,7 @@ export const AiProviderSection = withForm({
               onChange={(next) => form.setFieldValue("reviewAi", next)}
               description={
                 <>
-                  Uses the CLI's own subscription login — no API key needed.
-                  Reviews run read-only.
+                  {tx("Uses the CLI's own subscription login — no API key needed. Reviews run read-only.")}
                 </>
               }
             />
@@ -1063,11 +1075,11 @@ export const AiProviderSection = withForm({
                   )
                 }
               />
-              Use a different model for security audits
+              {tx("Use a different model for security audits")}
             </label>
             {!securityReviewAi && (
               <p className="text-xs text-muted-foreground">
-                Security audits use the review model above.
+                {tx("Security audits use the review model above.")}
               </p>
             )}
           </div>
@@ -1091,8 +1103,7 @@ export const AiProviderSection = withForm({
                   }
                   description={
                     <>
-                      Uses the CLI's own subscription login — no API key needed.
-                      Security audits run read-only.
+                      {tx("Uses the CLI's own subscription login — no API key needed. Security audits run read-only.")}
                     </>
                   }
                 />
@@ -1109,9 +1120,9 @@ export const AiProviderSection = withForm({
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="review-context-size">Review context</Label>
+            <Label htmlFor="review-context-size">{tx("Review context")}</Label>
             <Select
-              items={REVIEW_CONTEXT_ITEMS}
+              items={reviewContextItems}
               value={reviewContextSize}
               onValueChange={(v) => {
                 if (v)
@@ -1127,14 +1138,13 @@ export const AiProviderSection = withForm({
               <SelectContent>
                 {REVIEW_CONTEXT_SIZES.map((id) => (
                   <SelectItem key={id} value={id}>
-                    {REVIEW_CONTEXT_ITEMS[id]}
+                    {reviewContextItems[id]}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              How much diff and prior-discussion context AI reviews send. Auto
-              probes the model's context window where possible.
+              {tx("How much diff and prior-discussion context AI reviews send. Auto probes the model's context window where possible.")}
             </p>
           </div>
           {/* Effort rides each CLI's own reasoning lever, so the row shows only
@@ -1144,9 +1154,9 @@ export const AiProviderSection = withForm({
             (securityReviewAi &&
               reviewEffortCapable(securityReviewAi.provider))) && (
             <div className="space-y-2">
-              <Label htmlFor="review-effort">Review effort</Label>
+              <Label htmlFor="review-effort">{tx("Review effort")}</Label>
               <Select
-                items={REVIEW_EFFORT_ITEMS}
+                items={reviewEffortItems}
                 value={reviewEffort}
                 onValueChange={(v) => {
                   if (v) form.setFieldValue("reviewEffort", v as ReviewEffort);
@@ -1158,15 +1168,13 @@ export const AiProviderSection = withForm({
                 <SelectContent>
                   {REVIEW_EFFORTS.map((id) => (
                     <SelectItem key={id} value={id}>
-                      {REVIEW_EFFORT_ITEMS[id]}
+                      {reviewEffortItems[id]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                How hard the reviewing agent thinks, for reviews and security
-                audits alike. Lower is a quicker, lighter pass; Codex and the
-                API providers always run at their own defaults.
+                {tx("How hard the reviewing agent thinks, for reviews and security audits alike. Lower is a quicker, lighter pass; Codex and the API providers always run at their own defaults.")}
               </p>
             </div>
           )}
@@ -1175,9 +1183,9 @@ export const AiProviderSection = withForm({
           {(isCliProvider(reviewAi.provider) ||
             (securityReviewAi && isCliProvider(securityReviewAi.provider))) && (
             <div className="space-y-2">
-              <Label htmlFor="review-timeout">Review timeout</Label>
+              <Label htmlFor="review-timeout">{tx("Review timeout")}</Label>
               <Select
-                items={REVIEW_TIMEOUT_ITEMS}
+                items={reviewTimeoutItems}
                 value={reviewTimeout}
                 onValueChange={(v) => {
                   if (v)
@@ -1190,15 +1198,13 @@ export const AiProviderSection = withForm({
                 <SelectContent>
                   {REVIEW_TIMEOUTS.map((id) => (
                     <SelectItem key={id} value={id}>
-                      {REVIEW_TIMEOUT_ITEMS[id]}
+                      {reviewTimeoutItems[id]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                How long an agent-CLI review may run before it's stopped. Auto
-                allows 5 minutes — 20 when the review is agentic (always, for
-                Codex); a fixed limit applies to every review.
+                {tx("How long an agent-CLI review may run before it's stopped. Auto allows 5 minutes — 20 when the review is agentic (always, for Codex); a fixed limit applies to every review.")}
               </p>
             </div>
           )}
@@ -1214,16 +1220,15 @@ export const AiProviderSection = withForm({
 
         <div className="space-y-3 border-t pt-4">
           <div>
-            <h3 className="text-sm font-medium">Agent sessions</h3>
+            <h3 className="text-sm font-medium">{tx("Agent sessions")}</h3>
             <p className="text-xs text-muted-foreground">
-              How new agent runs start — the agent that runs them, and how
-              sessions are isolated.
+              {tx("How new agent runs start — the agent that runs them, and how sessions are isolated.")}
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="default-agent">Default agent</Label>
+            <Label htmlFor="default-agent">{tx("Default agent")}</Label>
             <Select
-              items={DEFAULT_AGENT_ITEMS}
+              items={defaultAgentItems}
               value={defaultAgent ?? "auto"}
               onValueChange={(v) => {
                 if (!v) return;
@@ -1242,7 +1247,7 @@ export const AiProviderSection = withForm({
                 {(Object.keys(DEFAULT_AGENT_ITEMS) as DefaultAgentChoice[]).map(
                   (id) => (
                     <SelectItem key={id} value={id}>
-                      {DEFAULT_AGENT_ITEMS[id]}
+                      {defaultAgentItems[id]}
                     </SelectItem>
                   ),
                 )}
@@ -1250,14 +1255,14 @@ export const AiProviderSection = withForm({
             </Select>
             <p className="text-xs text-muted-foreground">
               {defaultAgent
-                ? `New Session, Plan, and Research runs start on ${DEFAULT_AGENT_ITEMS[defaultAgent]}.`
-                : `New Session, Plan, and Research runs follow the AI provider above when it's an agent CLI — right now they start on ${DEFAULT_AGENT_ITEMS[providerKind(ai.provider) ?? "claude"]}.`}
+                ? tx("New Session, Plan, and Research runs start on {{agent}}.", { agent: defaultAgentItems[defaultAgent] })
+                : tx("New Session, Plan, and Research runs follow the AI provider above when it's an agent CLI — right now they start on {{agent}}.", { agent: defaultAgentItems[providerKind(ai.provider) ?? "claude"] })}
             </p>
           </div>
           <div className="space-y-2">
             {/* Sized below the section h3 so the sandbox controls read as its
                 subordinate group, not a second section. */}
-            <h4 className="text-xs font-medium">Isolation</h4>
+            <h4 className="text-xs font-medium">{tx("Isolation")}</h4>
             <AgentSandboxField
               value={agentIsolation}
               onChange={(v) => form.setFieldValue("agentIsolation", v)}
@@ -1275,19 +1280,17 @@ export const AiProviderSection = withForm({
         <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Remove the saved key?</DialogTitle>
+              <DialogTitle>{tx("Remove the saved key?")}</DialogTitle>
               <DialogDescription>
-                Deletes the {PROVIDER_LABELS[provider]} API key from the OS
-                keychain. AI features using {PROVIDER_LABELS[provider]} will
-                stop working until a new key is saved. This can't be undone.
+                {tx("Deletes the {{provider}} API key from the OS keychain. AI features using {{provider}} will stop working until a new key is saved. This can't be undone.", { provider: PROVIDER_LABELS[provider] })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmClear(false)}>
-                Cancel
+                {tx("Cancel")}
               </Button>
               <Button variant="destructive" onClick={clearKey}>
-                Remove key
+                {tx("Remove key")}
               </Button>
             </DialogFooter>
           </DialogContent>

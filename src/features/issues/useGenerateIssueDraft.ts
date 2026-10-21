@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAiStream } from "@/features/conversations/useAiStream";
 import { buildIssueDraftPrompt, extractIssueDraft } from "@/lib/ai/prompt";
@@ -10,6 +11,7 @@ import { readIssueTemplates, readRepoInstructions } from "@/lib/git/api";
  * useGenerateRepoDescription.
  */
 export function useGenerateIssueDraft(repoPath: string) {
+  const { t } = useTranslation("issues");
   const { generating, cancel, run } = useAiStream(repoPath);
 
   const generate = useCallback(
@@ -34,9 +36,9 @@ export function useGenerateIssueDraft(repoPath: string) {
       if (buffer === null) return;
       const draft = extractIssueDraft(buffer);
       if (draft.body.trim()) opts.onResult(draft);
-      else toast.error("Couldn't draft an issue — try again.");
+      else toast.error(t("Couldn't draft an issue — try again."));
     },
-    [repoPath, run],
+    [repoPath, run, t],
   );
 
   return { generate, cancel, generating };

@@ -47,6 +47,7 @@ import { NotificationsSection } from "./NotificationsSection";
 import { settingsFormOpts, toDraft } from "./settings-form";
 import { TerminalSection } from "./TerminalSection";
 import { UpdatesSection } from "./UpdatesSection";
+import { useSettingsText } from "./use-settings-text";
 
 // The Syntax panel pulls in the Shiki TextMate highlighter (@git-diff-view +
 // @shikijs/core), which is heavy and only needed once this panel is visited.
@@ -104,6 +105,7 @@ const AI_PANELS = new Set<PanelId>([
 ]);
 
 export function SettingsScreen() {
+  const tx = useSettingsText();
   const closeSettings = useUiStore((s) => s.closeSettings);
   const settingsTarget = useUiStore((s) => s.settingsTarget);
   const clearSettingsTarget = useUiStore((s) => s.clearSettingsTarget);
@@ -142,8 +144,8 @@ export function SettingsScreen() {
     ? panel
     : "general";
   const railGroups = useMemo(
-    () => [{ items: visiblePanels.map((p) => ({ id: p.id, label: p.label })) }],
-    [visiblePanels],
+    () => [{ items: visiblePanels.map((p) => ({ id: p.id, label: tx(p.label) })) }],
+    [visiblePanels, tx],
   );
 
   const form = useAppForm({
@@ -157,7 +159,7 @@ export function SettingsScreen() {
       // (which still sees settingsFormOpts' static defaults) clobbers the
       // values right back on the next render.
       form.reset(value, { keepDefaultValues: true });
-      toast.success("Settings saved");
+      toast.success(tx("Settings saved"));
       if (closeAfterSave.current) {
         closeAfterSave.current = false;
         closeSettings();
@@ -270,12 +272,12 @@ export function SettingsScreen() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Back"
+          aria-label={tx("Back")}
           onClick={requestClose}
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="text-sm font-medium">Settings</span>
+        <span className="text-sm font-medium">{tx("Settings")}</span>
       </header>
 
       {settings.isPending ? (
@@ -286,7 +288,7 @@ export function SettingsScreen() {
       ) : (
         <div className="flex min-h-0 flex-1">
           <NavRail
-            ariaLabel="Settings sections"
+            ariaLabel={tx("Settings sections")}
             groups={railGroups}
             activeId={activePanel}
             onSelect={(id) => setPanel(id as PanelId)}
@@ -334,7 +336,7 @@ export function SettingsScreen() {
                 <Suspense
                   fallback={
                     <LazyPanelFallback
-                      name="syntax settings"
+                      name={tx("syntax settings")}
                       className="gap-4 p-0"
                       rows={[
                         "h-5 w-36",
@@ -364,11 +366,11 @@ export function SettingsScreen() {
           className="flex shrink-0 items-center justify-between gap-3 border-t px-4 py-2.5"
         >
           <span className="text-xs text-muted-foreground">
-            You have unsaved changes
+            {tx("You have unsaved changes")}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={discard}>
-              Discard
+              {tx("Discard")}
             </Button>
             <Button
               size="sm"
@@ -376,7 +378,7 @@ export function SettingsScreen() {
               disabled={isSubmitting}
             >
               {isSubmitting && <Spinner data-icon="inline-start" />}
-              Save changes
+              {tx("Save changes")}
             </Button>
           </div>
         </footer>
@@ -385,14 +387,14 @@ export function SettingsScreen() {
       <Dialog open={confirmClose} onOpenChange={setConfirmClose}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogTitle>{tx("Unsaved changes")}</DialogTitle>
             <DialogDescription>
-              You have changes that haven't been saved yet.
+              {tx("You have changes that haven't been saved yet.")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmClose(false)}>
-              Keep editing
+              {tx("Keep editing")}
             </Button>
             <Button
               variant="outline"
@@ -402,7 +404,7 @@ export function SettingsScreen() {
                 closeSettings();
               }}
             >
-              Discard and close
+              {tx("Discard and close")}
             </Button>
             <Button
               onClick={() => {
@@ -412,7 +414,7 @@ export function SettingsScreen() {
               disabled={isSubmitting}
             >
               {isSubmitting && <Spinner data-icon="inline-start" />}
-              Save and close
+              {tx("Save and close")}
             </Button>
           </DialogFooter>
         </DialogContent>

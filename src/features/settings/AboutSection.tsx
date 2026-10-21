@@ -25,6 +25,7 @@ import {
   type ToolStatus,
   useSystemHealth,
 } from "@/lib/system/health";
+import { useSettingsText } from "./use-settings-text";
 
 /** Per-tool display metadata. `auth` marks tools that have a login concept;
  *  git (always local) doesn't. */
@@ -100,17 +101,19 @@ const AUTH_STATE: Record<
 };
 
 function AuthState({ authed }: { authed: AuthStatus }) {
+  const tx = useSettingsText();
   const state = AUTH_STATE[authed];
   if (!state) return null;
   return (
     <span className="inline-flex items-center gap-1 text-muted-foreground">
       {state.icon}
-      {state.label}
+      {tx(state.label)}
     </span>
   );
 }
 
 function ToolRow({ tool }: { tool: ToolStatus }) {
+  const tx = useSettingsText();
   const meta = TOOL_META[tool.id];
   if (!meta) return null;
   // An installed-but-too-old tool gets the same install link as a missing one,
@@ -135,7 +138,7 @@ function ToolRow({ tool }: { tool: ToolStatus }) {
           )}
           <span className="font-medium">{meta.name}</span>
           <span className="text-muted-foreground">
-            {tool.found ? "Installed" : "Not found"}
+            {tx(tool.found ? "Installed" : "Not found")}
           </span>
           {meta.auth && tool.found && <AuthState authed={tool.authed} />}
         </p>
@@ -147,7 +150,7 @@ function ToolRow({ tool }: { tool: ToolStatus }) {
           // rather than pushing the path out of the row.
           <p className="flex min-w-0 gap-1 text-[11px] text-muted-foreground">
             <span className="min-w-0 truncate">
-              {tool.version ?? "version unknown"}
+              {tool.version ?? tx("version unknown")}
             </span>
             {tool.path ? (
               <>
@@ -158,7 +161,7 @@ function ToolRow({ tool }: { tool: ToolStatus }) {
           </p>
         ) : (
           <p className="truncate text-[11px] text-muted-foreground">
-            {meta.role}
+            {tx(meta.role)}
           </p>
         )}
         {floorWarning ? (
@@ -172,7 +175,7 @@ function ToolRow({ tool }: { tool: ToolStatus }) {
           className="shrink-0 cursor-pointer"
           onClick={() => openUrl(meta.install)}
         >
-          {tool.found ? "Update" : "Install"}
+          {tx(tool.found ? "Update" : "Install")}
           <ArrowSquareOutIcon data-icon="inline-end" />
         </Button>
       ) : null}
@@ -249,6 +252,7 @@ function useWindowGeometry(): WindowGeo | null {
  * link for any that are missing or too old for a feature that needs them.
  */
 export function AboutSection() {
+  const tx = useSettingsText();
   const health = useSystemHealth();
   const geo = useWindowGeometry();
   const appInfo = useQuery({
@@ -267,43 +271,42 @@ export function AboutSection() {
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="text-sm font-semibold">About</h2>
+        <h2 className="text-sm font-semibold">{tx("About")}</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Your environment and the tools GitDesktop depends on. Several features
-          quietly degrade when a CLI is missing, outdated, or signed out.
+          {tx("Your environment and the tools GitDesktop depends on. Several features quietly degrade when a CLI is missing, outdated, or signed out.")}
         </p>
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-        <dt className="text-muted-foreground">App version</dt>
+        <dt className="text-muted-foreground">{tx("App version")}</dt>
         <dd className="font-mono">{appInfo.data?.version ?? "…"}</dd>
-        <dt className="text-muted-foreground">Operating system</dt>
+        <dt className="text-muted-foreground">{tx("Operating system")}</dt>
         <dd>{sys ? `${sys.os} ${sys.osVersion} (${sys.arch})` : "…"}</dd>
-        <dt className="text-muted-foreground">Tauri runtime</dt>
+        <dt className="text-muted-foreground">{tx("Tauri runtime")}</dt>
         <dd className="font-mono">{appInfo.data?.tauri ?? "…"}</dd>
-        <dt className="text-muted-foreground">Window position</dt>
+        <dt className="text-muted-foreground">{tx("Window position")}</dt>
         <dd className="flex items-center gap-1.5 font-mono">
           {geo ? `${geo.x}, ${geo.y}` : "…"}
           {geo && (
             <CopyIconButton
               text={`x=${geo.x} y=${geo.y} w=${geo.width} h=${geo.height}`}
-              label="Copy window coordinates"
-              toast="Window coordinates copied"
+              label={tx("Copy window coordinates")}
+              toast={tx("Window coordinates copied")}
               // Pulls the 24px hit target back to the row's 16px text line so the
               // value keeps its label's baseline and the grid's row rhythm.
               className="-my-1"
             />
           )}
         </dd>
-        <dt className="text-muted-foreground">Window size</dt>
+        <dt className="text-muted-foreground">{tx("Window size")}</dt>
         <dd className="font-mono">
           {geo ? `${geo.width} × ${geo.height}` : "…"}
         </dd>
-        <dt className="text-muted-foreground">Display</dt>
+        <dt className="text-muted-foreground">{tx("Display")}</dt>
         <dd>
           {geo?.monitor ? (
             <>
-              {geo.monitor.name || "Primary"}
+              {geo.monitor.name || tx("Primary")}
               <span className="text-muted-foreground">
                 {" · scale ×"}
                 {geo.monitor.scaleFactor}
@@ -318,7 +321,7 @@ export function AboutSection() {
       <div>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="text-xs font-medium text-muted-foreground">
-            Components
+            {tx("Components")}
           </h3>
           <Button
             variant="ghost"
@@ -331,7 +334,7 @@ export function AboutSection() {
             ) : (
               <ArrowClockwiseIcon data-icon="inline-start" />
             )}
-            Re-check
+            {tx("Re-check")}
           </Button>
         </div>
         {health.isPending ? (
@@ -343,7 +346,7 @@ export function AboutSection() {
         ) : health.isError && !health.data ? (
           // A failed Re-check keeps the list it already has.
           <p className="py-2 text-xs text-muted-foreground">
-            Couldn't check installed tools.
+            {tx("Couldn't check installed tools.")}
           </p>
         ) : (
           <ul className="divide-y">

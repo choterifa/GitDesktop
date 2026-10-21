@@ -2,6 +2,7 @@ import { ArrowClockwiseIcon, PlayIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type MouseEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
@@ -29,8 +30,6 @@ import {
 import {
   type ListNoticeCause,
   listNotice,
-  OFFLINE_ROWS_NOTICE,
-  offlinePendingMessage,
   refreshFailed,
 } from "@/features/conversations/remote-section-state";
 import { ForgeNotReady } from "@/features/repository/ForgeNotReady";
@@ -38,7 +37,6 @@ import { clipTitleFromText } from "@/lib/clip-title";
 import { suppressContextMenu } from "@/lib/context-menu";
 import {
   forgeFeatureReady,
-  forgeProbeReason,
   forgeProbeState,
   pendingRunState,
   rerunFamilyState,
@@ -46,7 +44,6 @@ import {
   usePendingRunWrites,
   useRepoStatus,
   useRepoWriteAccess,
-  writeAccessReason,
 } from "@/lib/git/queries";
 import type { CiRunPage, WorkflowRun } from "@/lib/github/actions";
 import {
@@ -56,7 +53,6 @@ import {
 } from "@/lib/github/actions";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
-import { pendingItemReason } from "@/lib/offline-writes";
 import { useUiStore } from "@/lib/stores/ui";
 import { parseableDate } from "@/lib/time";
 import { toastError } from "@/lib/toast";
@@ -108,6 +104,7 @@ export function ActionsPanel({
   repoPath: string;
   active: boolean;
 }) {
+  const { t } = useTranslation("actions");
   const forge = useForgeStatus(repoPath);
   // CI reads are provider-neutral (GitHub Actions + GitLab pipelines): a ready
   // repo lists runs either way. Starting a run is a SHARED write — `canWrite ||
@@ -133,10 +130,15 @@ export function ActionsPanel({
     undefined,
     active && !!provider,
   );
-  const writeReason = writeAccessReason(writeAccess.data);
+  const writeReason =
+    writeAccess.data?.canPush === false
+      ? t("access.requiresWrite", {
+          repo: writeAccess.data.repo ?? t("access.thisRepository"),
+        })
+      : undefined;
   const writeBlocked = writeAccess.data?.canPush === false;
-  const runNoun = isPipelines ? "pipeline" : "workflow";
-  const ciFeature = isPipelines ? "pipelines" : "workflow runs";
+  const runNoun = t(isPipelines ? "nouns.pipeline" : "nouns.workflow");
+  const ciFeature = t(isPipelines ? "nouns.pipelines" : "nouns.workflowRuns");
   // `canWrite` keeps the Run button up while the status is unknown, so the
   // probe arm says so in words that fit either provider ("workflow" is only
   // the unknown provider's default noun).
@@ -146,13 +148,16 @@ export function ActionsPanel({
       case writeReason !== undefined:
         return writeReason;
       case probe !== null:
-        return forgeProbeReason(probe, "run CI");
+        return t(
+          probe === "checking" ? "probe.checking" : "probe.unreachable",
+          { action: t("probe.actions.runCi") },
+        );
       case ghReady:
-        return `Run a ${runNoun}`;
+        return t(isPipelines ? "panel.runPipeline" : "panel.runWorkflow");
       case isGitLab:
-        return "Sign in with the GitLab CLI (glab) to run pipelines";
+        return t("panel.signInGitLab");
       default:
-        return "Sign in with GitHub CLI to run workflows";
+        return t("panel.signInGitHub");
     }
   })();
   const status = useRepoStatus(repoPath);
@@ -183,11 +188,14 @@ export function ActionsPanel({
   const refreshReason = (() => {
     switch (true) {
       case probe !== null:
-        return forgeProbeReason(probe, "load runs");
+        return t(
+          probe === "checking" ? "probe.checking" : "probe.unreachable",
+          { action: t("probe.actions.loadRuns") },
+        );
       case !ghReady:
-        return "Connect this repo to load runs";
+        return t("panel.connectRepo");
       case runs.isFetching:
-        return `Loading ${runNoun} runs…`;
+        return t("panel.loadingRuns", { noun: ciFeature });
       default:
         return undefined;
     }
@@ -271,6 +279,26 @@ export function ActionsPanel({
     offline: undefined,
   };
 
+  const noticeMessage = notice
+    ? notice.cause === "refresh"
+      ? t(
+          allRuns.length > 0
+            ? "panel.refreshFailedWithRows"
+            : "panel.refreshFailed",
+          { noun: ciFeature },
+        )
+      : runs.isPlaceholderData
+        ? t("panel.offlinePlaceholder", { noun: ciFeature })
+        : t("panel.offlineRows")
+    : undefined;
+  const noticeRetryLabel = notice
+    ? t("panel.retryLoading", { noun: ciFeature })
+    : undefined;
+
+  function pendingMenuReason(paused: boolean, inFlight: string): string {
+    return paused ? t("states.offlineItem") : inFlight;
+  }
+
   const onListKeyDown = listKeyboardNav({
     items: visible,
     activeIndex: visible.findIndex((r) => r.id === selectedRunId),
@@ -304,13 +332,15 @@ export function ActionsPanel({
           size="xs"
           aria-pressed={branchOnly}
           disabled={!currentBranch}
-          reason="No current branch"
+          reason={t("panel.noCurrentBranch")}
           title={
-            currentBranch ? `Show runs on ${currentBranch} only` : undefined
+            currentBranch
+              ? t("panel.showBranchRuns", { branch: currentBranch })
+              : undefined
           }
           onClick={() => setBranchOnly((v) => !v)}
         >
-          This branch
+          {t("panel.thisBranch")}
         </DisabledReasonButton>
         <div className="ml-auto flex items-center gap-1">
           {canDispatch && (
@@ -323,16 +353,16 @@ export function ActionsPanel({
               onClick={() => runAgain(null)}
             >
               <PlayIcon data-icon="inline-start" />
-              Run {runNoun}…
+              {t(isPipelines ? "panel.runPipeline" : "panel.runWorkflow")}
             </DisabledReasonButton>
           )}
           <DisabledReasonButton
             variant="outline"
             size="icon-sm"
-            aria-label="Refresh runs"
+            aria-label={t("panel.refreshRuns")}
             disabled={!ghReady || runs.isFetching}
             reason={refreshReason}
-            title="Refresh runs"
+            title={t("panel.refreshRuns")}
             // The whole Actions subtree, as the run-detail repair pass does: the
             // open run's detail is its own read, and a refresh that skipped it
             // would leave a failed detail failed beside a recovered list.
@@ -353,7 +383,7 @@ export function ActionsPanel({
           ref={filterRef}
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          placeholder="Filter by title, workflow, or branch"
+          placeholder={t("panel.filterPlaceholder")}
           className="h-7"
           autoComplete="off"
         />
@@ -368,10 +398,10 @@ export function ActionsPanel({
         className="min-h-0 flex-1 overflow-hidden outline-none"
       >
         <DegradedListNotice
-          noun={`${runNoun} runs`}
+          noun={ciFeature}
           degraded={notice !== null}
-          message={notice?.message}
-          retryLabel={notice?.retryLabel}
+          message={noticeMessage}
+          retryLabel={noticeRetryLabel}
           onRetry={notice ? noticeRetry[notice.cause] : undefined}
           className="pt-2"
         />
@@ -394,7 +424,7 @@ export function ActionsPanel({
           // and a Refresh would only park again. A loaded-empty list keeps its
           // empty state below, being a loaded answer.
           <p className="px-3 py-4 text-xs text-muted-foreground">
-            {offlinePendingMessage(`${runNoun} runs`)}
+            {t("panel.offlinePending", { noun: ciFeature })}
           </p>
         ) : runs.isPending ||
           (runs.isError && allRuns.length === 0 && runs.isFetching) ? (
@@ -408,24 +438,24 @@ export function ActionsPanel({
           // while every already-loaded page survives in the cache, and that failure
           // belongs on the Load-more row rather than replacing the whole list.
           <p className="px-3 py-4 text-xs text-muted-foreground">
-            Couldn't load {runNoun} runs. Refresh to try again.
+            {t("panel.loadRunsFailed", { noun: ciFeature })}
           </p>
         ) : visible.length === 0 ? (
           allRuns.length > 0 ? (
             <p className="px-3 py-4 text-xs text-muted-foreground">
-              No runs match the filter.
+              {t("panel.noRunsMatch")}
             </p>
           ) : branchOnly ? (
             <div className="flex flex-col items-start gap-2 px-3 py-4">
               <p className="text-xs text-muted-foreground">
-                No {runNoun} runs on this branch yet.
+                {t("panel.noBranchRuns", { noun: runNoun })}
               </p>
               <Button
                 variant="outline"
                 size="xs"
                 onClick={() => setBranchOnly(false)}
               >
-                Show all branches
+                {t("panel.showAllBranches")}
               </Button>
             </div>
           ) : (
@@ -434,13 +464,19 @@ export function ActionsPanel({
                 <EmptyMedia variant="icon">
                   <PlayIcon />
                 </EmptyMedia>
-                <EmptyTitle>No {runNoun} runs yet</EmptyTitle>
+                <EmptyTitle>
+                  {t(
+                    isPipelines
+                      ? "panel.noPipelinesYet"
+                      : "panel.noWorkflowsYet",
+                  )}
+                </EmptyTitle>
                 <EmptyDescription>
                   {isPipelines
                     ? isGitLab
-                      ? "Pipelines run on pushes and merge requests — runs land here as they happen."
-                      : "Pipelines run on pushes and pull requests — runs land here as they happen."
-                    : "GitHub Actions workflows run on pushes and pull requests — runs land here as they happen."}
+                      ? t("panel.gitLabEmpty")
+                      : t("panel.pipelineEmpty")
+                    : t("panel.workflowEmpty")}
                 </EmptyDescription>
               </EmptyHeader>
               {canDispatch && (
@@ -453,7 +489,7 @@ export function ActionsPanel({
                     onClick={() => runAgain(null)}
                   >
                     <PlayIcon data-icon="inline-start" />
-                    Run {runNoun}…
+                    {t(isPipelines ? "panel.runPipeline" : "panel.runWorkflow")}
                   </DisabledReasonButton>
                 </EmptyContent>
               )}
@@ -532,12 +568,18 @@ export function ActionsPanel({
                   writeReason={writeReason}
                   cancelHeld={
                     menuCancel
-                      ? pendingItemReason(menuCancel.paused, "cancelling…")
+                      ? pendingMenuReason(
+                          menuCancel.paused,
+                          t("states.cancelling"),
+                        )
                       : undefined
                   }
                   rerunHeld={
                     menuRerun
-                      ? pendingItemReason(menuRerun.paused, "re-running…")
+                      ? pendingMenuReason(
+                          menuRerun.paused,
+                          t("states.rerunning"),
+                        )
                       : undefined
                   }
                   actions={{
@@ -558,7 +600,7 @@ export function ActionsPanel({
             says it whenever it shows the park, so the row stays silent then. */}
         {runs.hasNextPage && runs.isPaused && notice?.cause !== "offline" && (
           <p className="border-b px-3 py-1.5 text-center text-xs text-muted-foreground">
-            {OFFLINE_ROWS_NOTICE}
+            {t("panel.offlineRows")}
           </p>
         )}
         {runs.hasNextPage && !runs.isPaused && (
@@ -570,23 +612,25 @@ export function ActionsPanel({
             onClick={() => runs.fetchNextPage()}
           >
             {runs.isFetchingNextPage
-              ? "Loading…"
+              ? t("states.loading")
               : runs.isFetchNextPageError
-                ? "Couldn't load more — try again"
-                : "Load more"}
+                ? t("panel.loadMoreFailed")
+                : t("panel.loadMore")}
             {/* The count describes what was LOADED, which says nothing about a
                 filtered view — it returns when the filter clears. Suppressed on the
                 retry label too: the row says one thing at a time. */}
             {totalCount !== null &&
               !query &&
               !runs.isFetchNextPageError &&
-              ` · Showing ${allRuns.length.toLocaleString()} of ${
-                provider === "github" &&
-                branchFilter &&
-                totalCount > FILTERED_RUN_WINDOW
-                  ? `${FILTERED_RUN_WINDOW.toLocaleString()}+`
-                  : totalCount.toLocaleString()
-              }`}
+              ` · ${t("panel.showingCount", {
+                loaded: allRuns.length.toLocaleString(),
+                total:
+                  provider === "github" &&
+                  branchFilter &&
+                  totalCount > FILTERED_RUN_WINDOW
+                    ? `${FILTERED_RUN_WINDOW.toLocaleString()}+`
+                    : totalCount.toLocaleString(),
+              })}`}
           </Button>
         )}
       </ScrollArea>

@@ -28,6 +28,7 @@ import {
   useUpdateHookManager,
   useWriteHook,
 } from "@/lib/git/queries";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
@@ -52,6 +53,7 @@ export function HooksDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tx = useCommonText();
   const hooks = useHooks(repoPath);
   const writeHook = useWriteHook(repoPath);
   const setEnabled = useSetHookEnabled(repoPath);
@@ -108,7 +110,7 @@ export function HooksDialog({
       toastError(e);
       return;
     }
-    toast.success(`Saved the ${name} hook`);
+    toast.success(tx("Saved the {{name}} hook", { name }));
   }
 
   async function toggle(enabled: boolean) {
@@ -120,7 +122,7 @@ export function HooksDialog({
       toastError(e);
       return;
     }
-    toast.success(`${enabled ? "Enabled" : "Disabled"} ${name}`);
+    toast.success(tx(enabled ? "Enabled {{name}}" : "Disabled {{name}}", { name }));
   }
 
   // The dialog survives a repo switch (RepositoryView is one instance), so a
@@ -138,7 +140,7 @@ export function HooksDialog({
       toastError(e);
       return;
     }
-    toast.success(`Deleted ${name}`);
+    toast.success(tx("Deleted {{name}}", { name }));
     if (stillIn(firedIn)) setSelected((cur) => (cur === name ? null : cur));
   }
 
@@ -155,9 +157,9 @@ export function HooksDialog({
       toastError(e);
       return;
     }
-    if (stillIn(firedIn)) setManagerOutput(out || "Done.");
+    if (stillIn(firedIn)) setManagerOutput(out || tx("Done."));
     toast.success(
-      `${manager} ${action === "install" ? "installed" : "updated"}`,
+      tx(action === "install" ? "{{manager}} installed" : "{{manager}} updated", { manager }),
     );
   }
 
@@ -174,29 +176,26 @@ export function HooksDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Git hooks</DialogTitle>
+          <DialogTitle>{tx("Git hooks")}</DialogTitle>
           <DialogDescription>
-            Scripts git runs around commits, merges, and pushes. They live in
-            this repo's hooks directory and run locally — they aren't committed
-            or shared. Each needs an executable script (a{" "}
-            <span className="font-mono">#!/bin/sh</span> shebang).
+            {tx("Scripts Git runs around commits, merges, and pushes. They live in this repo's hooks directory and run locally — they aren't committed or shared. Each needs an executable script (a {{shebang}} shebang).", { shebang: "#!/bin/sh" })}{" "}
           </DialogDescription>
         </DialogHeader>
 
         {manager ? (
           <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
             <p>
-              Hooks are managed by{" "}
+              {tx("Hooks are managed by")} {" "}
               <span className="font-medium">{manager}</span>
               {configName && (
                 <>
-                  {" via "}
+                  {` ${tx("via")} `}
                   <span className="font-mono">{configName}</span>
                 </>
               )}
               {manager === "husky"
-                ? " — these files live in .husky and are committed to the repo, so edits show in your working tree."
-                : " — hooks are defined there, not in the editor below."}
+                ? ` — ${tx("these files live in .husky and are committed to the repo, so edits show in your working tree.")}`
+                : ` — ${tx("hooks are defined there, not in the editor below.")}`}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {managerConfig && (
@@ -207,7 +206,7 @@ export function HooksDialog({
                     openWithDefault(managerConfig).catch(toastError)
                   }
                 >
-                  {manager === "husky" ? "Open .husky" : "Open config"}
+                  {manager === "husky" ? tx("Open .husky") : tx("Open config")}
                 </Button>
               )}
               {configManager && (
@@ -217,7 +216,7 @@ export function HooksDialog({
                   disabled={managerRunning}
                   onClick={() => void runManager("install")}
                 >
-                  Install hooks
+                  {tx("Install hooks")}
                 </Button>
               )}
               {manager === "pre-commit" && (
@@ -227,7 +226,7 @@ export function HooksDialog({
                   disabled={managerRunning}
                   onClick={() => void runManager("update")}
                 >
-                  Update
+                  {tx("Update")}
                 </Button>
               )}
             </div>
@@ -240,7 +239,7 @@ export function HooksDialog({
         ) : (
           hooks.data?.customHooksPath && (
             <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              Hooks run from{" "}
+              {tx("Hooks run from")} {" "}
               <span className="font-mono">{hooks.data?.hooksPath}</span>{" "}
               (core.hooksPath).
             </p>
@@ -269,12 +268,12 @@ export function HooksDialog({
                     <span className="truncate font-mono">{e.name}</span>
                     {e.state === "active" && (
                       <span className="shrink-0 text-[10px] text-success">
-                        Active
+                        {tx("Active")}
                       </span>
                     )}
                     {e.state === "disabled" && (
                       <span className="shrink-0 text-[10px] text-muted-foreground">
-                        Off
+                        {tx("Off")}
                       </span>
                     )}
                   </button>
@@ -285,7 +284,7 @@ export function HooksDialog({
             <div className="flex min-w-0 flex-1 flex-col">
               {entry === null ? (
                 <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-                  Select a hook to view or edit it.
+                  {tx("Select a hook to view or edit it.")}
                 </div>
               ) : (
                 <>
@@ -298,7 +297,7 @@ export function HooksDialog({
                         <DropdownMenuTrigger
                           render={
                             <Button variant="outline" size="xs">
-                              Templates
+                              {tx("Templates")}
                               <CaretDownIcon data-icon="inline-end" />
                             </Button>
                           }
@@ -310,9 +309,9 @@ export function HooksDialog({
                               onClick={() => setDraft(t.body)}
                               className="flex flex-col items-start gap-0.5 whitespace-normal py-2"
                             >
-                              <span className="font-medium">{t.name}</span>
+                              <span className="font-medium">{tx(t.name)}</span>
                               <span className="text-xs text-muted-foreground">
-                                {t.description}
+                                {tx(t.description)}
                               </span>
                             </DropdownMenuItem>
                           ))}
@@ -337,9 +336,7 @@ export function HooksDialog({
                   </div>
                   {noShebang && (
                     <p className="mt-1.5 text-xs text-warning">
-                      No shebang line (e.g.{" "}
-                      <span className="font-mono">#!/bin/sh</span>) — git may
-                      not run this hook.
+                      {tx("No shebang line (e.g. {{shebang}}) — git may not run this hook.", { shebang: "#!/bin/sh" })}
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-2">
@@ -348,7 +345,7 @@ export function HooksDialog({
                       onClick={() => void save()}
                       disabled={!canSave || writeHook.isPending}
                     >
-                      {entry.state === "inactive" ? "Create hook" : "Save"}
+                      {entry.state === "inactive" ? tx("Create hook") : tx("Save")}
                     </Button>
                     {entry.state === "active" && (
                       <Button
@@ -357,7 +354,7 @@ export function HooksDialog({
                         onClick={() => void toggle(false)}
                         disabled={setEnabled.isPending}
                       >
-                        Disable
+                        {tx("Disable")}
                       </Button>
                     )}
                     {entry.state === "disabled" && (
@@ -367,7 +364,7 @@ export function HooksDialog({
                         onClick={() => void toggle(true)}
                         disabled={setEnabled.isPending}
                       >
-                        Enable
+                        {tx("Enable")}
                       </Button>
                     )}
                     <span className="flex-1" />
@@ -375,14 +372,14 @@ export function HooksDialog({
                       (confirmDelete ? (
                         <>
                           <span className="text-xs text-muted-foreground">
-                            Recycle bin?
+                            {tx("Recycle bin?")}
                           </span>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => setConfirmDelete(false)}
                           >
-                            Cancel
+                            {tx("Cancel")}
                           </Button>
                           <Button
                             variant="destructive"
@@ -390,7 +387,7 @@ export function HooksDialog({
                             onClick={() => void doDelete()}
                             disabled={deleteHook.isPending}
                           >
-                            Delete
+                            {tx("Delete")}
                           </Button>
                         </>
                       ) : (
@@ -399,7 +396,7 @@ export function HooksDialog({
                           size="sm"
                           onClick={() => setConfirmDelete(true)}
                         >
-                          Delete…
+                          {tx("Delete…")}
                         </Button>
                       ))}
                   </div>

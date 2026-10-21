@@ -35,6 +35,7 @@ import { useRepoKeys } from "@/lib/settings/queries";
 import { repoNameFromPath } from "@/lib/stores/notifications";
 import { toastError } from "@/lib/toast";
 import { HostAllowNote } from "../HostAllowNote";
+import { useSettingsText } from "../use-settings-text";
 import { EntryEditor } from "./EntryEditor";
 import type { EntryRow } from "./shared";
 
@@ -77,6 +78,7 @@ export function McpServerDialog({
   onSave: (server: McpServer) => void;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   // Per-mount base for the field ids (label↔control association).
   const idBase = useId();
   const editing = initial !== null;
@@ -114,19 +116,23 @@ export function McpServerDialog({
   // own scope when it points at a DIFFERENT repo (editing it elsewhere), so that
   // assignment is preserved rather than silently dropped.
   const scopeOptions: { value: string; label: string }[] = [
-    { value: MCP_SCOPE_GLOBAL, label: "Global — all repositories" },
+    { value: MCP_SCOPE_GLOBAL, label: tx("Global — all repositories") },
   ];
   if (repoPath && thisRepoKey)
     scopeOptions.push({
       value: thisRepoKey,
-      label: `This repo — ${repoName ?? repoNameFromPath(repoPath)}`,
+      label: tx("This repo — {{repo}}", {
+        repo: repoName ?? repoNameFromPath(repoPath),
+      }),
     });
   if (curScope !== MCP_SCOPE_GLOBAL && !scopedToThisRepo)
     scopeOptions.push({
       value: curScope,
       // The stored scope is a worktree-stable identity key (`…/.git`); show the
       // containing repo folder, never a bare ".git".
-      label: `${repoNameFromPath(scopeRepoPath(curScope))} — other repo`,
+      label: tx("{{repo}} — other repo", {
+        repo: repoNameFromPath(scopeRepoPath(curScope)),
+      }),
     });
   // The Select's value must equal an option value. A draft scoped to the current
   // repo under a legacy raw path (curScope) won't equal the canonical "This repo"
@@ -194,19 +200,19 @@ export function McpServerDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {editing ? "Edit MCP server" : "Add MCP server"}
+            {tx(editing ? "Edit MCP server" : "Add MCP server")}
           </DialogTitle>
           <DialogDescription>
-            A Model Context Protocol server an agent session can opt into. Only
-            the servers a session picks are passed to its CLI — nothing else on
-            your machine is inherited.
+            {tx(
+              "A Model Context Protocol server an agent session can opt into. Only the servers a session picks are passed to its CLI — nothing else on your machine is inherited.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[60vh] space-y-5 overflow-y-auto px-1">
           <div className="grid grid-cols-[1fr_1fr] gap-3">
             <div className="space-y-2">
-              <Label htmlFor={`${idBase}-name`}>Name</Label>
+              <Label htmlFor={`${idBase}-name`}>{tx("Name")}</Label>
               <Input
                 id={`${idBase}-name`}
                 autoFocus
@@ -217,7 +223,7 @@ export function McpServerDialog({
                 spellCheck={false}
               />
             </div>
-            <LabeledGroup label="Transport">
+            <LabeledGroup label={tx("Transport")}>
               <div className="flex gap-1">
                 {MCP_TRANSPORTS.map((t) => (
                   <Button
@@ -229,7 +235,7 @@ export function McpServerDialog({
                     className="flex-1"
                     onClick={() => set("transport", t)}
                   >
-                    {t === "stdio" ? "Local (stdio)" : "Remote (HTTP)"}
+                    {tx(t === "stdio" ? "Local (stdio)" : "Remote (HTTP)")}
                   </Button>
                 ))}
               </div>
@@ -237,18 +243,18 @@ export function McpServerDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={`${idBase}-desc`}>Description</Label>
+            <Label htmlFor={`${idBase}-desc`}>{tx("Description")}</Label>
             <Input
               id={`${idBase}-desc`}
               value={draft.description}
               onChange={(e) => set("description", e.target.value)}
-              placeholder="Local file operations"
+              placeholder={tx("Local file operations")}
             />
           </div>
 
           {scopeOptions.length > 1 && (
             <div className="space-y-2">
-              <Label htmlFor={`${idBase}-scope`}>Available in</Label>
+              <Label htmlFor={`${idBase}-scope`}>{tx("Available in")}</Label>
               <Select
                 value={selectedScope}
                 onValueChange={(v) => v && set("scope", v)}
@@ -275,7 +281,7 @@ export function McpServerDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Repo-scoped servers only appear in that repo's sessions.
+                {tx("Repo-scoped servers only appear in that repo's sessions.")}
               </p>
             </div>
           )}
@@ -283,7 +289,7 @@ export function McpServerDialog({
           {isStdio ? (
             <>
               <div className="space-y-2">
-                <Label htmlFor={`${idBase}-command`}>Command</Label>
+                <Label htmlFor={`${idBase}-command`}>{tx("Command")}</Label>
                 <Input
                   id={`${idBase}-command`}
                   value={draft.command}
@@ -294,7 +300,7 @@ export function McpServerDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor={`${idBase}-args`}>Arguments</Label>
+                <Label htmlFor={`${idBase}-args`}>{tx("Arguments")}</Label>
                 <Textarea
                   id={`${idBase}-args`}
                   value={draft.args.join("\n")}
@@ -312,13 +318,13 @@ export function McpServerDialog({
                   spellCheck={false}
                 />
                 <p className="text-xs text-muted-foreground">
-                  One argument per line.
+                  {tx("One argument per line.")}
                 </p>
               </div>
             </>
           ) : (
             <div className="space-y-2">
-              <Label htmlFor={`${idBase}-url`}>URL</Label>
+              <Label htmlFor={`${idBase}-url`}>{tx("URL")}</Label>
               <Input
                 id={`${idBase}-url`}
                 value={draft.url}
@@ -340,14 +346,16 @@ export function McpServerDialog({
                   allowedHosts={allowedHosts}
                   onAllowHost={onAllowHost}
                   defaultNote={null}
-                  consequence="the agent CLI connects outside GitDesktop's AI allowlist, so allow it before saving."
+                  consequence={tx(
+                    "the agent CLI connects outside GitDesktop's AI allowlist, so allow it before saving.",
+                  )}
                 />
               )}
             </div>
           )}
 
           <EntryEditor
-            label={isStdio ? "Environment variables" : "Headers"}
+            label={tx(isStdio ? "Environment variables" : "Headers")}
             keyPlaceholder={isStdio ? "API_KEY" : "Authorization"}
             rows={rows}
             editing={editing}
@@ -371,9 +379,9 @@ export function McpServerDialog({
 
           <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md border px-3 py-2">
             <div>
-              <p className="text-sm font-medium">Enabled</p>
+              <p className="text-sm font-medium">{tx("Enabled")}</p>
               <p className="text-xs text-muted-foreground">
-                Offer this server to new sessions by default.
+                {tx("Offer this server to new sessions by default.")}
               </p>
             </div>
             <Switch
@@ -394,10 +402,10 @@ export function McpServerDialog({
             </p>
           ) : null}
           <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <Button onClick={save} disabled={!!validationError || saving}>
-            {editing ? "Save server" : "Add server"}
+            {tx(editing ? "Save server" : "Add server")}
           </Button>
         </DialogFooter>
       </DialogContent>

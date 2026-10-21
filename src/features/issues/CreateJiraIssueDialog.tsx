@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -32,7 +33,6 @@ import {
 import { useRetryFocusRescue } from "@/features/conversations/ConversationListPanel";
 import {
   DEGRADED_ACTION_CLASS,
-  offlinePendingMessage,
   refreshFailed,
 } from "@/features/conversations/remote-section-state";
 import {
@@ -79,6 +79,7 @@ export function CreateJiraIssueDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("issues");
   const create = useJiraCreateIssue(repoPath, link);
   // Only fetch types while the dialog is open; surfaced errors get a retry
   // rather than a dead Select.
@@ -93,8 +94,8 @@ export function CreateJiraIssueDialog({
     cancel,
     generating,
     close: () => onOpenChange(false),
-    readyTitle: "Issue draft ready",
-    readyDescription: "It's waiting in the dialog.",
+    readyTitle: t("jiraCreate.issueDraftReady"),
+    readyDescription: t("jiraCreate.waitingInDialog"),
     reopen: () => onOpenChange(true),
   });
 
@@ -144,9 +145,9 @@ export function CreateJiraIssueDialog({
         // the draft's. The toast fires either way, naming where it was filed.
         const originNote = originNoteFor(repoPath);
         const stillHere = originNote === undefined;
-        toast.success(`Created ${key}`, {
+        toast.success(t("jiraCreate.createdToast", { key }), {
           description: originNote ? `${originNote} · ${url}` : url,
-          action: { label: "View", onClick: () => openUrl(url) },
+          action: { label: t("jiraCreate.view"), onClick: () => openUrl(url) },
         });
         // Closed whenever the form still holds THIS submit's draft — leaving an
         // already-filed draft open is a duplicate factory. The selection is a
@@ -228,11 +229,14 @@ export function CreateJiraIssueDialog({
       case generating:
         return AI_DRAFT_PENDING_REASON;
       case create.isPending:
-        return pendingWriteReason(create.isPaused, "Creating the issue…");
+        return pendingWriteReason(
+          create.isPaused,
+          t("jiraCreate.creatingIssue"),
+        );
       case isSubmitting:
-        return "Creating the issue…";
+        return t("jiraCreate.creatingIssue");
       case !issueTypeId:
-        return "Select an issue type to create the issue";
+        return t("jiraCreate.selectIssueType");
       default:
         return null;
     }
@@ -293,11 +297,11 @@ export function CreateJiraIssueDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Create Jira issue</DialogTitle>
+            <DialogTitle>{t("jiraCreate.title")}</DialogTitle>
             <DialogDescription>
-              Opens a new issue in{" "}
-              <span className="font-mono">{link.projectKey}</span> on your Jira
-              site.
+              {t("jiraCreate.opensIn")} {" "}
+              <span className="font-mono">{link.projectKey}</span> {" "}
+              {t("jiraCreate.site")}
             </DialogDescription>
           </DialogHeader>
 
@@ -309,11 +313,11 @@ export function CreateJiraIssueDialog({
             >
               {(field) => (
                 <field.TextField
-                  label="Summary"
-                  placeholder="Summarize the issue"
+                  label={t("jiraCreate.summary")}
+                  placeholder={t("jiraCreate.summarize")}
                   readOnly={creating}
                   warning={(v) =>
-                    v.trim() ? null : "Enter a summary to create the issue"
+                    v.trim() ? null : t("jiraCreate.summaryRequired")
                   }
                 />
               )}
@@ -324,11 +328,15 @@ export function CreateJiraIssueDialog({
               tabIndex={-1}
               className="space-y-2 outline-none"
             >
-              <Label htmlFor={issueTypeSelectId}>Issue type</Label>
+              <Label htmlFor={issueTypeSelectId}>
+                {t("jiraCreate.issueType")}
+              </Label>
               {typesFailed ? (
                 <div className="flex items-center gap-2 border px-3 py-2 text-xs text-muted-foreground">
                   <span className="flex-1">
-                    Couldn't load issue types for {link.projectKey}.
+                    {t("jiraCreate.typesFailed", {
+                      projectKey: link.projectKey,
+                    })}
                   </span>
                   <Button
                     ref={typesRescue.retryRef}
@@ -337,13 +345,14 @@ export function CreateJiraIssueDialog({
                     size="xs"
                     onClick={() => types.refetch()}
                   >
-                    Retry
+                    {t("jiraCreate.retry")}
                   </Button>
                 </div>
               ) : noTypes ? (
                 <p className="text-xs text-warning">
-                  {link.projectKey} has no issue types you can create — create
-                  one in Jira, or check your project permissions.
+                  {t("jiraCreate.noTypes", {
+                    projectKey: link.projectKey,
+                  })}
                 </p>
               ) : (
                 <Select
@@ -358,11 +367,13 @@ export function CreateJiraIssueDialog({
                     <SelectValue
                       placeholder={
                         typesParked
-                          ? offlinePendingMessage("issue types")
+                          ? t("shared.waitingForConnection", {
+                              noun: t("jiraCreate.issueTypesNoun"),
+                            })
                           : types.isPending ||
                               (types.isFetching && creatable.length === 0)
-                            ? "Loading types…"
-                            : "Select a type"
+                            ? t("jiraCreate.loadingTypes")
+                            : t("jiraCreate.selectType")
                       }
                     />
                   </SelectTrigger>
@@ -377,15 +388,15 @@ export function CreateJiraIssueDialog({
               )}
               {typesRefreshFailed && !typesFailed && (
                 <p className="text-xs text-muted-foreground">
-                  Couldn't refresh issue types — showing the last loaded ones.{" "}
+                  {t("jiraCreate.typesRefreshFailed")}{" "}
                   <button
                     ref={typesRescue.retryRef}
                     type="button"
-                    aria-label="Retry loading issue types"
+                    aria-label={t("jiraCreate.retryTypes")}
                     onClick={() => void types.refetch()}
                     className={DEGRADED_ACTION_CLASS}
                   >
-                    Retry
+                    {t("jiraCreate.retry")}
                   </button>
                 </p>
               )}
@@ -394,8 +405,8 @@ export function CreateJiraIssueDialog({
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Description"
-                  placeholder="Jot down rough notes, then draft with AI"
+                  label={t("jiraCreate.description")}
+                  placeholder={t("jiraCreate.draftPlaceholder")}
                   disabled={creating}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
@@ -408,7 +419,7 @@ export function CreateJiraIssueDialog({
                         onClick={cancel}
                       >
                         <XIcon data-icon="inline-start" />
-                        Cancel
+                        {t("jiraCreate.cancel")}
                       </Button>
                     ) : (
                       // Empty notes stay a plain disable; a running create says why.
@@ -427,12 +438,14 @@ export function CreateJiraIssueDialog({
                         // a disabled Generate's shortcut is dead too.
                         title={
                           notes.trim() && !isSubmitting
-                            ? `Expand your notes into a structured issue with AI${generateChord.hint}`
-                            : "Expand your notes into a structured issue with AI"
+                            ? t("jiraCreate.expandNotesWithHint", {
+                                hint: generateChord.hint,
+                              })
+                            : t("jiraCreate.expandNotes")
                         }
                       >
                         <SparkleIcon data-icon="inline-start" />
-                        Draft with AI
+                        {t("jiraCreate.draftWithAi")}
                       </DisabledReasonButton>
                     )
                   }
@@ -453,7 +466,7 @@ export function CreateJiraIssueDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("jiraCreate.cancel")}
             </Button>
             <form.AppForm>
               <span
@@ -469,7 +482,7 @@ export function CreateJiraIssueDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Create issue
+                  {t("jiraCreate.createIssue")}
                 </form.SubmitButton>
                 {blockedReason ? (
                   <span id={reasonId} className="sr-only">

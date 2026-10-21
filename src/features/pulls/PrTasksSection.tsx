@@ -34,6 +34,7 @@ import { pendingWriteReason } from "@/lib/offline-writes";
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /** Count of unresolved tasks — shared by the section and the header chip. */
 function unresolved(tasks: PrTask[]): number {
@@ -77,9 +78,10 @@ function TaskRow({
   onDelete: () => void;
   onFocus: () => void;
 }) {
+  const tx = usePullsText();
   const resolved = task.state === "RESOLVED";
   const CheckIcon = resolved ? CheckSquareIcon : SquareIcon;
-  const label = `${task.text} — ${resolved ? "resolved" : "unresolved"}`;
+  const label = `${task.text} — ${tx(resolved ? "resolved" : "unresolved")}`;
 
   return (
     <div
@@ -129,8 +131,8 @@ function TaskRow({
           variant="ghost"
           size="icon-xs"
           className="shrink-0 text-muted-foreground hover:text-foreground"
-          aria-label="View the comment this task is on"
-          title="View the comment this task is on"
+          aria-label={tx("View the comment this task is on")}
+          title={tx("View the comment this task is on")}
           onClick={(e) => {
             e.stopPropagation();
             viewComment(task.commentId as string, task.url);
@@ -146,7 +148,9 @@ function TaskRow({
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Task actions for “${task.text}”`}
+                aria-label={tx("Task actions for “{{task}}”", {
+                  task: task.text,
+                })}
                 className="shrink-0 text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                 onClick={(e) => e.stopPropagation()}
               />
@@ -165,7 +169,7 @@ function TaskRow({
                 onStartEdit();
               }}
             >
-              Edit…
+              {tx("Edit…")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={(e) => {
@@ -173,7 +177,7 @@ function TaskRow({
                 onDelete();
               }}
             >
-              Delete…
+              {tx("Delete…")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -203,6 +207,7 @@ function TaskInput({
   onSubmit: (text: string) => void;
   onCancel: () => void;
 }) {
+  const tx = usePullsText();
   const canSubmit = value.trim().length > 0 && !pending;
 
   return (
@@ -231,7 +236,7 @@ function TaskInput({
         {submitLabel}
       </Button>
       <Button variant="ghost" size="xs" onClick={onCancel}>
-        Cancel
+        {tx("Cancel")}
       </Button>
     </div>
   );
@@ -255,6 +260,7 @@ export function PrTasksSection({
   /** Whether the PR is open — a closed/merged PR shows a read-only list. */
   editable: boolean;
 }) {
+  const tx = usePullsText();
   const queryClient = useQueryClient();
   const tasksQuery = usePrTasks(repoPath, number);
   const createTask = useCreatePrTask(repoPath);
@@ -312,7 +318,7 @@ export function PrTasksSection({
 
   const notice = sectionReadNotice({
     noun: "tasks",
-    loadFailed: "Couldn't load tasks.",
+    loadFailed: tx("Couldn't load tasks."),
     rowCount: tasks?.length,
     isError: tasksQuery.isError,
     isPaused: tasksQuery.isPaused,
@@ -425,7 +431,7 @@ export function PrTasksSection({
   return (
     <div id="pr-tasks-section" className="space-y-2 border-y py-3">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium">Tasks</span>
+        <span className="text-xs font-medium">{tx("Tasks")}</span>
         {total > 0 && (
           <span className="text-[11px] text-muted-foreground tabular-nums">
             {resolvedCount}/{total}
@@ -438,11 +444,11 @@ export function PrTasksSection({
           <Button
             variant="ghost"
             size="xs"
-            aria-label="Add a task"
+            aria-label={tx("Add a task")}
             onClick={openAdd}
           >
             <PlusIcon data-icon="inline-start" />
-            Add task
+            {tx("Add task")}
           </Button>
         )}
       </div>
@@ -473,8 +479,8 @@ export function PrTasksSection({
                 key={task.id}
                 value={editText}
                 onChange={setEditText}
-                placeholder="Task text…"
-                submitLabel="Save"
+                placeholder={tx("Task text…")}
+                submitLabel={tx("Save")}
                 pending={editTask.isPending}
                 onSubmit={(text) => void submitEdit(task.id, text)}
                 onCancel={closeEdit}
@@ -495,8 +501,10 @@ export function PrTasksSection({
           {total === 0 && !adding && (
             <p className="text-[11px] text-muted-foreground">
               {editable
-                ? "No tasks yet — use Add task to keep a checklist of follow-ups to resolve before merging."
-                : "No tasks."}
+                ? tx(
+                    "No tasks yet — use Add task to keep a checklist of follow-ups to resolve before merging.",
+                  )
+                : tx("No tasks.")}
             </p>
           )}
 
@@ -504,8 +512,8 @@ export function PrTasksSection({
             <TaskInput
               value={addText}
               onChange={setAddText}
-              placeholder="Add a task…"
-              submitLabel="Add"
+              placeholder={tx("Add a task…")}
+              submitLabel={tx("Add")}
               pending={createTask.isPending}
               onSubmit={(text) => void submitAdd(text)}
               onCancel={() => setAdding(false)}
@@ -518,9 +526,11 @@ export function PrTasksSection({
         commentId={deletingId}
         onClose={() => setDeletingId(null)}
         pending={deleteTask.isPending}
-        reason={pendingWriteReason(deleteTask.isPaused, "Deleting a task…")}
-        title="Delete task?"
-        description="This permanently deletes the task on Bitbucket. This cannot be undone."
+        reason={pendingWriteReason(deleteTask.isPaused, tx("Deleting a task…"))}
+        title={tx("Delete task?")}
+        description={tx(
+          "This permanently deletes the task on Bitbucket. This cannot be undone.",
+        )}
         onConfirm={(taskId) => void confirmDelete(taskId)}
       />
     </div>
@@ -542,16 +552,17 @@ export function PrTasksChip({
   number: number;
   onView: () => void;
 }) {
+  const tx = usePullsText();
   const tasksQuery = usePrTasks(repoPath, number);
   const count = unresolved(tasksQuery.data ?? []);
   if (count === 0) return null;
 
-  const noun = count === 1 ? "open task" : "open tasks";
+  const noun = tx(count === 1 ? "open task" : "open tasks");
   return (
     <button
       type="button"
       onClick={onView}
-      aria-label={`${count} ${noun} — view`}
+      aria-label={tx("{{count}} {{noun}} — view", { count, noun })}
       className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
     >
       <CheckSquareOffsetIcon className="size-3.5 shrink-0" aria-hidden />

@@ -59,6 +59,7 @@ import {
 import { PrAuditChip } from "./PrAuditChip";
 import { StatusIndicator, sessionStatus } from "./status";
 import { type AgentSession, useSessionsStore } from "./store";
+import { useSessionText } from "./use-session-text";
 
 /** A compact `#N · provider · model` line for a list row, so entries are browsable
  *  by their identifier + which agent/model produced them. The `#N` (a GitHub-style
@@ -143,26 +144,27 @@ function SessionMenuItems({
   session: AgentSession;
   requestConfirm: (req: ConfirmReq) => void;
 }) {
+  const tx = useSessionText();
   const store = useSessionsStore.getState;
   const reviewable = !session.kept && session.headHash !== session.base;
   return (
     <>
       <ContextMenuItem onClick={() => selectSession(session.id)}>
-        Open
+        {tx("Open")}
       </ContextMenuItem>
       {session.kept && (
         <ContextMenuItem onClick={() => store().resume(session.id)}>
-          Resume
+          {tx("Resume")}
         </ContextMenuItem>
       )}
       {reviewable && (
         <ContextMenuItem onClick={() => store().keep(session.id, false)}>
-          Keep
+          {tx("Keep")}
         </ContextMenuItem>
       )}
       {session.running && (
         <ContextMenuItem onClick={() => store().cancel(session.id)}>
-          Stop
+          {tx("Stop")}
         </ContextMenuItem>
       )}
       <ContextMenuSeparator />
@@ -171,28 +173,28 @@ function SessionMenuItems({
           variant="destructive"
           onClick={() =>
             requestConfirm({
-              title: "Delete this session?",
-              body: "Removes the kept session and its transcript. This can't be undone.",
-              label: "Delete",
+              title: tx("Delete this session?"),
+              body: tx("Removes the kept session and its transcript. This can't be undone."),
+              label: tx("Delete"),
               action: () => store().deleteSession(session.id),
             })
           }
         >
-          Delete
+          {tx("Delete")}
         </ContextMenuItem>
       ) : (
         <ContextMenuItem
           variant="destructive"
           onClick={() =>
             requestConfirm({
-              title: "Discard this session?",
-              body: "Deletes the worktree and its branch, throwing away the agent's work. This can't be undone.",
-              label: "Discard",
+              title: tx("Discard this session?"),
+              body: tx("Deletes the worktree and its branch, throwing away the agent's work. This can't be undone."),
+              label: tx("Discard"),
               action: () => store().discard(session.id),
             })
           }
         >
-          Discard
+          {tx("Discard")}
         </ContextMenuItem>
       )}
     </>
@@ -210,6 +212,7 @@ function PlanMenuItems({
   requestConfirm: (req: ConfirmReq) => void;
   onCreateIssue: () => void;
 }) {
+  const tx = useSessionText();
   const store = usePlanStore.getState;
   // The write-capable session this plan was implemented into, if it still exists
   // (discarding the session reverts the plan to editable) — gates "View session".
@@ -220,25 +223,25 @@ function PlanMenuItems({
   );
   return (
     <>
-      <ContextMenuItem onClick={() => selectPlan(run.id)}>Open</ContextMenuItem>
+      <ContextMenuItem onClick={() => selectPlan(run.id)}>{tx("Open")}</ContextMenuItem>
       {session && (
         <ContextMenuItem onClick={() => selectSession(session.id)}>
-          View session
+          {tx("View session")}
         </ContextMenuItem>
       )}
       {run.draft && (
         <ContextMenuItem onClick={onCreateIssue}>
-          Create local issue
+          {tx("Create local issue")}
         </ContextMenuItem>
       )}
       {run.generating && (
         <ContextMenuItem onClick={() => store().cancel(run.id)}>
-          Stop
+          {tx("Stop")}
         </ContextMenuItem>
       )}
       {(run.stopped || run.error) && (
         <ContextMenuItem onClick={() => store().restart(run.id)}>
-          Restart
+          {tx("Restart")}
         </ContextMenuItem>
       )}
       <ContextMenuSeparator />
@@ -246,14 +249,14 @@ function PlanMenuItems({
         variant="destructive"
         onClick={() =>
           requestConfirm({
-            title: "Dismiss this plan?",
-            body: "Removes the plan from the list. This can't be undone.",
-            label: "Dismiss",
+            title: tx("Dismiss this plan?"),
+            body: tx("Removes the plan from the list. This can't be undone."),
+            label: tx("Dismiss"),
             action: () => store().remove(run.id),
           })
         }
       >
-        Dismiss
+        {tx("Dismiss")}
       </ContextMenuItem>
     </>
   );
@@ -267,6 +270,7 @@ function ResearchMenuItems({
   run: ResearchRun;
   requestConfirm: (req: ConfirmReq) => void;
 }) {
+  const tx = useSessionText();
   const store = useResearchStore.getState;
   const turnIntoPlan = async () => {
     if (!run.report || run.distilling) return;
@@ -295,7 +299,7 @@ function ResearchMenuItems({
   return (
     <>
       <ContextMenuItem onClick={() => selectResearch(run.id)}>
-        Open
+        {tx("Open")}
       </ContextMenuItem>
       {run.report && (
         <>
@@ -303,30 +307,30 @@ function ResearchMenuItems({
             onClick={() => void turnIntoPlan()}
             disabled={run.distilling}
           >
-            {run.distilling ? "Distilling…" : "Turn into a Plan"}
+            {run.distilling ? tx("Distilling…") : tx("Turn into a Plan")}
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => void store().saveReport(run.id).catch(toastError)}
           >
-            Save report
+            {tx("Save report")}
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() =>
-              copyText(assembleSessionReport(run), "Report copied")
+              copyText(assembleSessionReport(run), tx("Report copied"))
             }
           >
-            Copy report
+            {tx("Copy report")}
           </ContextMenuItem>
         </>
       )}
       {(run.generating || run.distilling) && (
         <ContextMenuItem onClick={() => store().cancel(run.id)}>
-          Stop
+          {tx("Stop")}
         </ContextMenuItem>
       )}
       {(run.stopped || run.error) && (
         <ContextMenuItem onClick={() => store().restart(run.id)}>
-          Restart
+          {tx("Restart")}
         </ContextMenuItem>
       )}
       <ContextMenuSeparator />
@@ -334,14 +338,14 @@ function ResearchMenuItems({
         variant="destructive"
         onClick={() =>
           requestConfirm({
-            title: "Dismiss this research?",
-            body: "Removes the research run and its report from the list. This can't be undone.",
-            label: "Dismiss",
+            title: tx("Dismiss this research?"),
+            body: tx("Removes the research run and its report from the list. This can't be undone."),
+            label: tx("Dismiss"),
             action: () => store().remove(run.id),
           })
         }
       >
-        Dismiss
+        {tx("Dismiss")}
       </ContextMenuItem>
     </>
   );
@@ -372,8 +376,8 @@ function planHaystack(r: PlanRun): string {
     .toLowerCase();
 }
 
-function planLabel(r: PlanRun): string {
-  return r.origin?.issueTitle?.trim() || r.origin?.goal?.trim() || "Plan";
+function planLabel(r: PlanRun, fallback = "Plan"): string {
+  return r.origin?.issueTitle?.trim() || r.origin?.goal?.trim() || fallback;
 }
 
 /** Lowercased text a research search matches: its topic and every turn's report. */
@@ -384,8 +388,8 @@ function researchHaystack(r: ResearchRun): string {
     .toLowerCase();
 }
 
-function researchLabel(r: ResearchRun): string {
-  return r.origin?.topic?.trim() || "Research";
+function researchLabel(r: ResearchRun, fallback = "Research"): string {
+  return r.origin?.topic?.trim() || fallback;
 }
 
 /** Total cost of a research session — every turn, not just the latest. */
@@ -403,6 +407,7 @@ function researchCost(r: ResearchRun): number {
  * keys walk the rows.
  */
 export function SessionList({ repoPath }: { repoPath: string }) {
+  const tx = useSessionText();
   const allSessions = useSessionsStore((s) => s.sessions);
   const activeId = useSessionsStore((s) => s.activeId);
   const allRuns = usePlanStore((s) => s.runs);
@@ -634,7 +639,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
       <div className="flex shrink-0 items-center gap-2 border-b p-2 pl-3">
         <span className="flex items-center gap-1.5 text-sm font-medium">
           <SparkleIcon className="size-4 text-primary" />
-          Agent
+          {tx("Agent")}
         </span>
         <Button
           size="xs"
@@ -643,7 +648,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
           onClick={newSession}
         >
           <PlusIcon className="size-3.5" />
-          New
+          {tx("New")}
         </Button>
       </div>
       {repoEmpty ? (
@@ -657,16 +662,16 @@ export function SessionList({ repoPath }: { repoPath: string }) {
             >
               <TabsList className="w-full">
                 <TabsTrigger value="active" className="min-w-0 flex-1">
-                  Active
+                  {tx("Active")}
                   <Count n={activeCount} />
                 </TabsTrigger>
                 <TabsTrigger value="kept" className="min-w-0 flex-1">
-                  Kept
+                  {tx("Kept")}
                   <Count n={keptCount} />
                 </TabsTrigger>
                 {archivedCount > 0 && (
                   <TabsTrigger value="archived" className="min-w-0 flex-1">
-                    Archived
+                    {tx("Archived")}
                     <Count n={archivedCount} />
                   </TabsTrigger>
                 )}
@@ -678,8 +683,8 @@ export function SessionList({ repoPath }: { repoPath: string }) {
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search research, plans & sessions"
-                aria-label="Search agent research, plans, and sessions"
+                placeholder={tx("Search research, plans & sessions")}
+                aria-label={tx("Search agent research, plans, and sessions")}
                 autoComplete="off"
                 className="h-7 pl-7"
               />
@@ -690,7 +695,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
           ) : (
             <div
               role="listbox"
-              aria-label="Agent research, plans, and sessions"
+              aria-label={tx("Agent research, plans, and sessions")}
               onKeyDown={onKeyDown}
               className="min-h-0 flex-1 overflow-y-auto p-1"
             >
@@ -698,7 +703,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
                   add/remove animates. */}
               <AnimatePresence key={effectiveTab} initial={false}>
                 {showGroups && research.length > 0 && (
-                  <GroupLabel key="g-research">Research</GroupLabel>
+                  <GroupLabel key="g-research">{tx("Research")}</GroupLabel>
                 )}
                 {/* Research is first in navItems, so a research row's array index
                     IS its nav index — no offset (plans/sessions add one below). */}
@@ -714,7 +719,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
                   />
                 ))}
                 {showGroups && plans.length > 0 && (
-                  <GroupLabel key="g-plans">Plans</GroupLabel>
+                  <GroupLabel key="g-plans">{tx("Plans")}</GroupLabel>
                 )}
                 {plans.map((r, i) => {
                   const idx = research.length + i;
@@ -731,7 +736,7 @@ export function SessionList({ repoPath }: { repoPath: string }) {
                   );
                 })}
                 {showGroups && sessions.length > 0 && (
-                  <GroupLabel key="g-sessions">Sessions</GroupLabel>
+                  <GroupLabel key="g-sessions">{tx("Sessions")}</GroupLabel>
                 )}
                 {sessions.map((s, j) => {
                   const idx = research.length + plans.length + j;
@@ -779,19 +784,19 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 function EmptyState({ onNew }: { onNew: () => void }) {
+  const tx = useSessionText();
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
       <SparkleIcon className="size-7 text-muted-foreground" />
       <div className="space-y-1">
-        <p className="text-xs font-medium">No agent sessions yet</p>
+        <p className="text-xs font-medium">{tx("No agent sessions yet")}</p>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Delegate a task and the agent works in an isolated worktree you review
-          before keeping — or plan one first, read-only.
+          {tx("Delegate a task and the agent works in an isolated worktree you review before keeping — or plan one first, read-only.")}
         </p>
       </div>
       <Button size="sm" variant="outline" onClick={onNew}>
         <PlusIcon className="size-3.5" />
-        New
+        {tx("New")}
       </Button>
     </div>
   );
@@ -799,19 +804,17 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 /** What an otherwise-empty tab says about itself — each names how rows land
  *  there. */
-const TAB_EMPTY_MESSAGE: Record<SessionTab, string> = {
-  active: "Nothing active — start a plan or session with New.",
-  kept: "No kept sessions yet. Keep a session to file it here.",
-  archived:
-    "No archived plans or research runs yet. Plans land here once their session is kept, research once it's turned into a plan.",
-};
-
 /** Shown when a tab (or a search within it) has no rows, but other rows exist —
  *  so the full empty state with its New button would be misleading. */
 function ListEmpty({ tab, hasQuery }: { tab: SessionTab; hasQuery: boolean }) {
+  const tx = useSessionText();
   const message = hasQuery
-    ? "Nothing matches your search."
-    : TAB_EMPTY_MESSAGE[tab];
+    ? tx("Nothing matches your search.")
+    : tab === "active"
+      ? tx("Nothing active — start a plan or session with New.")
+      : tab === "kept"
+        ? tx("No kept sessions yet. Keep a session to file it here.")
+        : tx("No archived plans or research runs yet. Plans land here once their session is kept, research once it's turned into a plan.");
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
       <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -829,6 +832,7 @@ function PlanStatus({
   run: PlanRun;
   audit: Map<string, PrAudit>;
 }) {
+  const tx = useSessionText();
   // Subscribe to the spawned session (if any) so the row tracks its status live.
   const session = useSessionsStore((s) =>
     run.implementedSessionId
@@ -843,7 +847,7 @@ function PlanStatus({
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
         <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-        Planning…
+        {tx("Planning…")}
       </span>
     );
   }
@@ -854,7 +858,7 @@ function PlanStatus({
       return (
         <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-          Implementing…
+          {tx("Implementing…")}
         </span>
       );
     }
@@ -862,7 +866,7 @@ function PlanStatus({
       return (
         <span className="flex min-w-0 items-center gap-1.5 text-destructive">
           <WarningCircleIcon className="size-3.5 shrink-0" />
-          Implement failed
+          {tx("Implement failed")}
         </span>
       );
     }
@@ -873,7 +877,7 @@ function PlanStatus({
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
         <span className="truncate">
-          {merge ? "Implemented" : `Implemented · ${st.label}${num}`}
+          {merge ? tx("Implemented") : tx("Implemented · {{status}}{{number}}", { status: tx(st.label), number: num })}
         </span>
         {merge && <PrAuditChip audit={merge} />}
       </span>
@@ -883,12 +887,12 @@ function PlanStatus({
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-destructive">
         <WarningCircleIcon className="size-3.5 shrink-0" />
-        Plan failed
+        {tx("Plan failed")}
       </span>
     );
   if (run.draft)
-    return <span className="text-muted-foreground">Plan ready</span>;
-  return <span className="text-muted-foreground">Read-only plan</span>;
+    return <span className="text-muted-foreground">{tx("Plan ready")}</span>;
+  return <span className="text-muted-foreground">{tx("Read-only plan")}</span>;
 }
 
 function PlanRow({
@@ -906,6 +910,7 @@ function PlanRow({
   motionProps: Pick<MotionProps, "initial" | "animate" | "exit">;
   onClick: () => void;
 }) {
+  const tx = useSessionText();
   // The plan can be filed as a local issue from its context menu; the dialog lives
   // here (a sibling of the row's menu) so it survives the menu closing, prefilled
   // with the plan's drafted issue — same flow as the canvas footer.
@@ -928,7 +933,7 @@ function PlanRow({
             )}
           >
             <span className="line-clamp-2 w-full text-xs font-medium leading-snug">
-              {planLabel(run)}
+              {planLabel(run, tx("Plan"))}
             </span>
             <span className="flex w-full items-center gap-2 text-[11px]">
               <PlanStatus run={run} audit={audit} />
@@ -976,7 +981,8 @@ function SessionRow({
   motionProps: Pick<MotionProps, "initial" | "animate" | "exit">;
   onClick: () => void;
 }) {
-  const title = session.turns[0]?.prompt.trim() || "New session";
+  const tx = useSessionText();
+  const title = session.turns[0]?.prompt.trim() || tx("New session");
   const cost = session.turns.reduce((sum, t) => sum + (t.costUsd ?? 0), 0);
   return (
     <RowMenu
@@ -1002,7 +1008,7 @@ function SessionRow({
             {session.ensembleId && (
               <span
                 className="inline-flex shrink-0 items-center text-muted-foreground"
-                title="One arm of a best-of-N ensemble"
+                title={tx("One arm of a best-of-N ensemble")}
               >
                 <UsersThreeIcon className="size-3.5" />
               </span>
@@ -1037,6 +1043,7 @@ function ResearchStatus({
   run: ResearchRun;
   planned: boolean;
 }) {
+  const tx = useSessionText();
   // The plan this research was handed off into ("Turn into a Plan"), if any — the
   // research→plan analogue of a plan's "Implemented … #N" session link, so the row
   // points at what it became. A plan records its originating research id on its seed.
@@ -1049,10 +1056,10 @@ function ResearchStatus({
       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
         <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
         {run.distilling
-          ? "Distilling plan brief…"
+          ? tx("Distilling plan brief…")
           : run.depth === "deep"
-            ? "Researching…"
-            : "Brainstorming…"}
+            ? tx("Researching…")
+            : tx("Brainstorming…")}
       </span>
     );
   }
@@ -1060,20 +1067,20 @@ function ResearchStatus({
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-destructive">
         <WarningCircleIcon className="size-3.5 shrink-0" />
-        Research failed
+        {tx("Research failed")}
       </span>
     );
   if (planned)
     return (
       <span className="text-muted-foreground">
         {planNumber != null
-          ? `Turned into plan #${planNumber}`
-          : "Turned into a plan"}
+          ? tx("Turned into plan #{{number}}", { number: planNumber })
+          : tx("Turned into a plan")}
       </span>
     );
   if (run.report)
-    return <span className="text-muted-foreground">Report ready</span>;
-  return <span className="text-muted-foreground">Read-only research</span>;
+    return <span className="text-muted-foreground">{tx("Report ready")}</span>;
+  return <span className="text-muted-foreground">{tx("Read-only research")}</span>;
 }
 
 function ResearchRow({
@@ -1091,6 +1098,7 @@ function ResearchRow({
   motionProps: Pick<MotionProps, "initial" | "animate" | "exit">;
   onClick: () => void;
 }) {
+  const tx = useSessionText();
   return (
     <RowMenu
       trigger={
@@ -1108,7 +1116,7 @@ function ResearchRow({
           )}
         >
           <span className="line-clamp-2 w-full text-xs font-medium leading-snug">
-            {researchLabel(run)}
+              {researchLabel(run, tx("Research"))}
           </span>
           <span className="flex w-full items-center gap-2 text-[11px]">
             <ResearchStatus run={run} planned={planned} />

@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { quickTransition } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +70,7 @@ export function ConversationScrollArea({
   className?: string;
   children: ReactNode;
 }) {
+  const tx = useCommonText();
   const areaRef = useRef<HTMLDivElement>(null);
   // True while a smooth jump animates, so the intermediate positions don't
   // flicker the buttons; the jump settles the real edges once it lands.
@@ -173,8 +175,8 @@ export function ConversationScrollArea({
               <m.button
                 key="top"
                 type="button"
-                aria-label="Jump to top"
-                title="Jump to top"
+                aria-label={tx("Jump to top")}
+                title={tx("Jump to top")}
                 onClick={() => jump("top")}
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -193,8 +195,8 @@ export function ConversationScrollArea({
               <m.button
                 key="bottom"
                 type="button"
-                aria-label="Jump to bottom"
-                title="Jump to bottom"
+                aria-label={tx("Jump to bottom")}
+                title={tx("Jump to bottom")}
                 onClick={() => jump("bottom")}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}

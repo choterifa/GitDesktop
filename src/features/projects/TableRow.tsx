@@ -13,6 +13,7 @@ import {
   TitleCell,
   ValueCell,
 } from "./TableCell";
+import { useProjectsText } from "./use-projects-text";
 
 /** Where a virtualized row sits: absolutely positioned at its offset, as wide as
  *  the columns it lays out. */
@@ -161,8 +162,9 @@ export const TableGroupRow = memo(function TableGroupRow({
    *  keeps the column it was on. */
   onCellFocus: (rowKey: string, colIndex: number | null) => void;
 }) {
+  const tx = useProjectsText();
   const Caret = entry.expanded ? CaretDownIcon : CaretRightIcon;
-  const count = `${entry.count} ${entry.count === 1 ? "item" : "items"}`;
+  const count = `${entry.count} ${tx(entry.count === 1 ? "item" : "items")}`;
   return (
     <div
       role="row"

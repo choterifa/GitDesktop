@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
 import { MENU_HELD_ROW_CLASS } from "@/components/menu-held-row";
 import { useRelativeNow } from "@/components/relative-time";
 import {
@@ -9,22 +10,14 @@ import { copyText } from "@/lib/clipboard";
 import { type ForgeProvider, providerLabel } from "@/lib/git/types";
 import type { WorkflowRun } from "@/lib/github/actions";
 import {
-  type CiRunNoun,
   cancelLabel,
   cancelOffered,
   ciRunNoun,
   isPipelineProvider,
-  RERUN_TITLES,
   rerunOffers,
+  rerunTitle,
   rerunWindowReason,
 } from "./status";
-
-/** Sentence-initial noun for the copy toast; the item's own label carries it
- *  mid-sentence, where `ciRunNoun` is used directly. */
-const COPIED_URL_TOAST: Record<CiRunNoun, string> = {
-  run: "Run URL copied",
-  pipeline: "Pipeline URL copied",
-};
 
 /** Callbacks the menu items invoke — owned by the runs panel, which holds the
  *  mutations, toasts, and dialog state so this stays presentational. */
@@ -72,6 +65,7 @@ export function RunContextMenuItems({
    *  push block's. */
   rerunHeld?: string;
 }) {
+  const { t } = useTranslation("actions");
   // Destructured so each callback closes over a const binding rather than a
   // property read off the actions object.
   const { rerun, cancel, runAgain } = actions;
@@ -106,7 +100,7 @@ export function RunContextMenuItems({
           title={
             writeBlocked || rerunHint !== undefined
               ? undefined
-              : RERUN_TITLES[offer.kind]
+              : rerunTitle(offer.kind)
           }
           onClick={() => rerun(run.id, offer.kind === "failed")}
         >
@@ -138,7 +132,7 @@ export function RunContextMenuItems({
               runAgain(isPipelines ? null : run.workflowDatabaseId)
             }
           >
-            {isPipelines ? "Run pipeline…" : "Run workflow again…"}
+            {t(isPipelines ? "menu.runPipelineAgain" : "menu.runWorkflowAgain")}
             {blockedHint}
           </ContextMenuItem>
         </>
@@ -147,12 +141,12 @@ export function RunContextMenuItems({
         <>
           {hasWriteItems && <ContextMenuSeparator />}
           <ContextMenuItem onClick={() => openUrl(run.url)}>
-            View on {providerLabel(provider)}
+            {t("menu.viewOn", { provider: providerLabel(provider) })}
           </ContextMenuItem>
           <ContextMenuItem
-            onClick={() => copyText(run.url, COPIED_URL_TOAST[noun])}
+            onClick={() => copyText(run.url, t(`menu.${noun}UrlCopied`))}
           >
-            Copy {noun} URL
+            {t(`menu.copy${noun === "run" ? "Run" : "Pipeline"}Url`)}
           </ContextMenuItem>
         </>
       )}

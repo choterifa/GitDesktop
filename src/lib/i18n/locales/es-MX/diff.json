@@ -1,0 +1,102 @@
+{
+  "empty": {
+    "noChanges": "No hay cambios por revisar",
+    "selectFile": "Selecciona un archivo para ver sus cambios",
+    "noDiff": "No hay cambios que mostrar",
+    "loading": "Cargando el diff…"
+  },
+  "mode": {
+    "label": "Modo de vista del diff",
+    "unified": "Unificado",
+    "split": "Dividido",
+    "tooNarrow": "El panel es demasiado angosto para la vista dividida"
+  },
+  "generated": {
+    "title": "Parece ser un archivo generado o minificado",
+    "showAnyway": "Mostrar diff de todos modos",
+    "hiddenLines_one": "Se ocultó {{count}} línea más para mejorar el rendimiento",
+    "hiddenLines_other": "Se ocultaron {{count}} líneas más para mejorar el rendimiento",
+    "shortened_one": "Se acortó {{count}} línea larga para mejorar el rendimiento",
+    "shortened_other": "Se acortaron {{count}} líneas largas para mejorar el rendimiento",
+    "shortenedWithoutHidden_one": "Se acortó {{count}} línea larga",
+    "shortenedWithoutHidden_other": "Se acortaron {{count}} líneas largas",
+    "showFull": "Mostrar diff completo",
+    "truncated": "(truncado; el diff es demasiado grande)"
+  },
+  "status": {
+    "offlinePending": "Estás sin conexión. El diff se cargará cuando vuelvas a conectarte.",
+    "loadFailed": "No se pudo cargar el diff de este archivo",
+    "retry": "Volver a cargar este diff",
+    "diffNoun": "este diff",
+    "refreshFailed": "No se pudo actualizar este diff; se muestra la última versión cargada.",
+    "offlineStale": "Estás sin conexión. Se muestra el último diff abierto; este se cargará cuando vuelvas a conectarte.",
+    "offlineLastLoaded": "Estás sin conexión. Se muestra la última versión cargada.",
+    "binary": "Archivo binario; no hay un diff de texto disponible",
+    "noChanges": "No hay cambios que mostrar"
+  },
+  "language": {
+    "auto": "Automático",
+    "autoDetect": "Detección automática",
+    "custom": "Personalizados",
+    "common": "Comunes",
+    "all": "Todos los lenguajes",
+    "search": "Buscar lenguajes…",
+    "noMatches": "No hay lenguajes que coincidan"
+  },
+  "markdown": {
+    "viewLabel": "Vista de Markdown",
+    "raw": "Texto",
+    "preview": "Vista previa",
+    "nothing": "No hay nada que previsualizar",
+    "loadFailed": "No se pudo cargar este archivo para mostrar la vista previa",
+    "tooLarge": "El archivo es demasiado grande para mostrar la vista previa",
+    "deleted": "Archivo eliminado; se muestra la versión anterior.",
+    "mdxNote": "Vista previa aproximada: los componentes y expresiones de MDX se muestran como texto."
+  },
+  "image": {
+    "fullscreen": "Ver la imagen {{label}} en pantalla completa",
+    "tooLarge": "La imagen es demasiado grande para mostrarla",
+    "deleted": "Eliminada",
+    "old": "Anterior",
+    "added": "Agregada",
+    "new": "Nueva"
+  },
+  "errorBoundary": {
+    "message": "No se pudo mostrar el diff de este archivo.",
+    "retry": "Intentar de nuevo"
+  },
+  "undecodable": {
+    "unstaged": "Parte de este cambio no es texto UTF-8, así que el archivo se prepara o descarta completo para conservar sus bytes. Puedes prepararlo o descartarlo desde su fila en Cambios.",
+    "staged": "Parte de este cambio no es texto UTF-8, así que el archivo se quita del área de preparación completo para conservar sus bytes. Puedes quitarlo desde su fila en Preparados.",
+    "untracked": "Este archivo nuevo no es texto UTF-8, así que se prepara completo para conservar sus bytes. Puedes prepararlo o descartarlo desde su fila en Cambios."
+  },
+  "staging": {
+    "staleStage": "El diff acaba de actualizarse; no se preparó nada.",
+    "staleUnstage": "El diff acaba de actualizarse; no se quitó nada del área de preparación.",
+    "staleDiscard": "El diff acaba de actualizarse; no se descartó nada.",
+    "updating": "Actualizando el diff…",
+    "stage": "Preparar",
+    "unstage": "Quitar de preparados",
+    "discard": "Descartar…",
+    "clear": "Limpiar",
+    "stageHunk": "Preparar bloque",
+    "unstageHunk": "Quitar bloque de preparados",
+    "selection_one": "{{count}} línea seleccionada",
+    "selection_other": "{{count}} líneas seleccionadas",
+    "selectionLabel_one": "{{count}} línea seleccionada",
+    "selectionLabel_other": "{{count}} líneas seleccionadas",
+    "dontShowAgain": "No volver a mostrar",
+    "dragHint": "Arrastra sobre los números de línea para {{action}} solo esas líneas, tanto agregadas como eliminadas. Mantén Shift mientras arrastras para elegir un lado del cambio, o {{modifier}} para sumar líneas a la selección.",
+    "pressHint": "Presiona {{binding}} para {{action}} la selección.",
+    "discardTitle": "¿Descartar cambios?",
+    "discardNewDescription": "Quita {{label}} de {{path}}. Esta acción no se puede deshacer.",
+    "discardDescription": "Revierte {{label}} en {{path}} a la última versión confirmada. Esta acción no se puede deshacer.",
+    "cancel": "Cancelar",
+    "discardAction": "Descartar",
+    "collapseContext": "Contraer contexto expandido"
+  },
+  "hunk": {
+    "line": "línea {{start}}",
+    "lines": "líneas {{start}}–{{end}}"
+  }
+}

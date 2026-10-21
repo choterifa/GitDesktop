@@ -12,6 +12,7 @@ import {
   SplitSide,
 } from "@git-diff-view/react";
 import type { UseQueryResult } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   type ReactNode,
   useCallback,
@@ -27,11 +28,7 @@ import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { DegradedListNotice } from "@/features/conversations/ConversationListPanel";
-import {
-  detailNoticeMessage,
-  offlinePendingMessage,
-  refreshFailed,
-} from "@/features/conversations/remote-section-state";
+import { refreshFailed } from "@/features/conversations/remote-section-state";
 import { decodeBase64Utf8 } from "@/lib/git/api";
 import { useFileAtRev } from "@/lib/git/queries";
 import type { FileDiff } from "@/lib/git/types";
@@ -86,7 +83,7 @@ import {
 } from "./shiki-highlighter";
 import { SPLIT_MIN_CONTAINER_PX } from "./split-threshold";
 import { ensureCustomLanguages } from "./syntax";
-import { type StagingSide, UNDECODABLE_NOTE_COPY } from "./undecodable-note";
+import type { StagingSide } from "./undecodable-note";
 import {
   useFocusOnControlsSwap,
   useHiddenTriggerFocus,
@@ -209,6 +206,7 @@ export function DiffModeToggle({
    *  button may touch the preference while the override stands in for it. */
   splitDisabled?: boolean;
 }) {
+  const { t } = useTranslation("diff");
   const settings = useSettings();
   const saveSettings = useSaveSettings();
   const viewMode = settings.data?.diffViewMode ?? "unified";
@@ -217,7 +215,7 @@ export function DiffModeToggle({
     // DisabledReasonButton's wrapper span has no `data-slot`, so it opts out of
     // ButtonGroup's border-collapse/rounding child selectors — this call site
     // owns the seam on the Button instead (same arrangement as SyncControls).
-    <ButtonGroup aria-label="Diff view mode">
+    <ButtonGroup aria-label={t("mode.label")}>
       <Button
         variant={effectiveViewMode === "unified" ? "secondary" : "ghost"}
         size="xs"
@@ -229,14 +227,14 @@ export function DiffModeToggle({
             .catch(toastError);
         }}
       >
-        Unified
+        {t("mode.unified")}
       </Button>
       <DisabledReasonButton
         variant={effectiveViewMode === "split" ? "secondary" : "ghost"}
         size="xs"
         aria-pressed={effectiveViewMode === "split"}
         disabled={splitDisabled}
-        reason="Pane too narrow for split view"
+        reason={t("mode.tooNarrow")}
         className="border-l-0 focus-visible:relative focus-visible:z-10"
         onClick={() => {
           if (!settings.data) return;
@@ -245,7 +243,7 @@ export function DiffModeToggle({
             .catch(toastError);
         }}
       >
-        Split
+        {t("mode.split")}
       </DisabledReasonButton>
     </ButtonGroup>
   );
@@ -279,8 +277,13 @@ export function GitDiffView({
    *  when it's too narrow for split. Omitted = follow the preference. */
   forceUnified?: boolean;
 }) {
+  const { t } = useTranslation("diff");
   return (
-    <DiffErrorBoundary resetKey={`${filePath} ${text.length}`}>
+    <DiffErrorBoundary
+      resetKey={`${filePath} ${text.length}`}
+      message={t("errorBoundary.message")}
+      retryLabel={t("errorBoundary.retry")}
+    >
       <RenderedDiff
         filePath={filePath}
         text={text}
@@ -678,6 +681,7 @@ function RenderedDiff({
   lineWidget?: LineWidget;
   forceUnified?: boolean;
 }) {
+  const { t } = useTranslation("diff");
   const settings = useSettings();
   const isDark = useIsDark();
   // The narrow-pane override renders unified without ever writing the setting,
@@ -1129,14 +1133,14 @@ function RenderedDiff({
   if (blocked) {
     return (
       <DiffPlaceholder
-        message="Looks like a generated or minified file"
+        message={t("generated.title")}
         action={
           <Button
             size="xs"
             variant="outline"
             onClick={() => setShowAnyway(true)}
           >
-            Show diff anyway
+            {t("generated.showAnyway")}
           </Button>
         }
       />
@@ -1148,7 +1152,7 @@ function RenderedDiff({
   // `holdForGrammar` is never true — the interim hljs paint isn't delayed for a
   // grammar only the worker needs.
   if (contentPending || holdForGrammar) return null;
-  if (!diffFile) return <DiffPlaceholder message="No changes to show" />;
+  if (!diffFile) return <DiffPlaceholder message={t("empty.noDiff")} />;
   return (
     <>
       {inSlot && <span ref={rowsProbeRef} hidden />}
@@ -1201,15 +1205,14 @@ function RenderedDiff({
         <div className="flex items-center justify-center gap-3 border-t bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           {hidden > 0 && (
             <span>
-              {hidden.toLocaleString()} more {hidden === 1 ? "line" : "lines"}{" "}
-              hidden for performance
+              {t("generated.hiddenLines", { count: hidden })}
             </span>
           )}
           {shortened > 0 && (
             <span>
-              {shortened.toLocaleString()} long{" "}
-              {shortened === 1 ? "line" : "lines"} shortened
-              {hidden > 0 ? "" : " for performance"}
+              {hidden > 0
+                ? t("generated.shortenedWithoutHidden", { count: shortened })
+                : t("generated.shortened", { count: shortened })}
             </span>
           )}
           {hidden > 0 && (
@@ -1218,7 +1221,7 @@ function RenderedDiff({
               variant="outline"
               onClick={() => setShowFull(true)}
             >
-              Show full diff
+              {t("generated.showFull")}
             </Button>
           )}
         </div>
@@ -1334,6 +1337,7 @@ export function DiffContent({
    *  Absent = read-only host, no note. */
   stagingSide?: StagingSide;
 }) {
+  const { t } = useTranslation("diff");
   // The pane measures itself: this surface mounts at widths from a full window
   // down to a rail-flanked column, and both the split gate and the toolbar's
   // container queries key off THIS box, not the viewport.
@@ -1413,7 +1417,7 @@ export function DiffContent({
   // why instead.
   if (isPending) {
     return isPaused ? (
-      <DiffPlaceholder message={offlinePendingMessage("this diff")} />
+      <DiffPlaceholder message={t("status.offlinePending")} />
     ) : null;
   }
   // Every backend diff command echoes the requested path back verbatim, so a
@@ -1423,7 +1427,7 @@ export function DiffContent({
   // Only a failure with nothing to show replaces the pane: react-query keeps the
   // last good diff beside `isError`, and that stays up under a notice.
   if (!data) {
-    return <DiffPlaceholder message="Could not load diff for this file" />;
+    return <DiffPlaceholder message={t("status.loadFailed")} />;
   }
 
   // Error + fetching (a reconnect's resumed read) is unsettled: no notice. A
@@ -1433,13 +1437,16 @@ export function DiffContent({
   const failed = refreshFailed({ isError, isPaused, isFetching });
   const notice = (
     <DegradedListNotice
-      noun="this diff"
+      noun={t("empty.diffNoun")}
       degraded={failed || isPaused}
-      message={detailNoticeMessage({
-        noun: "diff",
-        isError: failed,
-        stale: dataIsPlaceholder ?? false,
-      })}
+      message={
+        failed
+          ? t("status.refreshFailed")
+          : dataIsPlaceholder
+            ? t("status.offlineStale")
+            : t("status.offlineLastLoaded")
+      }
+      retryLabel={t("status.retry")}
       onRetry={failed ? onRetry : undefined}
       className="shrink-0 border-b py-1.5"
     />
@@ -1459,11 +1466,11 @@ export function DiffContent({
       );
     }
     return withNotice(
-      <DiffPlaceholder message="Binary file — no text diff available" />,
+      <DiffPlaceholder message={t("status.binary")} />,
     );
   }
   if (emptyDiff) {
-    return withNotice(<DiffPlaceholder message="No changes to show" />);
+    return withNotice(<DiffPlaceholder message={t("status.noChanges")} />);
   }
 
   // SVGs are text, but they're also images: show the rendered old/new
@@ -1492,9 +1499,9 @@ export function DiffContent({
         {data.isTruncated && !previewOn && (
           <>
             <span aria-hidden className="hidden shrink-0 @2xl/diff-pane:inline">
-              (truncated — diff too large)
+              {t("generated.truncated")}
             </span>
-            <span className="sr-only">(truncated — diff too large)</span>
+            <span className="sr-only">{t("generated.truncated")}</span>
           </>
         )}
         {/* min-h-7 pins the cluster to the language picker's h-7 trigger, so an
@@ -1544,7 +1551,7 @@ export function DiffContent({
           staging rule holds whichever view is up. */}
       {stagingSide !== undefined && data.undecodable && (
         <InfoNote className="shrink-0">
-          {UNDECODABLE_NOTE_COPY[stagingSide]}
+          {t(`undecodable.${stagingSide}`)}
         </InfoNote>
       )}
       <div className="min-h-0 flex-1 overflow-auto">

@@ -33,6 +33,7 @@ import {
   useActivePlanRun,
   usePlanStore,
 } from "./store";
+import { usePlanText } from "./use-plan-text";
 
 /**
  * The read-only planning canvas — peer of the session canvas in the agent
@@ -56,10 +57,11 @@ export function PlanView({ repoPath }: { repoPath: string }) {
 /** The plan canvas header: what's being planned, plus Back (deselect, keep the
  *  run) and Dismiss (drop it). */
 function PlanHeader({ run }: { run: PlanRun }) {
+  const tx = usePlanText();
   const setActivePlan = usePlanStore((s) => s.setActivePlan);
   const remove = usePlanStore((s) => s.remove);
   const label =
-    run.origin?.issueTitle?.trim() || run.origin?.goal?.trim() || "Plan";
+    run.origin?.issueTitle?.trim() || run.origin?.goal?.trim() || tx("Plan");
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
       <SparkleIcon className="size-4 shrink-0 text-primary" />
@@ -74,17 +76,17 @@ function PlanHeader({ run }: { run: PlanRun }) {
         size="sm"
         className="shrink-0 gap-1.5 text-muted-foreground"
         onClick={() => setActivePlan(null)}
-        title="Back to the agent surface (keeps this plan)"
+        title={tx("Back to the agent surface (keeps this plan)")}
       >
         <ArrowLeftIcon className="size-3.5" />
-        Back
+        {tx("Back")}
       </Button>
       <Button
         variant="ghost"
         size="icon-xs"
         className="shrink-0 text-muted-foreground"
-        aria-label="Dismiss this plan"
-        title="Dismiss this plan"
+        aria-label={tx("Dismiss this plan")}
+        title={tx("Dismiss this plan")}
         onClick={() => remove(run.id)}
       >
         <TrashIcon className="size-4" />
@@ -105,6 +107,7 @@ export function PlanComposer({
   repoPath: string;
   seed: PlanSeed | null;
 }) {
+  const tx = usePlanText();
   const start = usePlanStore((s) => s.start);
   const settings = useSettings();
   const [goal, setGoal] = useState(seed?.goal ?? "");
@@ -150,18 +153,19 @@ export function PlanComposer({
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto p-6 text-center">
         <div className="flex max-w-md flex-col gap-2">
           <h2 className="text-base font-medium text-balance">
-            Plan a task, grounded in your code
+            {tx("Plan a task, grounded in your code")}
           </h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            A read-only agent explores the repo and drafts an agent-ready issue
-            — problem, approach, affected files, acceptance criteria, and a
-            verify plan. Nothing is changed; review it, then file it as an
-            issue. Start several — they run side by side.
+            {tx(
+              "A read-only agent explores the repo and drafts an agent-ready issue — problem, approach, affected files, acceptance criteria, and a verify plan. Nothing is changed; review it, then file it as an issue. Start several — they run side by side.",
+            )}
           </p>
         </div>
         {planningIssue && (
           <div className="mt-4 w-full max-w-xl border border-primary/30 bg-muted/40 px-3 py-2 text-left text-xs">
-            <p className="text-muted-foreground">Planning this issue:</p>
+            <p className="text-muted-foreground">
+              {tx("Planning this issue:")}
+            </p>
             <p className="mt-0.5 font-medium">{seed?.issueTitle}</p>
           </div>
         )}
@@ -182,10 +186,12 @@ export function PlanComposer({
             }}
             placeholder={
               planningIssue
-                ? "Optional: extra guidance for the plan…"
-                : "Describe the task to plan (e.g. “add rate limiting to the API client”)…"
+                ? tx("Optional: extra guidance for the plan…")
+                : tx(
+                    "Describe the task to plan (e.g. “add rate limiting to the API client”)…",
+                  )
             }
-            aria-label="Describe a task to plan"
+            aria-label={tx("Describe a task to plan")}
             className="max-h-48 min-h-16 w-full resize-none bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
           />
           <div className="flex items-center gap-2 border-t pt-2">
@@ -208,7 +214,9 @@ export function PlanComposer({
             <ComposerOptions effort={effort} onEffort={setEffort} />
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden truncate text-[11px] text-muted-foreground sm:inline">
-                {formatBinding("mod+enter")} to plan
+                {tx("Press {{shortcut}} to plan", {
+                  shortcut: formatBinding("mod+enter"),
+                })}
               </span>
               <Button
                 size="sm"
@@ -216,7 +224,7 @@ export function PlanComposer({
                 disabled={!canPlan}
                 onClick={submit}
               >
-                Plan
+                {tx("Start planning")}
               </Button>
             </div>
           </div>
@@ -227,6 +235,7 @@ export function PlanComposer({
 }
 
 function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
+  const tx = usePlanText();
   const refine = usePlanStore((s) => s.refine);
   const remove = usePlanStore((s) => s.remove);
   const cancel = usePlanStore((s) => s.cancel);
@@ -303,9 +312,9 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
           <span className="truncate">
             {status ||
               (generating
-                ? "Exploring the repository…"
+                ? tx("Exploring the repository…")
                 : stopped
-                  ? "Stopped"
+                  ? tx("Stopped")
                   : "")}
           </span>
           {generating ? (
@@ -316,7 +325,7 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
               onClick={() => cancel(run.id)}
             >
               <StopIcon weight="fill" />
-              Stop
+              {tx("Stop")}
             </Button>
           ) : stopped ? (
             <Button
@@ -326,7 +335,7 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
               onClick={() => restart(run.id)}
             >
               <ArrowClockwiseIcon className="size-3.5" />
-              Restart
+              {tx("Restart")}
             </Button>
           ) : null}
         </div>
@@ -347,7 +356,7 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
               <AgentNarration text={text} baseDir={repoPath} />
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">Starting…</p>
+            <p className="text-xs text-muted-foreground">{tx("Starting…")}</p>
           )}
         </div>
         {!generating && !locked && questions.length > 0 && (
@@ -366,9 +375,12 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
             <div className="flex items-start gap-2 border-b bg-warning/10 px-3 py-2 text-[11px] text-warning">
               <WarningIcon className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                {draft.unverified.length} cited path
-                {draft.unverified.length === 1 ? "" : "s"} couldn't be matched
-                to a real file — double-check before filing:{" "}
+                {tx(
+                  draft.unverified.length === 1
+                    ? "The cited path couldn't be matched to a real file — double-check before filing:"
+                    : "{{number}} cited paths couldn't be matched to real files — double-check before filing:",
+                  { number: draft.unverified.length },
+                )}{" "}
                 <span className="font-mono">{draft.unverified.join(", ")}</span>
               </span>
             </div>
@@ -377,9 +389,9 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
             <div className="flex items-center gap-2 px-3 py-2.5">
               <span className="min-w-0 text-[11px] text-muted-foreground">
                 {keptImpl
-                  ? "Implemented and kept."
-                  : "Being implemented by a session."}{" "}
-                Read-only.
+                  ? tx("Implemented and kept.")
+                  : tx("Being implemented by a session.")}{" "}
+                {tx("Read-only.")}
               </span>
               {draft && (
                 <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -388,10 +400,10 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
                     size="sm"
                     onClick={() => setLocalOpen(true)}
                   >
-                    Create local issue
+                    {tx("Create local issue")}
                   </Button>
                   <Button size="sm" onClick={goToSession}>
-                    View session
+                    {tx("View session")}
                   </Button>
                 </div>
               )}
@@ -399,12 +411,12 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
           ) : (
             <div className="flex items-center gap-2 px-3 py-2.5">
               <Button variant="outline" size="sm" onClick={replan}>
-                Re-plan
+                {tx("Re-plan")}
               </Button>
               {costUsd != null && (
                 <span
                   className="text-[11px] text-muted-foreground tabular-nums"
-                  title="Estimated cost of this planning run"
+                  title={tx("Estimated cost of this planning run")}
                 >
                   {formatUsd(costUsd)}
                 </span>
@@ -416,11 +428,13 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
                     size="sm"
                     onClick={() => setLocalOpen(true)}
                   >
-                    Create local issue
+                    {tx("Create local issue")}
                   </Button>
                   {ghReady && (
                     <Button variant="outline" size="sm" onClick={createGithub}>
-                      Create {remoteLabel} issue
+                      {tx("Create {{provider}} issue", {
+                        provider: remoteLabel,
+                      })}
                     </Button>
                   )}
                   <ImplementPlanButton run={run} />
@@ -456,6 +470,7 @@ function PlanResult({ run, repoPath }: { run: PlanRun; repoPath: string }) {
  * Styled to match the session (Delegate) composer.
  */
 function PlanFollowUp({ run }: { run: PlanRun }) {
+  const tx = usePlanText();
   const sendFollowUp = usePlanStore((s) => s.sendFollowUp);
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -490,13 +505,13 @@ function PlanFollowUp({ run }: { run: PlanRun }) {
         }}
         rows={1}
         disabled={run.generating}
-        placeholder="Refine the plan, or ask for a change…"
-        aria-label="Refine the plan"
+        placeholder={tx("Refine the plan, or ask for a change…")}
+        aria-label={tx("Refine the plan")}
         className="max-h-32 min-h-9 w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-60"
       />
       <div className="flex items-center gap-2 border-t pt-2">
         <span className="hidden truncate text-[11px] text-muted-foreground sm:inline">
-          ↵ send · ⇧↵ newline
+          {tx("↵ send · ⇧↵ newline")}
         </span>
         <Button
           size="sm"
@@ -504,7 +519,7 @@ function PlanFollowUp({ run }: { run: PlanRun }) {
           disabled={!text.trim() || run.generating}
           onClick={submit}
         >
-          Send
+          {tx("Send")}
         </Button>
       </div>
     </div>

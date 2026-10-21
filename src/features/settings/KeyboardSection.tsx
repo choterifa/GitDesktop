@@ -1,6 +1,7 @@
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { useSelector } from "@tanstack/react-store";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { withForm } from "@/lib/form";
@@ -14,6 +15,8 @@ import {
 import { dispatchAction, useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import {
   ACTIONS,
+  actionCategoryKey,
+  actionLabelKey,
   type ActionDef,
   CATEGORY_ORDER,
 } from "@/lib/hotkeys/registry";
@@ -56,27 +59,27 @@ function isBindableCombo(binding: string): boolean {
  *  true only of character keys, which is all typeahead consumes; Space earns a
  *  longer line, being the one bindable key whose native job is activating the
  *  focused control, so a live action takes that keypress instead. */
-function consequenceNote(binding: string): string {
+function consequenceNote(binding: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   const zones = isTypeaheadKey(binding)
-    ? "while you're typing or in a menu or picker"
-    : "while you're typing";
-  const quiet = `${formatBinding(binding)} stays quiet ${zones}, and fires anywhere else`;
+    ? t("keyboard.typingMenuPicker")
+    : t("keyboard.typing");
   return bindingKey(binding) === "space"
-    ? `${quiet} — including on a focused button, where it replaces the button's own Space press.`
-    : `${quiet}.`;
+    ? t("keyboard.spaceConsequence", { binding: formatBinding(binding), zones })
+    : t("keyboard.keyConsequence", { binding: formatBinding(binding), zones });
 }
 
 /** Why a refused key can't stand alone. The two sets collide with different
  *  things, so each names what the bare key would have taken over. */
-function refusalNote(binding: string): string {
+function refusalNote(binding: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   return ACTIVATION_KEYS.has(bindingKey(binding))
-    ? `Enter activates the focused control, so this shortcut needs ${formatBinding("mod")} or ${formatBinding("alt")} added.`
-    : `That key scrolls and navigates on its own, so this shortcut needs ${formatBinding("mod")} or ${formatBinding("alt")} added.`;
+    ? t("keyboard.refuseActivationKey", { modifier: formatBinding("mod"), alt: formatBinding("alt") })
+    : t("keyboard.refuseNavigationKey", { modifier: formatBinding("mod"), alt: formatBinding("alt") });
 }
 
 export const KeyboardSection = withForm({
   ...settingsFormOpts,
   render: function KeyboardSectionRender({ form }) {
+    const { t } = useTranslation("settings");
     const overrides = useSelector(form.store, (s) => s.values.hotkeys);
     const [recordingId, setRecordingId] = useState<string | null>(null);
     const [note, setNote] = useState<{
@@ -129,7 +132,7 @@ export const KeyboardSection = withForm({
           if (action.id !== id && effective(action.id) === binding) {
             if (action.defaultBinding === null) delete next[action.id];
             else next[action.id] = null;
-            stolenFrom = action.label;
+            stolenFrom = t(actionLabelKey(action.id));
           }
         }
       }
@@ -140,7 +143,7 @@ export const KeyboardSection = withForm({
       const sig = JSON.stringify(next);
       const stealNote =
         stolenFrom && binding
-          ? `${formatBinding(binding)} was taken from "${stolenFrom}", which is now unbound.`
+          ? t("keyboard.stolenNote", { binding: formatBinding(binding), action: stolenFrom })
           : null;
       setNote(stealNote ? { text: stealNote, sig } : null);
       return { stole: stealNote !== null, sig };
@@ -170,7 +173,7 @@ export const KeyboardSection = withForm({
       const binding = eventToBinding(e);
       if (!binding) return; // bare modifier — keep waiting
       if (!isBindableCombo(binding)) {
-        setNote({ text: refusalNote(binding), sig: draftSig });
+        setNote({ text: refusalNote(binding, t), sig: draftSig });
         return;
       }
       // The assignment always stands; a modifier-less binding only earns a note
@@ -178,7 +181,7 @@ export const KeyboardSection = withForm({
       // are exempt: the quiet zones named by the note don't apply to them.)
       const { stole, sig } = setBinding(id, binding);
       if (!stole && !hasModifier(binding)) {
-        setNote({ text: consequenceNote(binding), sig });
+        setNote({ text: consequenceNote(binding, t), sig });
       }
       setRecordingId(null);
     });
@@ -205,10 +208,13 @@ export const KeyboardSection = withForm({
      *  the Unstage/Undo labels). */
     function matchesQuery(action: ActionDef): boolean {
       if (query === "") return true;
-      if (matchesActionText(tokens, action.label, action.category)) return true;
+      if (
+        matchesActionText(tokens, action.label, action.category) ||
+        matchesActionText(tokens, t(actionLabelKey(action.id)), t(actionCategoryKey(action.category)))
+      ) return true;
       const binding = effective(action.id);
       if (binding === null)
-        return query.length >= 3 && "unbound".startsWith(query);
+        return query.length >= 3 && t("keyboard.unbound").toLowerCase().startsWith(query);
       return (
         binding.includes(query) ||
         formatBinding(binding).toLowerCase().includes(query)
@@ -238,11 +244,9 @@ export const KeyboardSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">Keyboard</h2>
+          <h2 className="text-sm font-medium">{t("keyboard.title")}</h2>
           <p className="text-xs text-muted-foreground">
-            Click a shortcut to record a new one — Esc cancels, Backspace
-            unbinds. Unbound actions stay available in the command palette.
-            Changes apply when you save.
+            {t("keyboard.description")}
           </p>
           {visibleNote && (
             <p className="mt-1 text-xs text-warning">{visibleNote}</p>
@@ -250,9 +254,12 @@ export const KeyboardSection = withForm({
           {/* Announce recording state + notes to screen readers. */}
           <span role="status" aria-live="assertive" className="sr-only">
             {recordingId
-              ? `Recording shortcut for ${
-                  ACTIONS.find((a) => a.id === recordingId)?.label ?? "action"
-                }. Press the new combination, or Escape to cancel.`
+              ? t("keyboard.recordingAnnouncement", {
+                  action: (() => {
+                    const action = ACTIONS.find((a) => a.id === recordingId);
+                    return action ? t(actionLabelKey(action.id)) : t("keyboard.action");
+                  })(),
+                })
               : (visibleNote ?? "")}
           </span>
         </div>
@@ -264,8 +271,8 @@ export const KeyboardSection = withForm({
             // Recording captures every keydown window-wide, so without this
             // the first thing typed here would be read as a binding attempt.
             onFocus={() => setRecordingId(null)}
-            placeholder="Filter shortcuts"
-            aria-label="Filter shortcuts"
+            placeholder={t("keyboard.filter")}
+            aria-label={t("keyboard.filter")}
             className="h-7 flex-1"
             autoComplete="off"
           />
@@ -274,14 +281,14 @@ export const KeyboardSection = withForm({
           <span role="status" aria-live="polite" className="sr-only">
             {query === ""
               ? ""
-              : `${shownCount} ${shownCount === 1 ? "shortcut" : "shortcuts"} shown`}
+              : t("keyboard.shown", { count: shownCount })}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => dispatchAction("show-shortcuts")}
           >
-            View all shortcuts
+            {t("keyboard.viewAll")}
           </Button>
           <Button
             variant="outline"
@@ -289,17 +296,17 @@ export const KeyboardSection = withForm({
             disabled={overrideCount === 0}
             onClick={() => form.setFieldValue("hotkeys", {})}
           >
-            Reset all to defaults
+            {t("keyboard.resetAll")}
           </Button>
         </div>
         {groups.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No shortcuts match — try an action name, category, or key.
+            {t("keyboard.noMatches")}
           </p>
         ) : null}
         {groups.map(({ category, actions }) => (
           <div key={category}>
-            <h3 className="mb-1 text-xs font-semibold">{category}</h3>
+            <h3 className="mb-1 text-xs font-semibold">{t(actionCategoryKey(category))}</h3>
             <div className="divide-y border">
               {actions.map((action) => {
                 const binding = effective(action.id);
@@ -311,16 +318,17 @@ export const KeyboardSection = withForm({
                     className="flex items-center gap-2 px-2.5 py-1.5"
                   >
                     <span className="min-w-0 flex-1 truncate text-xs">
-                      {action.label}
+                      {t(actionLabelKey(action.id))}
                     </span>
                     <button
                       type="button"
                       aria-label={
                         recording
-                          ? `Recording shortcut for ${action.label}. Press the new combination, or Escape to cancel.`
-                          : `Shortcut for ${action.label}: ${
-                              binding ? formatBinding(binding) : "unbound"
-                            }. Click to change.`
+                          ? t("keyboard.recordingRow", { action: t(actionLabelKey(action.id)) })
+                          : t("keyboard.shortcutRow", {
+                              action: t(actionLabelKey(action.id)),
+                              binding: binding ? formatBinding(binding) : t("keyboard.unbound"),
+                            })
                       }
                       onClick={() =>
                         setRecordingId(recording ? null : action.id)
@@ -333,18 +341,18 @@ export const KeyboardSection = withForm({
                             ? "bg-muted text-foreground hover:border-ring"
                             : "text-muted-foreground hover:border-ring",
                       )}
-                      title="Click, then press the new shortcut"
+                      title={t("keyboard.recordHint")}
                     >
                       {recording
-                        ? "Press keys…"
+                        ? t("keyboard.pressKeys")
                         : binding
                           ? formatBinding(binding)
-                          : "Unbound"}
+                          : t("keyboard.unbound")}
                     </button>
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      aria-label={`Reset ${action.label} to default`}
+                      aria-label={t("keyboard.resetAction", { action: t(actionLabelKey(action.id)) })}
                       className={cn("shrink-0", !overridden && "invisible")}
                       onClick={() => {
                         const next = { ...overrides };

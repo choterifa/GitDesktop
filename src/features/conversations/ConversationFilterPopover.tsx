@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/combobox";
 import { clipTitle } from "@/lib/clip-title";
 import type { TeamRef } from "@/lib/git/types";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import {
   ARIA_DISABLED_CLASS,
@@ -41,13 +42,6 @@ type FilterGroup = {
   value: string;
   kind: FilterItem["kind"];
   items: FilterItem[];
-};
-
-/** The free-entry row's copy: the server filters by any name, not only the ones
- *  this page happened to load. */
-const FREE_ENTRY_LABEL: Record<FilterItem["kind"], (q: string) => string> = {
-  author: (q) => `Filter by author "${q}"`,
-  label: (q) => `Filter by label "${q}"`,
 };
 
 /** One static checkbox row in the popover's Mine / My review groups. */
@@ -141,6 +135,7 @@ export function ConversationFilterPopover({
    *  toggle, which reads as a filter that forgets what it was told. */
   disabledReason?: string | null;
 }) {
+  const tx = useCommonText();
   const authorReasonId = useId();
   const capReasonId = useId();
   const [open, setOpen] = useState(false);
@@ -222,8 +217,8 @@ export function ConversationFilterPopover({
           size="icon-sm"
           aria-label={
             activeFilterCount > 0
-              ? `Filters (${activeFilterCount} active)`
-              : "Filters"
+              ? tx("Filters ({{count}} active)", { count: activeFilterCount })
+              : tx("Filters")
           }
           disabled={!!disabledReason}
           reason={disabledReason}
@@ -359,16 +354,18 @@ export function ConversationFilterPopover({
         <ComboboxInput
           className="shrink-0"
           showTrigger={false}
-          placeholder="Filter authors and labels…"
+          placeholder={tx("Filter authors and labels…")}
         />
         {groups.length === 0 ? (
           // Rendered via Combobox.Status so it lands in a polite live region.
           <ComboboxPrimitive.Status className="px-3 py-2 text-xs text-muted-foreground">
-            No authors or labels to filter by — type a name to filter anyway.
+            {tx(
+              "No authors or labels to filter by — type a name to filter anyway.",
+            )}
           </ComboboxPrimitive.Status>
         ) : (
           <>
-            <ComboboxEmpty>No matches</ComboboxEmpty>
+            <ComboboxEmpty>{tx("No matches")}</ComboboxEmpty>
             {/* `max-h-none` drops the vendored available-height budget (it counts
                 only the input) and hands sizing to the flex column above; the
                 list keeps its own overflow-y-auto, so it still scrolls. */}
@@ -390,7 +387,9 @@ export function ConversationFilterPopover({
                 const heldReasonId = blockedAxis ? authorReasonId : groupCapId;
                 return (
                   <ComboboxGroup key={group.value} items={group.items}>
-                    <ComboboxLabel>{group.value}</ComboboxLabel>
+                    <ComboboxLabel>
+                      {tx(group.kind === "author" ? "Author" : "Label")}
+                    </ComboboxLabel>
                     {blockedAxis && (
                       <p
                         id={authorReasonId}
@@ -660,6 +659,7 @@ function TeamsRow({
   teams: TeamChooser;
   inheritedReason: string | null;
 }) {
+  const tx = useCommonText();
   const [expanded, setExpanded] = useState(false);
   const reason = teams.disabledReason ?? inheritedReason;
   const { blockedReason, reasonId, wrapperTitle, describedBy, nativeProps } =
@@ -699,7 +699,9 @@ function TeamsRow({
   return (
     <div className="px-3 py-1.5">
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-xs">My teams</span>
+        <span className="min-w-0 flex-1 truncate text-xs">
+          {tx("My teams")}
+        </span>
         <span title={wrapperTitle}>
           <button
             ref={chooseRef}
@@ -715,7 +717,7 @@ function TeamsRow({
             )}
             {...nativeProps}
           >
-            {expanded ? "Done" : "Choose…"}
+            {expanded ? tx("Done") : tx("Choose…")}
           </button>
         </span>
         {blockedReason && (
@@ -743,12 +745,12 @@ function TeamsRow({
               </span>
               {teams.isStale(slug) && (
                 <span className="shrink-0 text-muted-foreground">
-                  (no longer your team)
+                  {tx("(no longer your team)")}
                 </span>
               )}
               <button
                 type="button"
-                aria-label={`Remove ${teams.name(slug)}`}
+                aria-label={tx("Remove {{name}}", { name: teams.name(slug) })}
                 data-tabstop="filter"
                 onClick={() => teams.onToggle(slug, false)}
                 onKeyDown={(e) => {
@@ -772,7 +774,7 @@ function TeamsRow({
           if (teams.pending) {
             return (
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Loading your teams…
+                {tx("Loading your teams…")}
               </p>
             );
           }
@@ -783,7 +785,7 @@ function TeamsRow({
             if (teams.note) return null;
             return (
               <p className="mt-1 text-[11px] text-muted-foreground">
-                No teams to choose from.
+                {tx("No teams to choose from.")}
               </p>
             );
           }
@@ -876,7 +878,15 @@ function FilterRow({
   disabled?: boolean;
   describedBy?: string;
 }) {
-  const label = item.free ? FREE_ENTRY_LABEL[item.kind](item.name) : item.name;
+  const tx = useCommonText();
+  const label = item.free
+    ? tx(
+        item.kind === "author"
+          ? 'Filter by author "{{name}}"'
+          : 'Filter by label "{{name}}"',
+        { name: item.name },
+      )
+    : item.name;
   return (
     <ComboboxPrimitive.Item
       value={item}

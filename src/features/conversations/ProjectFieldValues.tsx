@@ -14,14 +14,13 @@ import type {
   ProjectFieldValue,
   RemoteLens,
 } from "@/lib/git/types";
+import { i18n } from "@/lib/i18n";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useRemoteSlug } from "@/lib/repo-lens/queries";
 import { parseableDate } from "@/lib/time";
 import { useRetryFocusRescue } from "./ConversationListPanel";
 import { ProjectFieldsEditor } from "./ProjectFieldsEditor";
 import { projectScopeMissing } from "./ProjectsPopover";
-import { offlinePendingMessage } from "./remote-section-state";
-
-const FIELD_LABEL = "Project fields";
 
 /** GitHub select-option color NAMES → a dot hex. Data colours in a rail that has
  *  to stay quiet, so they sit well under the semantic state tokens' chroma; an
@@ -59,7 +58,7 @@ function parseFieldDate(date: string): Date | null {
 export function formatFieldDate(date: string): string {
   const parsed = parseFieldDate(date);
   if (parsed === null) return date;
-  return parsed.toLocaleDateString(undefined, {
+  return parsed.toLocaleDateString(i18n.language, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -72,7 +71,7 @@ function shortDay(date: Date, withYear: boolean): string {
     day: "numeric",
   };
   if (withYear) options.year = "numeric";
-  return date.toLocaleDateString(undefined, options);
+  return date.toLocaleDateString(i18n.language, options);
 }
 
 /** An iteration's span, start through its last day. `""` when the start can't be
@@ -143,7 +142,7 @@ function listValueNode(names: string[], totalCount: number): ReactNode {
       {more > 0 && (
         <span className="shrink-0 tabular-nums text-muted-foreground">
           {shown.length > 0 && <span className="sr-only">, </span>}+{more}
-          <span className="sr-only"> more</span>
+          <span className="sr-only"> {i18n.t("more", { ns: "common" })}</span>
         </span>
       )}
     </span>
@@ -228,7 +227,9 @@ export function fieldValueNode(
       // locale-formatted dates on the same line. The fraction cap is explicit:
       // the default rounds to 3 digits, rendering 0.0001 as 0.
       return Number.isFinite(value.number)
-        ? value.number.toLocaleString(undefined, { maximumFractionDigits: 20 })
+        ? value.number.toLocaleString(i18n.language, {
+            maximumFractionDigits: 20,
+          })
         : null;
     case "date":
       return value.date === "" ? null : formatFieldDate(value.date);
@@ -355,6 +356,8 @@ export function ProjectFieldValues({
    *  mounts, which is only where the item is on a board. */
   paletteEnabled?: boolean;
 }) {
+  const tx = useCommonText();
+  const fieldLabel = tx("Project fields");
   const host = useActiveGhHost();
   const scopes = useGhScopes(host);
   const canRead = enabled && !projectScopeMissing(scopes.data);
@@ -415,7 +418,10 @@ export function ProjectFieldValues({
     boardsKnown &&
     values.isPaused &&
     (values.data === undefined || values.error !== null);
-  const offlineMessage = offlinePendingMessage(FIELD_LABEL.toLowerCase());
+  const offlineMessage = tx(
+    "You're offline — {{subject}} will load once you're back online.",
+    { subject: fieldLabel.toLowerCase() },
+  );
   // Still gated: a disabled query keeps whatever error it last cached, so an item
   // whose boards — or whose scope — have since gone stays silent.
   const errored =
@@ -462,15 +468,17 @@ export function ProjectFieldValues({
       case failedShown && values.error !== null:
         return (
           <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
-            {presentError(values.error).summary}
+            {tx(presentError(values.error).summary)}
             <button
               ref={retryRef}
               type="button"
-              aria-label={`Retry loading ${FIELD_LABEL.toLowerCase()}`}
+              aria-label={tx("Retry loading {{noun}}", {
+                noun: fieldLabel.toLowerCase(),
+              })}
               className="cursor-pointer underline hover:text-foreground"
               onClick={() => values.refetch()}
             >
-              Retry
+              {tx("Retry")}
             </button>
           </span>
         );
@@ -487,7 +495,7 @@ export function ProjectFieldValues({
   const truncatedNote =
     values.data?.truncated === true ? (
       <p className="text-[11px] text-muted-foreground">
-        Some of this item's projects aren't shown.
+        {tx("Some of this item's projects aren't shown.")}
       </p>
     ) : null;
 
@@ -511,13 +519,13 @@ export function ProjectFieldValues({
       case boards.length > 0:
         return undefined;
       case loading:
-        return "Loading project fields…";
+        return tx("Loading project fields…");
       case parked:
         return offlineMessage;
       // Reachable with no error and nothing to retry — a values read that settled
       // empty against live memberships lands here, so this names no control.
       default:
-        return "Project fields haven't loaded for this item's boards yet.";
+        return tx("Project fields haven't loaded for this item's boards yet.");
     }
   })();
   const heading = showEditor ? (
@@ -544,7 +552,7 @@ export function ProjectFieldValues({
       <div ref={hostRef} tabIndex={-1} className="space-y-1.5 outline-none">
         {heading ?? (
           <p className="text-xs font-medium text-muted-foreground">
-            {FIELD_LABEL}
+            {fieldLabel}
           </p>
         )}
         {content}
@@ -553,13 +561,13 @@ export function ProjectFieldValues({
     );
   return (
     <>
-      {heading ?? <MetaFieldLabel>{FIELD_LABEL}</MetaFieldLabel>}
+      {heading ?? <MetaFieldLabel>{fieldLabel}</MetaFieldLabel>}
       {/* The cell takes no ref and swaps its children for the empty placeholder,
           so the host every state shares wraps the whole cell: a block grid item,
           which lays out as the cell alone did. */}
       <div ref={hostRef} tabIndex={-1} className="min-w-0 outline-none">
         <MetaValueCell
-          label={FIELD_LABEL}
+          label={fieldLabel}
           empty={content === null && truncatedNote === null}
           busy={lines.length === 0 && skeleton}
         >

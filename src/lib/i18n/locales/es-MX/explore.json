@@ -1,0 +1,76 @@
+{
+  "back": "Volver",
+  "title": "Explorar repositorios",
+  "searchPlaceholder": "Buscar repositorios",
+  "searchLabel": "Buscar repositorios",
+  "searchResults": "Resultados de búsqueda",
+  "loading": "Cargando…",
+  "loadMore": "Cargar más",
+  "bitbucketSearchHint": "La búsqueda incluye tus espacios de trabajo de Bitbucket.",
+  "searchCap": "GitHub devuelve como máximo 1,000 resultados. Refina la búsqueda.",
+  "sort": {
+    "label": "Ordenar resultados",
+    "best": "Mejor coincidencia",
+    "stars": "Más estrellas",
+    "updated": "Actualizados recientemente"
+  },
+  "tabs": {
+    "yours": "Tus repositorios",
+    "popular": "Populares"
+  },
+  "empty": {
+    "yours": "Aún no hay repositorios.",
+    "search": "No hay repositorios que coincidan."
+  },
+  "errors": {
+    "bitbucketTitle": "Conecta tu cuenta de Bitbucket",
+    "bitbucketBody": "Agrega un token de API de Atlassian en Configuración → Cuentas para buscar en tus espacios de trabajo de Bitbucket.",
+    "openAccounts": "Abrir Configuración → Cuentas",
+    "cliMissingTitle": "No se encontró {{cli}}",
+    "cliMissingBody": "Instala {{cli}} y ejecuta {{authCmd}} para buscar repositorios.",
+    "loadTitle": "No se pudieron cargar los repositorios"
+  },
+  "detail": {
+    "selectRepository": "Selecciona un repositorio",
+    "selectRepositoryDescription": "Elige un repositorio de la lista para ver su README y clonarlo, bifurcarlo o agregarle una estrella.",
+    "updated": "actualizado",
+    "viewOn": "Ver en {{provider}}",
+    "noReadme": "No hay README."
+  },
+  "repository": {
+    "private": "Privado",
+    "fork": "Bifurcación",
+    "privateFork": "Bifurcación privada",
+    "privateRepository": "Repositorio privado",
+    "archived": "Archivado"
+  },
+  "fork": {
+    "action": "Bifurcar",
+    "pending": "Bifurcando…",
+    "confirmTitle": "¿Bifurcar {{name}}?",
+    "confirmBody": "Se creará una bifurcación en {{provider}} en segundo plano. Podrás clonarla cuando esté lista.",
+    "success": "Bifurcación creada en {{name}}",
+    "notReady": "La bifurcación podría tardar un momento en estar lista para clonarse.",
+    "clone": "Clonar la bifurcación"
+  },
+  "stars": {
+    "one": "{{count}} estrella",
+    "many": "{{count}} estrellas",
+    "checking": "Comprobando el estado de la estrella…",
+    "remove": "Quitar estrella",
+    "add": "Agregar estrella"
+  },
+  "clone": {
+    "submit": "Clonar",
+    "title": "Clonar {{name}}",
+    "description": "Elige una carpeta de destino. Se clonará mediante HTTPS o SSH con las credenciales de Git del sistema.",
+    "localPath": "Ruta local",
+    "choosePathReason": "Elige una ruta local para clonar",
+    "pathPlaceholder": "Elige una carpeta de destino…",
+    "choose": "Elegir…",
+    "destinationLabel": "Se clonará en",
+    "submodules": "Clonar submódulos",
+    "submodulesDescription": "Inicializa todos los submódulos, incluidos los anidados, después de clonar."
+  },
+  "cancel": "Cancelar"
+}

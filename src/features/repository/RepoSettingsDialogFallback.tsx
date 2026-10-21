@@ -1,4 +1,5 @@
 import { useLayoutEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { DIALOG_SCROLL_X_HIDDEN } from "@/components/dialog-scroll";
 import {
   Dialog,
@@ -29,6 +30,7 @@ export function RepoSettingsDialogFallback({
   repoPath: string;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   // This frame is a dialog-open period like any other, so it carries the marker
   // too: a description generation settling here would otherwise offer a "View"
   // deep link that the open dialog's own host drops.
@@ -53,7 +55,7 @@ export function RepoSettingsDialogFallback({
         onKeyDown={generateChord.onKeyDown}
       >
         <DialogHeader>
-          <DialogTitle>Repository settings</DialogTitle>
+          <DialogTitle>{t("dialogs.settings.loadingTitle")}</DialogTitle>
           <Skeleton className="h-4 w-2/3" />
         </DialogHeader>
         <div className="flex min-h-0 min-w-0 flex-1 gap-4">
@@ -73,7 +75,7 @@ export function RepoSettingsDialogFallback({
             {/* aria-busy alone has no text; role="status" gives the busy
                 region words for readers that announce it. */}
             <span role="status" className="sr-only">
-              Loading repository settings…
+              {t("dialogs.settings.loading")}
             </span>
             {/* The General section's own loading shape, so fallback → dialog →
                 section reads as one progressive fill, not three layouts. */}

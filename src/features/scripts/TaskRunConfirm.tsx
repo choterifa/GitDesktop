@@ -30,19 +30,11 @@ import { INTERPRETERS, type TaskDef } from "@/lib/scripts/types";
 import { useTaskRunStore } from "@/lib/stores/taskRun";
 import { useUiStore } from "@/lib/stores/ui";
 import { useRetained } from "@/lib/use-retained";
+import { useScriptsText } from "./use-scripts-text";
 
 const INTERPRETER_LABELS: Record<string, string> = Object.fromEntries(
   INTERPRETERS.map((i) => [i.id, i.label]),
 );
-
-/** Why the resolved script is missing. Only a relative path depends on the open
- *  repository, so only those cases name it. */
-const MISSING_SCRIPT_COPY: Record<MissingScriptCase, string> = {
-  absolute: "No file at this path.",
-  "repo-relative": "No such file in this repository.",
-  "global-relative":
-    "This path is relative, so it resolves against the open repository, which has no such file.",
-};
 
 /**
  * The run dialog, driven by the task-run store's `pending`. Hoisted at the repo
@@ -56,6 +48,7 @@ const MISSING_SCRIPT_COPY: Record<MissingScriptCase, string> = {
  * be repo-relative, so the same task points at a different file in every repo.
  */
 export function TaskRunConfirm() {
+  const tx = useScriptsText();
   const repoPath = useUiStore((s) => s.repoPath);
   const pending = useTaskRunStore((s) => s.pending);
   const activeRun = useTaskRunStore((s) => s.activeRun);
@@ -86,7 +79,7 @@ export function TaskRunConfirm() {
   const firstRun = shownPending?.firstRun === true;
   const task = shownPending?.task ?? null;
   const interpreter = task
-    ? (INTERPRETER_LABELS[task.interpreter] ?? task.interpreter)
+    ? tx(INTERPRETER_LABELS[task.interpreter] ?? task.interpreter)
     : "";
   // Resolution rides the LIVE pending, not the retained one: that way the query
   // goes dormant at close and re-enables at each open, refetching once its
@@ -115,7 +108,17 @@ export function TaskRunConfirm() {
       : null;
   const detail =
     task?.description ||
-    `Runs the ${interpreter} script in the repository's folder. Make sure you trust what it does.`;
+    tx(
+      "Runs the {{interpreter}} script in the repository's folder. Make sure you trust what it does.",
+      { interpreter },
+    );
+  const missingScriptCopy: Record<MissingScriptCase, string> = {
+    absolute: tx("No file at this path."),
+    "repo-relative": tx("No such file in this repository."),
+    "global-relative": tx(
+      "This path is relative, so it resolves against the open repository, which has no such file.",
+    ),
+  };
 
   // The Run button and the args field's Enter share this: which control the user
   // reaches for must not decide whether the confirmation is recorded.
@@ -163,18 +166,25 @@ export function TaskRunConfirm() {
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {replacing ? "A task is already running" : `Run “${task?.name}”?`}
+            {replacing
+              ? tx("A task is already running")
+              : tx("Run “{{name}}”?", { name: task?.name })}
           </DialogTitle>
           <DialogDescription>
             {replacing ? (
               <>
-                Stops “{activeRun?.task.name}” — still running — and runs “
-                {task?.name}” instead.
+                {tx(
+                  "Stops “{{current}}” — still running — and runs “{{next}}” instead.",
+                  {
+                    current: activeRun?.task.name,
+                    next: task?.name,
+                  },
+                )}
               </>
             ) : (
               <>
                 {firstRun
-                  ? "This is the task's first run in this repository, so it confirms once here. Later runs start straight away. "
+                  ? `${tx("This is the task's first run in this repository, so it confirms once here. Later runs start straight away.")} `
                   : ""}
                 {detail}
               </>
@@ -203,14 +213,14 @@ export function TaskRunConfirm() {
                 />
                 <span className="min-w-0">
                   {
-                    MISSING_SCRIPT_COPY[
+                    missingScriptCopy[
                       missingScriptCase(
                         taskScope(task) === TASK_SCOPE_GLOBAL,
                         task.source.path,
                       )
                     ]
                   }{" "}
-                  The run will stop with “script file not found”.
+                  {tx("The run will stop with “script file not found”.")}
                 </span>
               </p>
             ) : null}
@@ -218,7 +228,7 @@ export function TaskRunConfirm() {
         ) : null}
 
         <div className="space-y-1.5">
-          <Label htmlFor="run-args">Arguments</Label>
+          <Label htmlFor="run-args">{tx("Arguments")}</Label>
           <Input
             id="run-args"
             autoFocus
@@ -231,7 +241,7 @@ export function TaskRunConfirm() {
                 run();
               }
             }}
-            placeholder="none"
+            placeholder={tx("none")}
             autoComplete="off"
             spellCheck={false}
           />
@@ -254,10 +264,10 @@ export function TaskRunConfirm() {
 
         <DialogFooter>
           <Button variant="outline" onClick={cancelPending}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <Button variant={replacing ? "destructive" : "default"} onClick={run}>
-            {replacing ? "Stop & run" : "Run"}
+            {replacing ? tx("Stop & run") : tx("Run")}
           </Button>
         </DialogFooter>
       </DialogContent>

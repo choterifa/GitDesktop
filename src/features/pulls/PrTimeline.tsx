@@ -34,6 +34,7 @@ import type { ForgeTimelineEvent } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { parseableDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /** A merged timeline entry: the keys the feed sorts by, plus EITHER a ready
  *  `node` (reviews, comments, events — the building view owns their wiring) OR a
@@ -175,76 +176,89 @@ const CLOSE_REASON_PRESENTATION: Partial<Record<string, EventPresentation>> = {
  *  word — never color-alone. Returns the pieces so the row can render actor +
  *  time consistently. `label` is the accessible verb; `extra` is optional
  *  trailing content (e.g. a label color dot). */
-function eventPresentation(event: ForgeTimelineEvent): EventPresentation {
+function eventPresentation(
+  event: ForgeTimelineEvent,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): EventPresentation {
   switch (event.kind) {
     case "forcePushed":
       return {
         Icon: ArrowsClockwiseIcon,
-        label: `force-pushed ${(event.before || "?").slice(0, 7)}…${(event.after || "?").slice(0, 7)}`,
+        label: tx("force-pushed {{before}}…{{after}}", {
+          before: (event.before || "?").slice(0, 7),
+          after: (event.after || "?").slice(0, 7),
+        }),
       };
     case "labeled":
       return {
         Icon: TagIcon,
         label: event.added
-          ? `added the ${event.label} label`
-          : `removed the ${event.label} label`,
+          ? tx("added the {{label}} label", { label: event.label })
+          : tx("removed the {{label}} label", { label: event.label }),
         colorDot: event.color,
       };
     case "reviewRequested":
       return {
         Icon: GitPullRequestIcon,
-        label: `requested a review from ${event.reviewer || "someone"}`,
+        label: tx("requested a review from {{reviewer}}", {
+          reviewer: event.reviewer || tx("someone"),
+        }),
       };
     case "readyForReview":
       return {
         Icon: GitPullRequestIcon,
-        label: "marked this ready for review",
+        label: tx("marked this ready for review"),
       };
     case "convertToDraft":
-      return { Icon: PencilSimpleIcon, label: "converted this to a draft" };
+      return { Icon: PencilSimpleIcon, label: tx("converted this to a draft") };
     case "approved":
       return {
         Icon: CheckCircleIcon,
         tone: "text-success",
-        label: "approved these changes",
+        label: tx("approved these changes"),
       };
     case "changesRequested":
       return {
         Icon: XCircleIcon,
         tone: "text-warning",
-        label: "requested changes",
+        label: tx("requested changes"),
       };
     case "unapproved":
       return {
         Icon: ArrowCounterClockwiseIcon,
-        label: "withdrew their approval",
+        label: tx("withdrew their approval"),
       };
-    case "closed":
-      return (
-        CLOSE_REASON_PRESENTATION[event.stateReason] ?? {
-          Icon: XCircleIcon,
-          tone: "text-destructive",
-          label: "closed this",
-        }
-      );
+    case "closed": {
+      const presentation = CLOSE_REASON_PRESENTATION[event.stateReason];
+      return presentation
+        ? { ...presentation, label: tx(presentation.label) }
+        : {
+            Icon: XCircleIcon,
+            tone: "text-destructive",
+            label: tx("closed this"),
+          };
+    }
     case "reopened":
       return {
         Icon: CheckCircleIcon,
         tone: "text-success",
-        label: "reopened this",
+        label: tx("reopened this"),
       };
     case "merged":
       return {
         Icon: GitMergeIcon,
         tone: "text-merged",
         label: event.commitOid
-          ? `merged this in ${event.commitOid.slice(0, 7)}`
-          : "merged this",
+          ? tx("merged this in {{oid}}", { oid: event.commitOid.slice(0, 7) })
+          : tx("merged this"),
       };
     case "renamed":
       return {
         Icon: GitBranchIcon,
-        label: `renamed this from ${event.previous} to ${event.current}`,
+        label: tx("renamed this from {{previous}} to {{current}}", {
+          previous: event.previous,
+          current: event.current,
+        }),
       };
     case "assigned": {
       // An actor assigning themselves reads as "self-assigned", matching how every
@@ -253,32 +267,38 @@ function eventPresentation(event: ForgeTimelineEvent): EventPresentation {
       if (event.added) {
         return {
           Icon: UserPlusIcon,
-          label: self ? "self-assigned this" : `assigned ${event.assignee}`,
+          label: self
+            ? tx("self-assigned this")
+            : tx("assigned {{assignee}}", { assignee: event.assignee }),
         };
       }
       return {
         Icon: UserMinusIcon,
         label: self
-          ? "removed their assignment"
-          : `unassigned ${event.assignee}`,
+          ? tx("removed their assignment")
+          : tx("unassigned {{assignee}}", { assignee: event.assignee }),
       };
     }
     case "milestoned":
       return {
         Icon: FlagIcon,
         label: event.added
-          ? `added this to the ${event.milestone} milestone`
-          : `removed this from the ${event.milestone} milestone`,
+          ? tx("added this to the {{milestone}} milestone", {
+              milestone: event.milestone,
+            })
+          : tx("removed this from the {{milestone}} milestone", {
+              milestone: event.milestone,
+            }),
       };
     case "crossReferenced":
       // A deleted or inaccessible referent comes back as number 0 — say the plain
       // thing rather than offer a chip that leads nowhere.
       if (!event.sourceNumber) {
-        return { Icon: LinkIcon, label: "mentioned this" };
+        return { Icon: LinkIcon, label: tx("mentioned this") };
       }
       return {
         Icon: LinkIcon,
-        label: "mentioned this in",
+        label: tx("mentioned this in"),
         refChip: {
           kind: event.sourceKind,
           number: event.sourceNumber,
@@ -290,12 +310,12 @@ function eventPresentation(event: ForgeTimelineEvent): EventPresentation {
       if (!event.sourceNumber) {
         return {
           Icon: event.added ? LinkIcon : LinkBreakIcon,
-          label: event.added ? "linked this" : "unlinked this",
+          label: event.added ? tx("linked this") : tx("unlinked this"),
         };
       }
       return {
         Icon: event.added ? LinkIcon : LinkBreakIcon,
-        label: event.added ? "linked" : "unlinked",
+        label: event.added ? tx("linked") : tx("unlinked"),
         refChip: {
           kind: event.sourceKind,
           number: event.sourceNumber,
@@ -306,35 +326,37 @@ function eventPresentation(event: ForgeTimelineEvent): EventPresentation {
     case "pinned":
       return {
         Icon: event.added ? PushPinIcon : PushPinSlashIcon,
-        label: event.added ? "pinned this" : "unpinned this",
+        label: event.added ? tx("pinned this") : tx("unpinned this"),
       };
     case "locked":
       if (!event.locked) {
         return {
           Icon: LockSimpleOpenIcon,
-          label: "unlocked this conversation",
+          label: tx("unlocked this conversation"),
         };
       }
       return {
         Icon: LockSimpleIcon,
         label: event.reason
-          ? `locked this conversation as ${event.reason.replaceAll("_", " ")}`
-          : "locked this conversation",
+          ? tx("locked this conversation as {{reason}}", {
+              reason: event.reason.replaceAll("_", " "),
+            })
+          : tx("locked this conversation"),
       };
     case "transferred":
       return {
         Icon: ArrowsLeftRightIcon,
         label: event.fromRepo
-          ? `transferred this from ${event.fromRepo}`
-          : "transferred this from another repository",
+          ? tx("transferred this from {{repo}}", { repo: event.fromRepo })
+          : tx("transferred this from another repository"),
       };
     case "markedAsDuplicate":
       if (!event.canonicalNumber) {
-        return { Icon: StackIcon, label: "marked this as a duplicate" };
+        return { Icon: StackIcon, label: tx("marked this as a duplicate") };
       }
       return {
         Icon: StackIcon,
-        label: "marked this as a duplicate of",
+        label: tx("marked this as a duplicate of"),
         refChip: {
           kind: event.canonicalKind,
           number: event.canonicalNumber,
@@ -411,7 +433,8 @@ export function TimelineEventRow({
    *  from a local one and rendered non-interactive. */
   selfRepo?: string;
 }) {
-  const { Icon, tone, label, colorDot, refChip } = eventPresentation(event);
+  const tx = usePullsText();
+  const { Icon, tone, label, colorDot, refChip } = eventPresentation(event, tx);
   return (
     <div className="flex items-start gap-2 text-xs">
       <RailIcon Icon={Icon} tone={tone} label={label} />
@@ -470,6 +493,7 @@ export function PushedCommitsRow({
   /** Drill into commit `id` (its oid). When absent, rows are non-interactive. */
   onSelectCommit?: (id: string) => void;
 }) {
+  const tx = usePullsText();
   const [open, setOpen] = useState(false);
   const n = commits.length;
   // The feed is sorted oldest→newest and the run preserves that order, so the
@@ -505,7 +529,10 @@ export function PushedCommitsRow({
     <div className="flex items-start gap-2 text-xs">
       <RailIcon
         Icon={GitCommitIcon}
-        label={`pushed ${n} commit${n === 1 ? "" : "s"}`}
+        label={tx(
+          n === 1 ? "pushed {{count}} commit" : "pushed {{count}} commits",
+          { count: n },
+        )}
       />
       <div className="min-w-0 flex-1 py-0.5">
         <div className="flex items-center gap-x-1.5">
@@ -520,7 +547,10 @@ export function PushedCommitsRow({
             ) : (
               <CaretRightIcon className="size-3 shrink-0" />
             )}
-            pushed {n} commit{n === 1 ? "" : "s"}
+            {tx(
+              n === 1 ? "pushed {{count}} commit" : "pushed {{count}} commits",
+              { count: n },
+            )}
           </button>
           {headerDate && parseableDate(headerDate) && (
             <span className="shrink-0 text-muted-foreground/80">
@@ -540,7 +570,7 @@ export function PushedCommitsRow({
                     type="button"
                     data-row={c.id}
                     onClick={() => onSelectCommit(c.id)}
-                    title={`View commit ${c.shortSha}`}
+                    title={tx("View commit {{sha}}", { sha: c.shortSha })}
                     className="group flex w-full cursor-pointer items-baseline gap-2 text-left"
                   >
                     <span
@@ -590,11 +620,17 @@ export function PushedCommitsRow({
 /** The subtle stale marker rendered right after an out-of-date approval /
  *  changes-requested review: warning-toned, icon + word (never color-alone). */
 export function StaleReviewMarker({ commitsSince }: { commitsSince: number }) {
+  const tx = usePullsText();
   return (
     <div className="flex items-center gap-1 pl-7 text-[11px] text-warning">
       <WarningIcon className="size-3 shrink-0" aria-hidden />
       <span>
-        stale · {commitsSince} commit{commitsSince === 1 ? "" : "s"} since
+        {tx(
+          commitsSince === 1
+            ? "stale · {{count}} commit since"
+            : "stale · {{count}} commits since",
+          { count: commitsSince },
+        )}
       </span>
     </div>
   );

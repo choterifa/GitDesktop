@@ -1,0 +1,15 @@
+{
+  "title": "Terminal",
+  "container": "· contenedor",
+  "worktree": "· árbol de trabajo",
+  "publishedPorts": "Puertos publicados",
+  "restartReconnect": "Reiniciar o reconectar la consola",
+  "restartShell": "Reiniciar la consola",
+  "stopContainer": "Detener el contenedor (libera sus puertos)",
+  "stop": "Detener",
+  "hideWithHotkey": "Ocultar la terminal (se abre con el atajo de terminal)",
+  "hide": "Ocultar terminal",
+  "loading": "la terminal",
+  "processExited": "proceso finalizado",
+  "exitCodeSuffix": "(código {{code}})"
+}

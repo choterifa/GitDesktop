@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -156,11 +157,6 @@ function isReservedName(entry: FileEntry): boolean {
   return reservedDeviceName(entry.path) !== null;
 }
 
-/** Appended to a multi-file discard confirm: the recycle bin refuses a reserved
- *  device name, so the backend removes those outright. */
-const RESERVED_DISCARD_NOTE =
-  ' Files with Windows-reserved names (like "nul") skip the recycle bin and are deleted permanently.';
-
 type FilterKind = "included" | "excluded" | "new" | "modified" | "deleted";
 
 function hasKind(entry: FileEntry, kinds: ChangeKind[]): boolean {
@@ -177,12 +173,12 @@ const FILTER_PREDICATES: Record<FilterKind, (e: FileEntry) => boolean> = {
   deleted: (e) => hasKind(e, ["deleted"]),
 };
 
-const FILTER_LABELS: Record<FilterKind, string> = {
-  included: "Included in commit",
-  excluded: "Excluded from commit",
-  new: "New files",
-  modified: "Modified files",
-  deleted: "Deleted files",
+const FILTER_LABEL_KEYS: Record<FilterKind, string> = {
+  included: "changes.filterIncluded",
+  excluded: "changes.filterExcluded",
+  new: "changes.filterNew",
+  modified: "changes.filterModified",
+  deleted: "changes.filterDeleted",
 };
 
 /** Target of a discard/stash confirm dialog: specific files (one row or a
@@ -284,6 +280,7 @@ export function ChangesPanel({
    *  renders, so the line-count poll is gated on this rather than on mounting. */
   active: boolean;
 }) {
+  const { t } = useTranslation("repository");
   const status = useRepoStatus(repoPath);
   const stage = useStage(repoPath);
   const unstage = useUnstage(repoPath);
@@ -888,7 +885,7 @@ export function ChangesPanel({
     // `mutating`, so they skip the disables and get the toast instead. Refused
     // before the try, so the first check's flags survive.
     if (checkingRef.current) {
-      toast.info("Still checking files for conflict markers");
+      toast.info(t("changes.checkingConflictMarkers"));
       return false;
     }
     const firedOn = repoPath;
@@ -1260,7 +1257,7 @@ export function ChangesPanel({
     if (discardScope.kind === "all") {
       try {
         await discardAll.mutateAsync(undefined);
-        toast.success("All changes discarded");
+        toast.success(t("changes.allDiscarded"));
         finish();
       } catch (e) {
         onError(e);
@@ -1276,8 +1273,8 @@ export function ChangesPanel({
       await discardPaths.mutateAsync(targets);
       toast.success(
         targets.length === 1
-          ? `Discarded changes to ${targets[0].path}`
-          : `Discarded changes to ${targets.length} files`,
+          ? t("changes.discardedPath", { path: targets[0].path })
+          : t("changes.discardedFiles", { count: targets.length }),
       );
       finish();
     } catch (e) {
@@ -1301,7 +1298,7 @@ export function ChangesPanel({
     if (stashScope.kind === "all") {
       try {
         await stashAll.mutateAsync(undefined);
-        toast.success("Changes stashed");
+        toast.success(t("changes.stashed"));
         finish();
       } catch (e) {
         onError(e);
@@ -1321,11 +1318,11 @@ export function ChangesPanel({
       if (matched) {
         toast.success(
           targets.length === 1
-            ? `Stashed ${targets[0]}`
-            : `Stashed ${targets.length} files`,
+            ? t("changes.stashedPath", { path: targets[0] })
+            : t("changes.stashedFiles", { count: targets.length }),
         );
       } else {
-        toast.info("Nothing to stash");
+        toast.info(t("changes.nothingToStash"));
       }
       finish();
     } catch (e) {
@@ -1422,10 +1419,10 @@ export function ChangesPanel({
   const discardOne = discardFiles.length === 1 ? discardFiles[0] : null;
   const discardTitle =
     shownDiscardScope?.kind === "all"
-      ? "Discard all changes?"
+      ? t("changes.discardAllTitle")
       : discardOne
-        ? "Discard changes?"
-        : `Discard ${discardFiles.length} changes?`;
+        ? t("changes.discardTitle")
+        : t("changes.discardCountTitle", { count: discardFiles.length });
   // Only untracked entries reach the recycle bin, so only they can be the ones
   // deleted outright; "all" discards the whole tree, not just what's on screen.
   const discardHasReserved = (
@@ -1434,21 +1431,26 @@ export function ChangesPanel({
   const discardBody = ((): string => {
     switch (true) {
       case shownDiscardScope?.kind === "all":
-        return `All uncommitted changes are discarded: tracked files reset to the last commit, untracked files move to the recycle bin.${discardHasReserved ? RESERVED_DISCARD_NOTE : ""}`;
+        return t("changes.discardAllDescription", {
+          reservedNote: discardHasReserved ? ` ${t("changes.reservedDiscardNote")}` : "",
+        });
       // Per-file discard restores the worktree from the INDEX, so a file with
       // staged changes lands on its staged version, not the last commit.
       case discardOne !== null &&
         discardOne.unstaged !== "untracked" &&
         discardOne.staged !== null:
-        return `Unstaged changes to ${discardOne.path} will be discarded, returning it to its staged version. Its staged changes are kept. This cannot be undone.`;
+        return t("changes.discardStagedDescription", { path: discardOne.path });
       case discardOne !== null && discardOne.unstaged !== "untracked":
-        return `Unstaged changes to ${discardOne.path} will be restored to the last committed version. This cannot be undone.`;
+        return t("changes.discardTrackedDescription", { path: discardOne.path });
       case discardOne !== null && discardHasReserved:
-        return `${discardOne.path} is untracked. Its Windows-reserved name can't go to the recycle bin, so it will be deleted permanently.`;
+        return t("changes.discardReservedDescription", { path: discardOne.path });
       case discardOne !== null:
-        return `${discardOne.path} is untracked — it will be moved to the recycle bin.`;
+        return t("changes.discardUntrackedDescription", { path: discardOne.path });
       default:
-        return `Changes to ${discardFiles.length} files will be discarded — tracked files are restored and untracked files moved to the recycle bin. This cannot be undone.${discardHasReserved ? RESERVED_DISCARD_NOTE : ""}`;
+        return t("changes.discardManyDescription", {
+          count: discardFiles.length,
+          reservedNote: discardHasReserved ? ` ${t("changes.reservedDiscardNote")}` : "",
+        });
     }
   })();
 
@@ -1457,16 +1459,16 @@ export function ChangesPanel({
   const stashOne = stashFiles.length === 1 ? stashFiles[0] : null;
   const stashTitle =
     shownStashScope?.kind === "all"
-      ? "Stash all changes?"
+      ? t("changes.stashAllTitle")
       : stashOne
-        ? "Stash change?"
-        : `Stash ${stashFiles.length} changes?`;
+        ? t("changes.stashTitle")
+        : t("changes.stashCountTitle", { count: stashFiles.length });
   const stashBody =
     shownStashScope?.kind === "all"
-      ? 'Sets your working tree back to the last commit and saves all uncommitted changes — including untracked files — to the stash. "Pop latest stash" restores them.'
+      ? t("changes.stashAllDescription")
       : stashOne
-        ? `${stashOne.path} is saved to the stash and removed from your working tree. "Pop latest stash" restores it.`
-        : `${stashFiles.length} selected files are saved to the stash and removed from your working tree. "Pop latest stash" restores them.`;
+        ? t("changes.stashOneDescription", { path: stashOne.path })
+        : t("changes.stashManyDescription", { count: stashFiles.length });
 
   // One row's inner content, closing over the panel's selection/mutation state.
   // Passed to the virtualized list so all that state stays here and only the
@@ -1485,8 +1487,8 @@ export function ChangesPanel({
         >
           <h3 className="py-1 text-xs font-medium text-muted-foreground">
             {row.section === "staged"
-              ? `Staged (${row.count})`
-              : `Changes (${row.count})`}
+              ? t("changes.stagedCount", { count: row.count })
+              : t("changes.changesCount", { count: row.count })}
           </h3>
           <DisabledReasonButton
             variant="ghost"
@@ -1498,12 +1500,14 @@ export function ChangesPanel({
             }
             reason={
               row.section === "unstaged" && stageableUnstaged.length === 0
-                ? "Git can't stage Windows-reserved device names, and every file here has one"
+                ? t("changes.reservedOnlyReason")
                 : null
             }
             onClick={row.section === "staged" ? unstageAll : stageAll}
           >
-            {row.section === "staged" ? "Unstage all" : "Stage all"}
+            {row.section === "staged"
+              ? t("changes.unstageAll")
+              : t("changes.stageAll")}
           </DisabledReasonButton>
         </div>
       );
@@ -1519,9 +1523,11 @@ export function ChangesPanel({
           // ARIA 1.2 gives `option` no expanded state, so the label carries
           // what the caret shows — and the full directory path, because two
           // compacted rows can share a display label.
-          aria-label={`${row.path} — ${row.count} ${
-            row.count === 1 ? "file" : "files"
-          }, ${row.collapsed ? "collapsed" : "expanded"}`}
+          aria-label={t("changes.folderAria", {
+            path: row.path,
+            count: row.count,
+            state: t(row.collapsed ? "changes.collapsed" : "changes.expanded"),
+          })}
           tabIndex={0}
           className="flex cursor-pointer items-center gap-1 py-1 pr-2 text-xs text-muted-foreground hover:bg-muted/60"
           style={{ paddingLeft: 8 + row.depth * 12 }}
@@ -1602,8 +1608,8 @@ export function ChangesPanel({
                     size="icon-sm"
                     aria-label={
                       activeKinds.size > 0
-                        ? `Filter options (${activeKinds.size} active)`
-                        : "Filter options"
+                        ? t("changes.filterOptionsActive", { count: activeKinds.size })
+                        : t("changes.filterOptions")
                     }
                     className="relative"
                   />
@@ -1627,9 +1633,9 @@ export function ChangesPanel({
                 >
                   <Popover.Popup className="w-56 rounded-none bg-popover p-2 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                     <p className="px-1 pb-1.5 text-xs font-medium">
-                      Filter Options
+                      {t("changes.filterOptions")}
                     </p>
-                    {(Object.keys(FILTER_LABELS) as FilterKind[]).map(
+                    {(Object.keys(FILTER_LABEL_KEYS) as FilterKind[]).map(
                       (kind) => (
                         <label
                           key={kind}
@@ -1641,7 +1647,7 @@ export function ChangesPanel({
                               toggleKind(kind, v === true)
                             }
                           />
-                          <span className="flex-1">{FILTER_LABELS[kind]}</span>
+                          <span className="flex-1">{t(FILTER_LABEL_KEYS[kind])}</span>
                           <span className="text-muted-foreground">
                             ({entries.filter(FILTER_PREDICATES[kind]).length})
                           </span>
@@ -1656,7 +1662,7 @@ export function ChangesPanel({
               ref={filterRef}
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              placeholder="Filter"
+              placeholder={t("changes.filterPlaceholder")}
               className="h-7 flex-1"
               autoComplete="off"
             />
@@ -1665,11 +1671,11 @@ export function ChangesPanel({
               variant={treeMode ? "secondary" : "outline"}
               size="icon-sm"
               aria-pressed={treeMode}
-              aria-label="Directory tree view"
+              aria-label={t("changes.directoryTreeView")}
               title={
                 treeMode
-                  ? "Show changes as a flat list"
-                  : "Group changes by directory"
+                  ? t("changes.flatList")
+                  : t("changes.groupByDirectory")
               }
               onClick={toggleViewMode}
             >
@@ -1795,10 +1801,10 @@ export function ChangesPanel({
           type="button"
           onClick={() => setStashesOpen(true)}
           className="flex shrink-0 items-center gap-2 border-t px-3 py-2 text-left text-xs hover:bg-muted/60"
-          title="View stashed changes on this branch"
+          title={t("changes.viewStashes")}
         >
           <StackIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 font-medium">Stashed Changes</span>
+          <span className="flex-1 font-medium">{t("changes.stashedChanges")}</span>
           <span className="text-muted-foreground tabular-nums">
             {stashCount.data}
           </span>
@@ -1839,7 +1845,9 @@ export function ChangesPanel({
         title={discardTitle}
         body={discardBody}
         confirmLabel={
-          shownDiscardScope?.kind === "all" ? "Discard all" : "Discard"
+          shownDiscardScope?.kind === "all"
+            ? t("changes.discardAll")
+            : t("changes.discardAction")
         }
         confirmVariant="destructive"
         pending={discardPaths.isPending || discardAll.isPending}
@@ -1851,7 +1859,11 @@ export function ChangesPanel({
         onCancel={() => setStashScope(null)}
         title={stashTitle}
         body={stashBody}
-        confirmLabel={shownStashScope?.kind === "all" ? "Stash all" : "Stash"}
+        confirmLabel={
+          shownStashScope?.kind === "all"
+            ? t("changes.stashAll")
+            : t("changes.stashAction")
+        }
         pending={stashPaths.isPending || stashAll.isPending}
         onConfirm={() => void confirmStash()}
       />
@@ -1911,6 +1923,7 @@ function VirtualizedChangeList({
   onCursorScrolled: () => boolean;
   renderRow: (row: FlatRow) => ReactNode;
 }) {
+  const { t } = useTranslation("repository");
   // State-backed (not a plain ref) so the virtualizer observes the scroll
   // element the instant it mounts — a plain ref would leave the first paint blank.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -2013,20 +2026,20 @@ function VirtualizedChangeList({
           onFocus={onListFocus}
           onContextMenuCapture={onContextMenuCapture}
           role="listbox"
-          aria-label="Changed files"
+          aria-label={t("changes.changedFiles")}
           aria-multiselectable="true"
         />
       }
     >
       {nothingMatches ? (
         <div className="px-2 py-8 text-center text-xs text-muted-foreground">
-          <p>No files match the filter</p>
+          <p>{t("changes.noFilesMatch")}</p>
           <button
             type="button"
             onClick={onClearFilter}
             className="mt-1 cursor-pointer font-medium underline underline-offset-2 hover:no-underline"
           >
-            Clear filter
+            {t("changes.clearFilter")}
           </button>
         </div>
       ) : (

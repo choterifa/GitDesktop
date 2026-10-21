@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { clipTitleFromText } from "@/lib/clip-title";
+import { formatNumber } from "@/lib/i18n/format";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import type { McpServer } from "@/lib/settings/api";
 import {
@@ -46,12 +47,11 @@ import { formatRelativeTime, parseableDate } from "@/lib/time";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { HostAllowNote } from "../HostAllowNote";
+import { useSettingsText } from "../use-settings-text";
 
-/** Compact number for stars/installs (87729 → "87.7K"). */
-const compactNumber = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
+/** Compact number for stars/installs, formatted for the active UI locale. */
+const compactNumber = (value: number) =>
+  formatNumber(value, { notation: "compact", maximumFractionDigits: 1 });
 
 /** A one-line summary of what a server will run (stdio) or connect to (http) —
  *  the honest "what can this do" view shown in a result's expanded detail. */
@@ -85,6 +85,7 @@ export function BrowseRegistryDialog({
   onAdd: (server: McpServer) => void;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   const [source, setSource] = useState<"registry" | "github">("registry");
   const [query, setQuery] = useState("");
   const debounced = useDebouncedValue(query.trim(), 300);
@@ -200,15 +201,15 @@ export function BrowseRegistryDialog({
     const name = uniqueServerName(c.server.name, taken);
     onAdd({ ...c.server, id: crypto.randomUUID(), name });
     setAdded((prev) => new Set(prev).add(c.registryName));
-    toast.success(`Added "${name}" — review and enable it`);
+    toast.success(tx("Added {{name}} — review and enable it", { name }));
   }
 
   const errorMessage = isError
     ? error instanceof Error
       ? error.message
       : source === "github"
-        ? "Couldn't search GitHub. Is the GitHub CLI signed in?"
-        : "Couldn't reach the MCP registry."
+        ? tx("Couldn't search GitHub. Is the GitHub CLI signed in?")
+        : tx("Couldn't reach the MCP registry.")
     : null;
 
   // Clamp a stale active index after the result set shrinks (search/retry).
@@ -226,29 +227,31 @@ export function BrowseRegistryDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Browse MCP servers</DialogTitle>
+          <DialogTitle>{tx("Browse MCP servers")}</DialogTitle>
           <DialogDescription>
             {source === "github" ? (
               <>
-                MCP-server repositories on GitHub, ranked by stars. Rougher than
-                the registry — some need manual setup after adding.
+                {tx(
+                  "MCP-server repositories on GitHub, ranked by stars. Rougher than the registry — some need manual setup after adding.",
+                )}
               </>
             ) : (
               <>
-                Public servers from the official Model Context Protocol
-                registry.
+                {tx(
+                  "Public servers from the official Model Context Protocol registry.",
+                )}
               </>
             )}{" "}
-            Added servers start{" "}
-            <strong className="font-medium">disabled</strong> — review what each
-            one runs, add any secret, then enable it.
+            {tx(
+              "Added servers start disabled — review what each one runs, add any secret, then enable it.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex gap-1">
           {(
             [
-              ["registry", "Official registry"],
+              ["registry", tx("Official registry")],
               ["github", "GitHub"],
             ] as const
           ).map(([value, label]) => (
@@ -274,8 +277,8 @@ export function BrowseRegistryDialog({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={
               source === "github"
-                ? "Search GitHub MCP repos…"
-                : "Search servers…"
+                ? tx("Search GitHub MCP repos…")
+                : tx("Search servers…")
             }
             className="pl-8"
             spellCheck={false}
@@ -290,21 +293,26 @@ export function BrowseRegistryDialog({
             <p className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
               <Spinner />{" "}
               {source === "github"
-                ? "Searching GitHub…"
-                : "Searching the registry…"}
+                ? tx("Searching GitHub…")
+                : tx("Searching the registry…")}
             </p>
           ) : errorMessage ? (
             <div className="space-y-2 py-6 text-xs">
               <p className="text-muted-foreground">{errorMessage}</p>
               <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Try again
+                {tx("Try again")}
               </Button>
             </div>
           ) : candidates.length === 0 ? (
             <p className="py-6 text-xs text-muted-foreground">
               {debounced
-                ? `No ${source === "github" ? "repositories" : "servers"} match “${debounced}”.`
-                : "No results found."}
+                ? tx(
+                    source === "github"
+                      ? "No repositories match “{{query}}”."
+                      : "No servers match “{{query}}”.",
+                    { query: debounced },
+                  )
+                : tx("No results found.")}
             </p>
           ) : (
             <>
@@ -350,13 +358,13 @@ export function BrowseRegistryDialog({
                 const rowStatus = ((): string => {
                   switch (true) {
                     case isAdded:
-                      return ", added";
+                      return `, ${tx("added")}`;
                     case inRegistry:
-                      return ", already in your registry";
+                      return `, ${tx("already in your registry")}`;
                     case !!addReason:
                       return `. ${addReason}`;
                     default:
-                      return ". Press Enter to add.";
+                      return `. ${tx("Press Enter to add.")}`;
                   }
                 })();
                 return (
@@ -389,7 +397,7 @@ export function BrowseRegistryDialog({
                       size="icon-sm"
                       className="mt-0.5 shrink-0"
                       aria-expanded={isOpen}
-                      aria-label={isOpen ? "Hide details" : "Show details"}
+                      aria-label={tx(isOpen ? "Hide details" : "Show details")}
                       onClick={() => toggleExpanded(c.registryName)}
                     >
                       <CaretRightIcon
@@ -415,7 +423,7 @@ export function BrowseRegistryDialog({
                         )}
                         {c.needsSetup && (
                           <span className="shrink-0 text-[10px] text-warning">
-                            needs setup
+                            {tx("needs setup")}
                           </span>
                         )}
                         {(stat || installs != null) && (
@@ -423,19 +431,23 @@ export function BrowseRegistryDialog({
                             {stat && (
                               <span
                                 className="flex items-center gap-0.5"
-                                title={`${stat.stars.toLocaleString()} stars`}
+                                title={tx("{{count}} stars", {
+                                  count: formatNumber(stat.stars),
+                                })}
                               >
                                 <StarIcon weight="fill" />
-                                {compactNumber.format(stat.stars)}
+                                {compactNumber(stat.stars)}
                               </span>
                             )}
                             {installs != null && (
                               <span
                                 className="flex items-center gap-0.5"
-                                title={`${installs.toLocaleString()} npm downloads last week`}
+                                title={tx("{{count}} npm downloads last week", {
+                                  count: formatNumber(installs),
+                                })}
                               >
                                 <DownloadSimpleIcon />
-                                {compactNumber.format(installs)}/wk
+                                {compactNumber(installs)}/wk
                               </span>
                             )}
                           </div>
@@ -461,15 +473,16 @@ export function BrowseRegistryDialog({
                           {c.server.transport === "stdio" &&
                           !c.server.command ? (
                             <div className="text-muted-foreground">
-                              No manifest found — you'll set the command after
-                              adding.
+                              {tx(
+                                "No manifest found — you'll set the command after adding.",
+                              )}
                             </div>
                           ) : (
                             <div>
                               <span className="font-medium">
                                 {c.server.transport === "stdio"
-                                  ? "Runs locally"
-                                  : "Connects to"}
+                                  ? tx("Runs locally")
+                                  : tx("Connects to")}
                                 :{" "}
                               </span>
                               <span className="font-mono break-all">
@@ -481,8 +494,8 @@ export function BrowseRegistryDialog({
                             <div>
                               <span className="font-medium">
                                 {c.server.transport === "stdio"
-                                  ? "Environment"
-                                  : "Headers"}
+                                  ? tx("Environment")
+                                  : tx("Headers")}
                                 :{" "}
                               </span>
                               {entries.map((e, idx) => (
@@ -492,7 +505,7 @@ export function BrowseRegistryDialog({
                                   {secretSet.has(e.key) && (
                                     <span className="text-muted-foreground">
                                       {" "}
-                                      (secret)
+                                      {tx("(secret)")}
                                     </span>
                                   )}
                                 </span>
@@ -504,15 +517,27 @@ export function BrowseRegistryDialog({
                               {[
                                 stat?.license,
                                 stat
-                                  ? `${compactNumber.format(stat.forks)} forks`
+                                  ? tx("{{count}} forks", {
+                                      count: compactNumber(stat.forks),
+                                    })
                                   : null,
                                 stat?.pushedAt && parseableDate(stat.pushedAt)
-                                  ? `updated ${formatRelativeTime(stat.pushedAt, now)}`
+                                  ? tx("updated {{time}}", {
+                                      time: formatRelativeTime(
+                                        stat.pushedAt,
+                                        now,
+                                      ),
+                                    })
                                   : c.publishedAt &&
                                       parseableDate(c.publishedAt)
-                                    ? `published ${formatRelativeTime(c.publishedAt, now)}`
+                                    ? tx("published {{time}}", {
+                                        time: formatRelativeTime(
+                                          c.publishedAt,
+                                          now,
+                                        ),
+                                      })
                                     : null,
-                                stat?.archived ? "archived" : null,
+                                stat?.archived ? tx("archived") : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")}
@@ -524,7 +549,7 @@ export function BrowseRegistryDialog({
                               onClick={() => openUrl(repo.url)}
                               className="inline-flex cursor-pointer items-center gap-1 text-primary hover:underline"
                             >
-                              View on GitHub
+                              {tx("View on GitHub")}
                               <ArrowSquareOutIcon />
                             </button>
                           )}
@@ -534,7 +559,9 @@ export function BrowseRegistryDialog({
                               allowedHosts={allowedHosts}
                               onAllowHost={onAllowHost}
                               defaultNote={null}
-                              consequence="the agent CLI connects outside GitDesktop's AI allowlist, so allow it before adding."
+                              consequence={tx(
+                                "the agent CLI connects outside GitDesktop's AI allowlist, so allow it before adding.",
+                              )}
                             />
                           ) : null}
                         </div>
@@ -543,11 +570,11 @@ export function BrowseRegistryDialog({
 
                     {isAdded ? (
                       <span className="flex shrink-0 items-center gap-1 self-start text-[11px] text-success">
-                        <CheckIcon weight="bold" /> Added
+                        <CheckIcon weight="bold" /> {tx("Added")}
                       </span>
                     ) : inRegistry ? (
                       <span className="shrink-0 self-start text-[10px] text-muted-foreground">
-                        In registry
+                        {tx("In registry")}
                       </span>
                     ) : (
                       <DisabledReasonButton
@@ -558,7 +585,7 @@ export function BrowseRegistryDialog({
                         reason={addReason}
                         onClick={() => add(c)}
                       >
-                        <PlusIcon data-icon="inline-start" /> Add
+                        <PlusIcon data-icon="inline-start" /> {tx("Add")}
                       </DisabledReasonButton>
                     )}
                   </div>
@@ -573,7 +600,7 @@ export function BrowseRegistryDialog({
                     disabled={isFetchingNextPage}
                   >
                     {isFetchingNextPage && <Spinner data-icon="inline-start" />}
-                    Load more
+                    {tx("Load more")}
                   </Button>
                 </div>
               )}
@@ -583,7 +610,7 @@ export function BrowseRegistryDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Done
+            {tx("Done")}
           </Button>
         </DialogFooter>
       </DialogContent>

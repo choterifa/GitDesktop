@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CommitAuthorAvatar } from "@/components/commit-author-avatar";
 import { PathText } from "@/components/path-text";
 import { RelativeTime } from "@/components/relative-time";
@@ -33,6 +34,7 @@ export function FileHistoryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("history");
   const fileLog = useFileLog(repoPath, open ? path : null);
   // Batch-resolve commit-author avatars (GitHub-only; deduped by react-query with
   // the other History surfaces, so this shares one call per repo per 15min).
@@ -65,7 +67,9 @@ export function FileHistoryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[80vh] flex-col sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="truncate">History of {name}</DialogTitle>
+          <DialogTitle className="truncate">
+            {t("fileHistory.title", { name })}
+          </DialogTitle>
           <DialogDescription>
             <PathText path={path} className="font-mono" />
           </DialogDescription>
@@ -80,7 +84,7 @@ export function FileHistoryDialog({
                 </div>
               ) : commits.length === 0 ? (
                 <p className="p-3 text-xs text-muted-foreground">
-                  No history for this file.
+                  {t("fileHistory.empty")}
                 </p>
               ) : (
                 // Arrow-key nav lives on the focusable row buttons below; this
@@ -122,7 +126,7 @@ export function FileHistoryDialog({
                       {fileLog.isFetchingNextPage && (
                         <Spinner data-icon="inline-start" />
                       )}
-                      Load more
+                      {t("fileHistory.loadMore")}
                     </button>
                   )}
                 </div>
@@ -143,7 +147,7 @@ export function FileHistoryDialog({
                 }}
               />
             ) : (
-              <DiffPlaceholder message="Select a commit" />
+              <DiffPlaceholder message={t("fileHistory.selectCommit")} />
             )}
           </div>
         </div>

@@ -1,0 +1,102 @@
+{
+  "empty": {
+    "noChanges": "No changes to review",
+    "selectFile": "Select a file to see its changes",
+    "noDiff": "No changes to show",
+    "loading": "Loading the diff…"
+  },
+  "mode": {
+    "label": "Diff view mode",
+    "unified": "Unified",
+    "split": "Split",
+    "tooNarrow": "Pane too narrow for split view"
+  },
+  "generated": {
+    "title": "Looks like a generated or minified file",
+    "showAnyway": "Show diff anyway",
+    "hiddenLines_one": "{{count}} more line hidden for performance",
+    "hiddenLines_other": "{{count}} more lines hidden for performance",
+    "shortened_one": "{{count}} long line shortened for performance",
+    "shortened_other": "{{count}} long lines shortened for performance",
+    "shortenedWithoutHidden_one": "{{count}} long line shortened",
+    "shortenedWithoutHidden_other": "{{count}} long lines shortened",
+    "showFull": "Show full diff",
+    "truncated": "(truncated — diff too large)"
+  },
+  "status": {
+    "offlinePending": "You're offline — this diff will load once you're back online.",
+    "loadFailed": "Could not load diff for this file",
+    "retry": "Retry loading this diff",
+    "diffNoun": "this diff",
+    "refreshFailed": "Couldn't refresh this diff — showing the last loaded version.",
+    "offlineStale": "You're offline — showing the last opened diff; this one will load once you're back online.",
+    "offlineLastLoaded": "You're offline — showing the last loaded version.",
+    "binary": "Binary file — no text diff available",
+    "noChanges": "No changes to show"
+  },
+  "language": {
+    "auto": "Auto",
+    "autoDetect": "Auto-detect",
+    "custom": "Custom",
+    "common": "Common",
+    "all": "All languages",
+    "search": "Search languages…",
+    "noMatches": "No matching language"
+  },
+  "markdown": {
+    "viewLabel": "Markdown view",
+    "raw": "Raw",
+    "preview": "Preview",
+    "nothing": "Nothing to preview",
+    "loadFailed": "Could not load this file to preview",
+    "tooLarge": "File too large to preview",
+    "deleted": "File deleted — previewing the previous version.",
+    "mdxNote": "Approximate preview: MDX components and expressions render as plain text."
+  },
+  "image": {
+    "fullscreen": "View {{label}} image fullscreen",
+    "tooLarge": "Too large to preview",
+    "deleted": "Deleted",
+    "old": "Old",
+    "added": "Added",
+    "new": "New"
+  },
+  "errorBoundary": {
+    "message": "This file's diff couldn't be displayed.",
+    "retry": "Try again"
+  },
+  "undecodable": {
+    "unstaged": "Part of this change isn't UTF-8 text, so the file stages and discards as a whole to keep its bytes exact. Stage or discard it from its row in Changes.",
+    "staged": "Part of this change isn't UTF-8 text, so the file unstages as a whole to keep its bytes exact. Unstage it from its row in Staged.",
+    "untracked": "This new file isn't UTF-8 text, so it stages as a whole to keep its bytes exact. Stage or discard it from its row in Changes."
+  },
+  "staging": {
+    "staleStage": "The diff just updated — nothing was staged.",
+    "staleUnstage": "The diff just updated — nothing was unstaged.",
+    "staleDiscard": "The diff just updated — nothing was discarded.",
+    "updating": "Updating the diff…",
+    "stage": "Stage",
+    "unstage": "Unstage",
+    "discard": "Discard…",
+    "clear": "Clear",
+    "stageHunk": "Stage hunk",
+    "unstageHunk": "Unstage hunk",
+    "selection_one": "{{count}} line selected",
+    "selection_other": "{{count}} lines selected",
+    "selectionLabel_one": "{{count}} selected line",
+    "selectionLabel_other": "{{count}} selected lines",
+    "dontShowAgain": "Don't show again",
+    "dragHint": "Drag across the line numbers to {{action}} just those lines, added and removed alike. Hold Shift while dragging to take one side of a change, or {{modifier}} to add to the selection.",
+    "pressHint": "Press {{binding}} to {{action}} the selection.",
+    "discardTitle": "Discard changes?",
+    "discardNewDescription": "Removes {{label}} from {{path}}. This cannot be undone.",
+    "discardDescription": "Reverts {{label}} in {{path}} to the last committed version. This cannot be undone.",
+    "cancel": "Cancel",
+    "discardAction": "Discard",
+    "collapseContext": "Collapse expanded context"
+  },
+  "hunk": {
+    "line": "line {{start}}",
+    "lines": "lines {{start}}–{{end}}"
+  }
+}

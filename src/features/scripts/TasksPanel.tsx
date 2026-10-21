@@ -50,18 +50,11 @@ import {
 } from "@/lib/use-disabled-reason";
 import { cn } from "@/lib/utils";
 import { TaskDialog } from "./TaskDialog";
+import { useScriptsText } from "./use-scripts-text";
 
 const INTERPRETER_LABELS: Record<string, string> = Object.fromEntries(
   INTERPRETERS.map((i) => [i.id, i.label]),
 );
-
-/** What a delete costs, by source: an inline body exists only inside the task,
- *  while a file task owns nothing but the registration. */
-const DELETE_BODY: Record<TaskDef["source"]["kind"], string> = {
-  inline:
-    "The task and its inline script are removed together. The script is stored only in this task, so deleting it is permanent.",
-  file: "The task is removed. The script file it points at stays on disk.",
-};
 
 /** One keyboard-navigable row: the in-scope tasks, then the other-repositories
  *  disclosure header and — while it's open — that group's rows. One list, so the
@@ -88,6 +81,7 @@ function navRowKey(row: NavRow): string {
 }
 
 export function TasksPanel() {
+  const tx = useScriptsText();
   const scripts = useScripts();
   const setEnabled = useSetTasksEnabled();
   const addTask = useAddTask();
@@ -134,13 +128,17 @@ export function TasksPanel() {
       return;
     }
     closeEditorIf(submitted);
-    toast.success(isNew ? `Added "${task.name}"` : `Saved "${task.name}"`);
+    toast.success(
+      tx(isNew ? 'Added "{{name}}"' : 'Saved "{{name}}"', {
+        name: task.name,
+      }),
+    );
   }
 
   async function deleteTask(id: string) {
     // All tasks, not just the in-scope ones: the other-repositories group deletes
     // through here too.
-    const name = tasks.find((t) => t.id === id)?.name ?? "task";
+    const name = tasks.find((t) => t.id === id)?.name ?? tx("task");
     const submitted = session;
     try {
       await removeTask.mutateAsync(id);
@@ -149,7 +147,7 @@ export function TasksPanel() {
       return;
     }
     closeEditorIf(submitted);
-    toast.success(`Deleted "${name}"`);
+    toast.success(tx('Deleted "{{name}}"', { name }));
   }
 
   // The row menus' delete is one click from gone, so it asks first. The editor's
@@ -157,9 +155,16 @@ export function TasksPanel() {
   // second prompt would stack on it.
   async function confirmDeleteTask(task: TaskDef) {
     const ok = await useConfirm.getState().ask({
-      title: `Delete "${task.name}"?`,
-      body: DELETE_BODY[task.source.kind],
-      confirmLabel: "Delete task",
+      title: tx('Delete "{{name}}"?', { name: task.name }),
+      body:
+        task.source.kind === "inline"
+          ? tx(
+              "The task and its inline script are removed together. The script is stored only in this task, so deleting it is permanent.",
+            )
+          : tx(
+              "The task is removed. The script file it points at stays on disk.",
+            ),
+      confirmLabel: tx("Delete task"),
       confirmVariant: "destructive",
       scope: "app",
     });
@@ -208,7 +213,7 @@ export function TasksPanel() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
         <LightningIcon className="size-4 text-muted-foreground" />
-        <span className="text-xs font-medium">Tasks</span>
+        <span className="text-xs font-medium">{tx("Tasks")}</span>
         {enabled && settled && inScope.length > 0 && (
           <span className="text-xs text-muted-foreground">
             {inScope.length}
@@ -220,8 +225,8 @@ export function TasksPanel() {
             size="icon-xs"
             variant="ghost"
             onClick={() => openEditor("new")}
-            title="New task"
-            aria-label="New task"
+            title={tx("New task")}
+            aria-label={tx("New task")}
           >
             <PlusIcon />
           </Button>
@@ -240,11 +245,13 @@ export function TasksPanel() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
           <LightningIcon className="size-8 text-muted-foreground" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">Run your scripts from here</p>
+            <p className="text-sm font-medium">
+              {tx("Run your scripts from here")}
+            </p>
             <p className="text-xs text-muted-foreground">
-              Save a script — like your release or build flow — and run it in an
-              interactive terminal without leaving GitDesktop. Scripts you save
-              stay on this machine and only run when you start them.
+              {tx(
+                "Save a script — like your release or build flow — and run it in an interactive terminal without leaving GitDesktop. Scripts you save stay on this machine and only run when you start them.",
+              )}
             </p>
           </div>
           <Button
@@ -252,23 +259,23 @@ export function TasksPanel() {
             disabled={setEnabled.isPending}
             onClick={() => void setEnabled.mutateAsync(true).catch(toastError)}
           >
-            Enable task running
+            {tx("Enable task running")}
           </Button>
         </div>
       ) : tasks.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
           <LightningIcon className="size-8 text-muted-foreground" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">No tasks yet</p>
+            <p className="text-sm font-medium">{tx("No tasks yet")}</p>
             <p className="text-xs text-muted-foreground">
-              Register a script to run it here. A task belongs to the repository
-              you create it in, and you can make one available in every
-              repository instead.
+              {tx(
+                "Register a script to run it here. A task belongs to the repository you create it in, and you can make one available in every repository instead.",
+              )}
             </p>
           </div>
           <Button size="sm" onClick={() => openEditor("new")}>
             <PlusIcon data-icon="inline-start" />
-            New task
+            {tx("New task")}
           </Button>
         </div>
       ) : (
@@ -276,7 +283,7 @@ export function TasksPanel() {
           <div
             ref={listRef}
             role="group"
-            aria-label="Tasks"
+            aria-label={tx("Tasks")}
             onKeyDown={nav}
             className="space-y-0.5 p-2"
           >
@@ -285,16 +292,17 @@ export function TasksPanel() {
                 <LightningIcon className="size-8 text-muted-foreground" />
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
-                    No tasks for this repository
+                    {tx("No tasks for this repository")}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Create one here, or open the repository a task below belongs
-                    to.
+                    {tx(
+                      "Create one here, or open the repository a task below belongs to.",
+                    )}
                   </p>
                 </div>
                 <Button size="sm" onClick={() => openEditor("new")}>
                   <PlusIcon data-icon="inline-start" />
-                  New task
+                  {tx("New task")}
                 </Button>
               </div>
             ) : (
@@ -332,12 +340,14 @@ export function TasksPanel() {
                         )}
                         {taskScope(task) === TASK_SCOPE_GLOBAL && (
                           <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                            All repos
+                            {tx("All repos")}
                           </span>
                         )}
                         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                          {INTERPRETER_LABELS[task.interpreter] ??
-                            task.interpreter}
+                          {tx(
+                            INTERPRETER_LABELS[task.interpreter] ??
+                              task.interpreter,
+                          )}
                         </span>
                       </span>
                       {task.description !== "" && (
@@ -357,8 +367,12 @@ export function TasksPanel() {
                           size="icon-xs"
                           variant="ghost"
                           className="shrink-0 text-muted-foreground"
-                          title={`More actions for "${task.name}"`}
-                          aria-label={`More actions for ${task.name}`}
+                          title={tx('More actions for "{{name}}"', {
+                            name: task.name,
+                          })}
+                          aria-label={tx("More actions for {{name}}", {
+                            name: task.name,
+                          })}
                         />
                       }
                     >
@@ -367,18 +381,18 @@ export function TasksPanel() {
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => void request(task)}>
                         <PlayIcon data-icon="inline-start" />
-                        Run
+                        {tx("Run")}
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => openEditor(task)}>
                         <PencilSimpleIcon data-icon="inline-start" />
-                        Edit
+                        {tx("Edit")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
                         onClick={() => void confirmDeleteTask(task)}
                       >
                         <TrashIcon data-icon="inline-start" />
-                        Delete
+                        {tx("Delete")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -408,7 +422,7 @@ export function TasksPanel() {
                   ) : (
                     <CaretRightIcon className="size-3 shrink-0" />
                   )}
-                  Other repositories
+                  {tx("Other repositories")}
                   <span className="tabular-nums">· {elsewhere.length}</span>
                 </button>
                 {/* The panel is the only place tasks can be managed, so a task
@@ -461,7 +475,10 @@ export function TasksPanel() {
  * A malformed stored scope names no repository to open, so its copy points at
  * the repair instead: Edit, then the "Available in" picker.
  */
-function otherRowCopy(task: TaskDef): {
+function otherRowCopy(
+  task: TaskDef,
+  tx: ReturnType<typeof useScriptsText>,
+): {
   attribution: string;
   reason: string;
   runLabel: string;
@@ -470,17 +487,26 @@ function otherRowCopy(task: TaskDef): {
   const scope = taskScope(task);
   if (scope === TASK_SCOPE_UNKNOWN) {
     return {
-      attribution: "scope unreadable",
-      reason: `"${task.name}" has an unreadable saved scope — edit the task to choose where it's available`,
-      runLabel: "Run (scope unreadable)",
+      attribution: tx("scope unreadable"),
+      reason: tx(
+        '"{{name}}" has an unreadable saved scope — edit the task to choose where it\'s available',
+        { name: task.name },
+      ),
+      runLabel: tx("Run (scope unreadable)"),
       unreadable: true,
     };
   }
   const label = scopeRepoLabel(scope);
   return {
     attribution: label,
-    reason: `"${task.name}" is scoped to "${label}" — open that repository to run it`,
-    runLabel: `Run (scoped to "${label}")`,
+    reason: tx(
+      '"{{name}}" is scoped to "{{repo}}" — open that repository to run it',
+      {
+        name: task.name,
+        repo: label,
+      },
+    ),
+    runLabel: tx('Run (scoped to "{{repo}}")', { repo: label }),
     unreadable: false,
   };
 }
@@ -507,7 +533,8 @@ function OtherTaskRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const copy = otherRowCopy(task);
+  const tx = useScriptsText();
+  const copy = otherRowCopy(task, tx);
   const { blockedReason, reasonId, wrapperTitle, describedBy, nativeProps } =
     useDisabledReason({ disabled: true, reason: copy.reason });
 
@@ -537,7 +564,7 @@ function OtherTaskRow({
             <span className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate">{task.name}</span>
               <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                {INTERPRETER_LABELS[task.interpreter] ?? task.interpreter}
+                {tx(INTERPRETER_LABELS[task.interpreter] ?? task.interpreter)}
               </span>
             </span>
             <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -563,8 +590,8 @@ function OtherTaskRow({
               size="icon-xs"
               variant="ghost"
               className="shrink-0 text-muted-foreground"
-              title={`More actions for "${task.name}"`}
-              aria-label={`More actions for ${task.name}`}
+              title={tx('More actions for "{{name}}"', { name: task.name })}
+              aria-label={tx("More actions for {{name}}", { name: task.name })}
             />
           }
         >
@@ -577,11 +604,11 @@ function OtherTaskRow({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onEdit}>
             <PencilSimpleIcon data-icon="inline-start" />
-            Edit
+            {tx("Edit")}
           </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" onClick={onDelete}>
             <TrashIcon data-icon="inline-start" />
-            Delete
+            {tx("Delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

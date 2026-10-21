@@ -7,6 +7,7 @@ import {
   type MarkdownEditorHandle,
 } from "@/components/markdown-editor";
 import { SUBMIT_HINT } from "@/lib/hotkeys/binding";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useComposerCollapsed } from "./useComposerCollapsed";
 import type { MentionSource } from "./useMentionCandidates";
 
@@ -85,6 +86,7 @@ export function CommentComposer({
    *  completed reference pass one. */
   mentions?: MentionSource;
 }) {
+  const tx = useCommonText();
   const hasDraft = value.trim().length > 0;
   // Only the `busy` hold gets words: an empty draft explains itself, and a reason
   // there would add a tab stop for every viewer who simply hasn't typed yet.
@@ -280,7 +282,7 @@ export function CommentComposer({
             >
               <CaretRightIcon className="size-3 shrink-0" />
               {hasDraft && (
-                <span className="shrink-0 rounded border px-1">Draft</span>
+                <span className="shrink-0 rounded border px-1">{tx("Draft")}</span>
               )}
               <span className="truncate">
                 {hasDraft ? value.trim().split("\n", 1)[0] : placeholder}
@@ -299,8 +301,8 @@ export function CommentComposer({
             className="flex shrink-0 items-center text-muted-foreground hover:text-foreground"
             aria-expanded
             aria-controls={editorId}
-            aria-label="Collapse the comment box"
-            title="Collapse the comment box"
+            aria-label={tx("Collapse the comment box")}
+            title={tx("Collapse the comment box")}
             onClick={collapse}
           >
             <CaretDownIcon className="size-3" />
@@ -328,9 +330,9 @@ export function CommentComposer({
             disabled={busy}
             reason={blockedReason}
             onClick={onClear}
-            title="Discard this draft (e.g. a quote reply)"
+            title={tx("Discard this draft (e.g. a quote reply)")}
           >
-            Clear
+            {tx("Clear")}
           </DisabledReasonButton>
         )}
       </div>

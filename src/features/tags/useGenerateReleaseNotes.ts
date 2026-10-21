@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAiStream } from "@/features/conversations/useAiStream";
 import { buildReleaseNotesPrompt } from "@/lib/ai/prompt";
@@ -77,6 +78,7 @@ async function gatherReleaseSource(
  * settled run from an aborted one, whose per-chunk `onResult` still fired.
  */
 export function useGenerateReleaseNotes(repoPath: string) {
+  const { t } = useTranslation("tags");
   const { generating, cancel, run } = useAiStream(repoPath);
 
   const generate = useCallback(
@@ -113,12 +115,12 @@ export function useGenerateReleaseNotes(repoPath: string) {
       // A blank completion is a failed generation, so it collapses to the same
       // null a bail/abort/error resolves — one owner for "no notes landed".
       if (buffer !== null && !buffer.trim()) {
-        toast.error("Couldn't generate notes — try again.");
+        toast.error(t("errors.generateNotesFailed"));
         return null;
       }
       return buffer;
     },
-    [repoPath, run],
+    [repoPath, run, t],
   );
 
   return { generate, cancel, generating };

@@ -725,7 +725,7 @@ export const useUiStore = create<UiState>()((set, get) => {
     queuedMerges: {},
     repoPath: null,
     repoName: null,
-    repoTab: "changes",
+    repoTab: "history",
     compareBranch: null,
     selectedPr: null,
     pendingPrSection: null,
@@ -767,7 +767,7 @@ export const useUiStore = create<UiState>()((set, get) => {
             previousView: "repo",
             repoPath: info.root,
             repoName: info.name,
-            repoTab: "changes",
+            repoTab: "history",
             // Clear the live fields; the previous repo's draft stays in
             // commitDrafts (keyed by repo+branch) and CommitBox reloads the new
             // repo's draft once its branch is known.

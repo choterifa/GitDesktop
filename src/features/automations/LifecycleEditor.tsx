@@ -5,6 +5,7 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,7 +23,6 @@ import {
   type ActionId,
   type BranchConditions,
   branchConditionsPass,
-  LIFECYCLE_LABELS,
   type LifecycleEvent,
 } from "@/lib/automations/types";
 import { matchesGlob } from "@/lib/branch-rules/match";
@@ -30,17 +30,16 @@ import { matchesGlob } from "@/lib/branch-rules/match";
 const ACTION_IDS = Object.keys(ACTION_LABELS) as ActionId[];
 const LIFECYCLE_ORDER: LifecycleEvent[] = ["commit", "pr-open", "pr-sync"];
 
-const LIFECYCLE_HELP: Record<LifecycleEvent, string> = {
-  commit: "Runs after you commit on a branch that meets the conditions.",
-  "pr-open": "Runs once when a pull request is opened.",
-  "pr-sync":
-    "Re-reviews a pull request when new commits arrive — only PRs already reviewed in that mode.",
+const LIFECYCLE_HELP_KEYS: Record<LifecycleEvent, string> = {
+  commit: "lifecycleHelp.commit",
+  "pr-open": "lifecycleHelp.prOpen",
+  "pr-sync": "lifecycleHelp.prSync",
 };
 
-const MATCH_LABELS: Record<BranchConditions["match"], string> = {
-  head: "Source branch",
-  base: "Target branch",
-  either: "Either branch",
+const MATCH_LABEL_KEYS: Record<BranchConditions["match"], string> = {
+  head: "conditions.matchSource",
+  base: "conditions.matchTarget",
+  either: "conditions.matchEither",
 };
 
 /**
@@ -90,13 +89,18 @@ export function sanitizeConditions(
 
 /** A short muted line for a collapsed conditions editor (e.g. "only release/**, except wip/*").
  *  Only non-blank patterns contribute. */
-function conditionsSummary(c: BranchConditions | undefined): string | null {
+function conditionsSummary(
+  c: BranchConditions | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string | null {
   if (!hasConditions(c)) return null;
   const include = (c?.include ?? []).filter((p) => p.trim() !== "");
   const exclude = (c?.exclude ?? []).filter((p) => p.trim() !== "");
   const parts: string[] = [];
-  if (include.length) parts.push(`only ${include.join(", ")}`);
-  if (exclude.length) parts.push(`except ${exclude.join(", ")}`);
+  if (include.length)
+    parts.push(t("conditions.summaryOnly", { patterns: include.join(", ") }));
+  if (exclude.length)
+    parts.push(t("conditions.summaryExcept", { patterns: exclude.join(", ") }));
   return parts.join(", ");
 }
 
@@ -114,10 +118,17 @@ function ConditionsEditor({
   conditions: BranchConditions | undefined;
   onChange: (next: BranchConditions) => void;
 }) {
+  const { t } = useTranslation("automations");
+  const matchLabels = Object.fromEntries(
+    Object.entries(MATCH_LABEL_KEYS).map(([key, translationKey]) => [
+      key,
+      t(translationKey),
+    ]),
+  );
   const [open, setOpen] = useState(false);
   const [testBranch, setTestBranch] = useState("");
   const c = conditions ?? EMPTY_CONDITIONS;
-  const summary = conditionsSummary(conditions);
+  const summary = conditionsSummary(conditions, t);
   const includeLabelId = useId();
   const excludeLabelId = useId();
   const matchSelectId = useId();
@@ -149,7 +160,7 @@ function ConditionsEditor({
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Remove pattern"
+              aria-label={t("conditions.removePattern")}
               onClick={() =>
                 patchList(
                   key,
@@ -167,7 +178,7 @@ function ConditionsEditor({
           onClick={() => patchList(key, [...list, ""])}
         >
           <PlusIcon data-icon="inline-start" />
-          Add pattern
+          {t("conditions.addPattern")}
         </Button>
       </div>
     );
@@ -199,7 +210,7 @@ function ConditionsEditor({
         ) : (
           <CaretRightIcon className="size-3" />
         )}
-        Conditions
+        {t("conditions.title")}
         {!open && summary && (
           <span className="text-muted-foreground/80">— {summary}</span>
         )}
@@ -213,7 +224,7 @@ function ConditionsEditor({
             aria-labelledby={includeLabelId}
           >
             <Label id={includeLabelId} className="text-xs">
-              Only these branches (optional)
+              {t("conditions.onlyBranches")}
             </Label>
             {renderPatternRows("include", "release/**")}
           </div>
@@ -223,17 +234,17 @@ function ConditionsEditor({
             aria-labelledby={excludeLabelId}
           >
             <Label id={excludeLabelId} className="text-xs">
-              Except these branches
+              {t("conditions.exceptBranches")}
             </Label>
             {renderPatternRows("exclude", "wip/*")}
           </div>
           {usesMatch(lifecycle) && (
             <div className="space-y-1">
               <Label htmlFor={matchSelectId} className="text-xs">
-                Match against
+                {t("conditions.matchAgainst")}
               </Label>
               <Select
-                items={MATCH_LABELS}
+                items={matchLabels}
                 value={c.match}
                 onValueChange={(v) =>
                   v && onChange({ ...c, match: v as BranchConditions["match"] })
@@ -244,10 +255,10 @@ function ConditionsEditor({
                 </SelectTrigger>
                 <SelectContent>
                   {(
-                    Object.keys(MATCH_LABELS) as BranchConditions["match"][]
+                    Object.keys(MATCH_LABEL_KEYS) as BranchConditions["match"][]
                   ).map((m) => (
                     <SelectItem key={m} value={m}>
-                      {MATCH_LABELS[m]}
+                      {t(MATCH_LABEL_KEYS[m])}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -256,7 +267,7 @@ function ConditionsEditor({
           )}
           <div className="space-y-1">
             <Label htmlFor={testBranchId} className="text-xs">
-              Try a branch
+              {t("conditions.tryBranch")}
             </Label>
             <div className="flex items-center gap-2">
               <Input
@@ -275,14 +286,14 @@ function ConditionsEditor({
                   }
                 >
                   {runs ? (
-                    "runs"
+                    t("conditions.runs")
                   ) : blockingExclude ? (
                     <>
-                      skipped — excluded by{" "}
+                      {t("conditions.skippedExcludedBy")}{" "}
                       <span className="font-mono">{blockingExclude}</span>
                     </>
                   ) : (
-                    "skipped — no include matches"
+                    t("conditions.skippedNoInclude")
                   )}
                 </span>
               )}
@@ -305,6 +316,7 @@ function ActionRow({
   cell: CellState;
   onPatch: (patch: CellPatch) => void;
 }) {
+  const { t } = useTranslation("automations");
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -315,11 +327,11 @@ function ActionRow({
               onPatch({ enabled: checked === true })
             }
           />
-          {ACTION_LABELS[action]}
+          {t(`actions.${action}`)}
         </label>
         {cell.overridden && (
           <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-            Overridden
+            {t("repo.overridden")}
           </Badge>
         )}
       </div>
@@ -351,16 +363,17 @@ export function LifecycleEditor({
     patch: CellPatch,
   ) => void;
 }) {
+  const { t } = useTranslation("automations");
   return (
     <div className="space-y-3">
       {LIFECYCLE_ORDER.map((lifecycle) => (
         <div key={lifecycle} className="space-y-2.5 rounded-md border p-2.5">
           <div>
             <h3 className="text-xs font-medium">
-              {LIFECYCLE_LABELS[lifecycle]}
+              {t(`lifecycles.${lifecycle}`)}
             </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {LIFECYCLE_HELP[lifecycle]}
+              {t(LIFECYCLE_HELP_KEYS[lifecycle])}
             </p>
           </div>
           <div className="space-y-3">

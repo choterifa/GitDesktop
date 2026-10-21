@@ -37,6 +37,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 const APPS: { value: SecretApp; label: string }[] = [
   { value: "actions", label: "Actions" },
@@ -48,13 +49,8 @@ const REPO_SCOPE = "$repo";
 
 /** Trigger labels for the store select — without them Base UI shows the raw
  *  value ("codespaces"). */
-const APP_ITEMS: Record<string, string> = Object.fromEntries(
-  APPS.map((a) => [a.value, a.label]),
-);
-
 /** Trigger label for the scope sentinel. Environment names label as themselves,
  *  which is what an unmapped value already renders. */
-const SCOPE_ITEMS: Record<string, string> = { [REPO_SCOPE]: "Repository" };
 
 /** GitHub's rule: letters/digits/underscore, not starting with a digit, and not
  *  starting with GITHUB_. */
@@ -79,6 +75,7 @@ export function SecretsSection({
   const [scope, setScope] = useState<string>(REPO_SCOPE);
   const storeSelectId = useId();
   const scopeSelectId = useId();
+  const appItems = Object.fromEntries(APPS.map((a) => [a.value, tr(a.label)]));
 
   const envs = useEnvironments(repoPath, open);
   // Environment scope exists only for Actions (secrets and variables).
@@ -112,10 +109,10 @@ export function SecretsSection({
               htmlFor={storeSelectId}
               className="text-[11px] text-muted-foreground"
             >
-              Store
+              {tr("Store")}
             </Label>
             <Select
-              items={APP_ITEMS}
+              items={appItems}
               value={app}
               onValueChange={(v) => v && setApp(v as SecretApp)}
             >
@@ -125,7 +122,7 @@ export function SecretsSection({
               <SelectContent>
                 {APPS.map((a) => (
                   <SelectItem key={a.value} value={a.value}>
-                    {a.label}
+                    {tr(a.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -138,10 +135,10 @@ export function SecretsSection({
             htmlFor={scopeSelectId}
             className="text-[11px] text-muted-foreground"
           >
-            Scope
+            {tr("Scope")}
           </Label>
           <Select
-            items={SCOPE_ITEMS}
+            items={{ [REPO_SCOPE]: tr("Repository") }}
             value={env ?? REPO_SCOPE}
             onValueChange={(v) => v && setScope(v)}
             disabled={!envAllowed}
@@ -150,7 +147,7 @@ export function SecretsSection({
               <SelectValue onMouseEnter={clipTitleFromText} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={REPO_SCOPE}>Repository</SelectItem>
+              <SelectItem value={REPO_SCOPE}>{tr("Repository")}</SelectItem>
               {(envs.data ?? []).map((e) => (
                 <SelectItem key={e} value={e}>
                   <SelectClipText>{e}</SelectClipText>
@@ -218,7 +215,7 @@ function SecretsList({
   async function add() {
     try {
       await set.mutateAsync({ app, env, name: name.trim(), value });
-      toast.success("Secret saved");
+      toast.success(tr("Secret saved"));
       setName("");
       setValue("");
     } catch (e) {
@@ -229,7 +226,7 @@ function SecretsList({
   async function remove(secretName: string) {
     try {
       await del.mutateAsync({ app, env, name: secretName });
-      toast.success("Secret removed");
+      toast.success(tr("Secret removed"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -258,7 +255,7 @@ function SecretsList({
             type="password"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="Value"
+            placeholder={tr("Value")}
             autoComplete="off"
           />
           <DisabledReasonButton
@@ -272,21 +269,22 @@ function SecretsList({
             ) : (
               <PlusIcon data-icon="inline-start" />
             )}
-            Add
+            {tr("Add")}
           </DisabledReasonButton>
         </div>
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Encrypted before it leaves your machine. The value can't be shown
-          again — re-enter it to change it.
+          {tr(
+            "Encrypted before it leaves your machine. The value can't be shown\r\n          again — re-enter it to change it.",
+          )}
         </p>
       </div>
 
       <RemoteListSection
         query={secrets}
         rowCount={secrets.data?.length ?? 0}
-        noun="secrets"
-        loadFailed="Couldn't load secrets."
-        emptyLabel="No secrets here yet."
+        noun={tr("secrets")}
+        loadFailed={tr("Couldn't load secrets.")}
+        emptyLabel={tr("No secrets here yet.")}
         errorScope="repo"
       >
         {secrets.data?.map((s) => (
@@ -295,7 +293,9 @@ function SecretsList({
             name={s.name}
             meta={
               s.updatedAt && parseableDate(s.updatedAt)
-                ? `Updated ${formatRelativeTime(s.updatedAt, now)}`
+                ? tr("Updated {{time}}", {
+                    time: formatRelativeTime(s.updatedAt, now),
+                  })
                 : ""
             }
             confirming={confirming === s.name}
@@ -348,7 +348,7 @@ function VariablesList({
   async function add() {
     try {
       await set.mutateAsync({ env, name: name.trim(), value });
-      toast.success("Variable saved");
+      toast.success(tr("Variable saved"));
       setName("");
       setValue("");
     } catch (e) {
@@ -359,7 +359,7 @@ function VariablesList({
   async function remove(variableName: string) {
     try {
       await del.mutateAsync({ env, name: variableName });
-      toast.success("Variable removed");
+      toast.success(tr("Variable removed"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -387,7 +387,7 @@ function VariablesList({
           <Input
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="Value"
+            placeholder={tr("Value")}
             autoComplete="off"
           />
           <DisabledReasonButton
@@ -401,20 +401,20 @@ function VariablesList({
             ) : (
               <PlusIcon data-icon="inline-start" />
             )}
-            Save
+            {tr("Save")}
           </DisabledReasonButton>
         </div>
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Reusing an existing name updates that variable.
+          {tr("Reusing an existing name updates that variable.")}
         </p>
       </div>
 
       <RemoteListSection
         query={variables}
         rowCount={variables.data?.length ?? 0}
-        noun="variables"
-        loadFailed="Couldn't load variables."
-        emptyLabel="No variables here yet."
+        noun={tr("variables")}
+        loadFailed={tr("Couldn't load variables.")}
+        emptyLabel={tr("No variables here yet.")}
         errorScope="repo"
       >
         {variables.data?.map((v) => (
@@ -485,8 +485,8 @@ function Row({
       </div>
       {confirming ? (
         <InlineConfirm
-          prompt="Delete?"
-          actLabel="Delete"
+          prompt={tr("Delete?")}
+          actLabel={tr("Delete")}
           pending={pending}
           heldReason={confirmHeld}
           swapFocusRef={swapFocus()}
@@ -497,7 +497,7 @@ function Row({
         <>
           {onEdit && (
             <Button size="sm" variant="ghost" onClick={onEdit}>
-              Edit
+              {tr("Edit")}
             </Button>
           )}
           <Button
@@ -505,7 +505,7 @@ function Row({
             size="sm"
             variant="ghost"
             className="text-destructive hover:text-destructive"
-            aria-label={`Delete ${name}`}
+            aria-label={tr("Delete {{name}}", { name })}
             onClick={onConfirm}
           >
             <TrashIcon />

@@ -36,6 +36,7 @@ import { ImportMcpDialog } from "./mcp/ImportMcpDialog";
 import { McpServerDialog } from "./mcp/McpServerDialog";
 import { PerRepoStateControl } from "./mcp/PerRepoStateControl";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 /** The row's small warning chip, restyled from the Badge base it rides. Its
  *  hover/open tint is warning-keyed: the secondary variant's own tint matches
@@ -46,6 +47,7 @@ const MCP_CHIP_CLASS =
 export const McpServersSection = withForm({
   ...settingsFormOpts,
   render: function McpServersSectionRender({ form }) {
+    const tx = useSettingsText();
     // The registry as an array whatever the stored container is: `loadSettings`
     // preserves a corrupt non-array rather than destroying it, so this section
     // renders empty and every edit below BUILDS FROM this guarded view — writing a
@@ -95,7 +97,13 @@ export const McpServersSection = withForm({
       const admitted: McpServer[] = [];
       for (const s of incoming) {
         const reason = mcpHostGateReason(s, allowedHosts);
-        if (reason) toast.error(`"${s.name}" wasn't registered — ${reason}`);
+        if (reason)
+          toast.error(
+            tx("{{name}} wasn't registered — {{reason}}", {
+              name: s.name,
+              reason,
+            }),
+          );
         else admitted.push(s);
       }
       return admitted;
@@ -147,7 +155,7 @@ export const McpServersSection = withForm({
       // Tidy up any keychain secrets the server owned (best-effort).
       for (const key of server.secretKeys)
         void deleteMcpSecret(server.id, key).catch(() => undefined);
-      toast.success(`Removed "${server.name}"`);
+      toast.success(tx('Removed "{{name}}"', { name: server.name }));
     }
 
     function toggleEnabled(server: McpServer, enabled: boolean) {
@@ -198,16 +206,20 @@ export const McpServersSection = withForm({
     }[] = [
       {
         key: "global",
-        label: "Global — all repositories",
+        label: tx("Global — all repositories"),
         // With a repo open, the per-row control sets this repo's override.
         hint: repoPath
-          ? "Set how each behaves in this repo, or Default to follow the global setting."
+          ? tx(
+              "Set how each behaves in this repo, or Default to follow the global setting.",
+            )
           : undefined,
         servers: list.filter((s) => serverScope(s) === MCP_SCOPE_GLOBAL),
       },
       {
         key: "repo",
-        label: `This repo — ${repoName ?? (repoPath ? repoNameFromPath(repoPath) : "")}`,
+        label: tx("This repo — {{repo}}", {
+          repo: repoName ?? (repoPath ? repoNameFromPath(repoPath) : ""),
+        }),
         // "This repo" = scoped to any of the open repo's keys (identity or a
         // legacy raw checkout path), so a server scoped from a sibling worktree
         // groups here too.
@@ -221,7 +233,7 @@ export const McpServersSection = withForm({
       },
       {
         key: "other",
-        label: "Other repositories",
+        label: tx("Other repositories"),
         servers: list.filter((s) => {
           const sc = serverScope(s);
           return sc !== MCP_SCOPE_GLOBAL && !isServerInScope(s, repoKeys);
@@ -250,13 +262,11 @@ export const McpServersSection = withForm({
       <section className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-medium">MCP servers</h2>
+            <h2 className="text-sm font-medium">{tx("MCP servers")}</h2>
             <p className="text-xs text-muted-foreground">
-              Register Model Context Protocol servers that agent sessions can
-              opt into. Each session passes{" "}
-              <strong className="font-medium">only</strong> the servers you pick
-              to its CLI in strict mode, so a run never inherits other MCP
-              servers on your machine. Secrets are stored in your OS keychain.
+              {tx(
+                "Register Model Context Protocol servers that agent sessions can opt into. Each session passes only the servers you pick to its CLI in strict mode, so a run never inherits other MCP servers on your machine. Secrets are stored in your OS keychain.",
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -264,32 +274,35 @@ export const McpServersSection = withForm({
               variant="ghost"
               size="sm"
               onClick={() => setBrowseOpen(true)}
-              title="Browse the MCP registry and GitHub for servers"
+              title={tx("Browse the MCP registry and GitHub for servers")}
             >
-              <MagnifyingGlassIcon data-icon="inline-start" /> Browse
+              <MagnifyingGlassIcon data-icon="inline-start" /> {tx("Browse")}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setImportOpen(true)}
-              title="Import servers you've already configured (.mcp.json / global)"
+              title={tx(
+                "Import servers you've already configured (.mcp.json / global)",
+              )}
             >
-              <DownloadSimpleIcon data-icon="inline-start" /> Import
+              <DownloadSimpleIcon data-icon="inline-start" /> {tx("Import")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={() => setEditing("new")}
             >
-              <PlusIcon data-icon="inline-start" /> Add server
+              <PlusIcon data-icon="inline-start" /> {tx("Add server")}
             </Button>
           </div>
         </div>
 
         {list.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No MCP servers yet. Add one to make it available in the agent
-            composer's server picker.
+            {tx(
+              "No MCP servers yet. Add one to make it available in the agent composer's server picker.",
+            )}
           </p>
         ) : (
           // A roving-focus list (arrow keys move between rows); grouped by scope.
@@ -334,10 +347,20 @@ export const McpServersSection = withForm({
                     <div
                       key={server.id}
                       data-mcp-row={server.id}
-                      aria-label={`${server.name}, ${server.transport}, ${effectiveMcpState(
-                        server,
-                        repoKeys,
-                      )}. Press Enter to edit.`}
+                      aria-label={tx(
+                        "{{name}}, {{transport}}, {{state}}. Press Enter to edit.",
+                        {
+                          name: server.name,
+                          transport: server.transport,
+                          state: tx(
+                            effectiveMcpState(server, repoKeys) === "on"
+                              ? "On"
+                              : effectiveMcpState(server, repoKeys) === "off"
+                                ? "Off"
+                                : "Optional",
+                          ),
+                        },
+                      )}
                       tabIndex={
                         i === safeActive || (safeActive === -1 && i === 0)
                           ? 0
@@ -370,16 +393,27 @@ export const McpServersSection = withForm({
                         <StatusDetailChip
                           variant="secondary"
                           className={MCP_CHIP_CLASS}
-                          label="needs setup"
-                          detail={`Set the ${server.transport === "stdio" ? "command" : "URL"} before enabling — edit this server.`}
+                          label={tx("needs setup")}
+                          detail={tx(
+                            "Set the {{field}} before enabling — edit this server.",
+                            {
+                              field: tx(
+                                server.transport === "stdio"
+                                  ? "command"
+                                  : "URL",
+                              ),
+                            },
+                          )}
                         />
                       )}
                       {hostNotAllowed && (
                         <StatusDetailChip
                           variant="secondary"
                           className={MCP_CHIP_CLASS}
-                          label="host not allowed"
-                          detail="The CLI connects to this host outside GitDesktop's AI host allowlist. Allow the host in AI settings to clear this."
+                          label={tx("host not allowed")}
+                          detail={tx(
+                            "The CLI connects to this host outside GitDesktop's AI host allowlist. Allow the host in AI settings to clear this.",
+                          )}
                         />
                       )}
                       {server.description && (
@@ -406,13 +440,18 @@ export const McpServersSection = withForm({
                             checked={server.enabled}
                             disabled={incomplete}
                             onCheckedChange={(v) => toggleEnabled(server, v)}
-                            aria-label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}
+                            aria-label={tx("{{action}} {{name}}", {
+                              action: tx(server.enabled ? "Disable" : "Enable"),
+                              name: server.name,
+                            })}
                           />
                         )}
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Edit ${server.name}`}
+                          aria-label={tx("Edit {{name}}", {
+                            name: server.name,
+                          })}
                           onClick={() => setEditing(server)}
                         >
                           <PencilSimpleIcon />
@@ -420,7 +459,9 @@ export const McpServersSection = withForm({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Remove ${server.name}`}
+                          aria-label={tx("Remove {{name}}", {
+                            name: server.name,
+                          })}
                           onClick={() => removeServer(server)}
                         >
                           <XIcon />

@@ -8,6 +8,7 @@ import {
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { HeldFrame, heldParentProps } from "@/components/held-frame";
@@ -43,8 +44,6 @@ import {
 import { makeQuoteReply } from "@/features/conversations/quoteReply";
 import { ReactionBar } from "@/features/conversations/ReactionBar";
 import {
-  detailNoticeMessage,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
 } from "@/features/conversations/remote-section-state";
@@ -70,7 +69,6 @@ import {
   forgeFeatureReady,
   pendingIssueWrite,
   repoKeys,
-  TRIAGE_ACCESS_ITEM_REASON,
   triageAccessReason,
   useCloseIssue,
   useCommentIssue,
@@ -97,7 +95,6 @@ import {
   useTransferIssue,
   useUnlockIssue,
   useUnminimizeComment,
-  WRITE_ACCESS_ITEM_REASON,
   writeAccessReason,
 } from "@/lib/git/queries";
 import {
@@ -107,11 +104,7 @@ import {
 } from "@/lib/git/types";
 import { useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import {
-  COMMENT_DELETE_PENDING_REASON,
-  COMMENT_POST_PENDING_REASON,
-  OFFLINE_ITEM_REASON,
   pendingItemReason,
-  pendingWriteReason,
   RIDING_COMMENT_CLOSE_HELD,
   refuseWhileOffline,
   useOfflineHold,
@@ -131,27 +124,20 @@ import { SolveIssueButton } from "../sessions/SolveIssueButton";
 import { IssueSubIssues } from "./IssueRelations";
 import {
   DeleteIssueDialog,
-  ISSUE_SWITCH_LOADING_REASON,
+  ISSUE_SWITCH_LOADING_REASON_KEY,
   IssueLoadingFrame,
   IssueSidebar,
   TransferIssueDialog,
 } from "./RemoteIssueViewParts";
 
-/** GitHub's lock reasons (menu label → API value); null locks with no reason. */
+/** GitHub lock reason API values; labels are translated at render time. */
 const LOCK_REASONS: [string, LockReason | null][] = [
-  ["No reason", null],
-  ["Off-topic", "off_topic"],
-  ["Resolved", "resolved"],
-  ["Spam", "spam"],
-  ["Too heated", "too_heated"],
+  ["noReason", null],
+  ["offTopic", "off_topic"],
+  ["resolved", "resolved"],
+  ["spam", "spam"],
+  ["tooHeated", "too_heated"],
 ];
-
-/** What the close prompt's title adds per route: GitHub's "not planned" close is
- *  a different act from a plain one, and only the title says so. */
-const CLOSE_TITLE_QUALIFIER = {
-  completed: "",
-  not_planned: " as not planned",
-} as const;
 
 /** The issue's row in any cached list page of this repo and lens, read at
  *  render for the loading frame's title and state; undefined when no list
@@ -187,6 +173,8 @@ export function RemoteIssueView({
   repoPath: string;
   number: number;
 }) {
+  const { t } = useTranslation("issues");
+  const issueSwitchReason = t(ISSUE_SWITCH_LOADING_REASON_KEY);
   // The read view is provider-neutral. The remaining GitHub-only mutations
   // (pin, sub-issues, close reason) route through `gh_*` commands and stay
   // gated on `canWrite` — "not a known read-only provider" rather than
@@ -210,14 +198,28 @@ export function RemoteIssueView({
   // pin, transfer, delete and branch creation are write-tier. Each blocked flag
   // derives from its reason so the two can never disagree.
   const writeAccess = useRepoWriteAccess(repoPath, lens, !!provider);
-  const writeReason = writeAccessReason(writeAccess.data);
-  const triageReason = triageAccessReason(writeAccess.data);
+  const writeAccessDetail = writeAccessReason(writeAccess.data);
+  const triageAccessDetail = triageAccessReason(writeAccess.data);
+  const writeReason = writeAccessDetail
+    ? t("remote.writeAccessReason", {
+        repo: writeAccess.data?.repo ?? t("remote.thisRepository"),
+      })
+    : undefined;
+  const triageReason = triageAccessDetail
+    ? t("remote.triageAccessReason", {
+        repo: writeAccess.data?.repo ?? t("remote.thisRepository"),
+      })
+    : undefined;
   const writeBlocked = !!writeReason;
   const triageBlocked = !!triageReason;
   // A disabled menu item drops pointer events, so its explanation goes in the
   // label; each suffix is empty whenever its axis allows the action.
-  const triageItemReason = triageReason ? TRIAGE_ACCESS_ITEM_REASON : undefined;
-  const writeItemReason = writeReason ? WRITE_ACCESS_ITEM_REASON : undefined;
+  const triageItemReason = triageReason
+    ? t("remote.triageAccessItemReason")
+    : undefined;
+  const writeItemReason = writeReason
+    ? t("remote.writeAccessItemReason")
+    : undefined;
   // Set while offline. Close, pin, lock and the transfer/delete confirms hold on
   // it at the press; the composer's writes are left to park, and
   // `composerReason` says so.
@@ -311,11 +313,19 @@ export function RemoteIssueView({
   const pinHeld = (() => {
     switch (true) {
       case pinning !== undefined:
-        return pendingItemReason(pinning.paused, "pinning…");
+        return pendingItemReason(
+          pinning.paused,
+          t("remote.pinning"),
+          t("remote.offlineItem"),
+        );
       case unpinning !== undefined:
-        return pendingItemReason(unpinning.paused, "unpinning…");
+        return pendingItemReason(
+          unpinning.paused,
+          t("remote.unpinning"),
+          t("remote.offlineItem"),
+        );
       case !!offlineHold:
-        return OFFLINE_ITEM_REASON;
+        return t("remote.offlineItem");
       default:
         return undefined;
     }
@@ -323,11 +333,19 @@ export function RemoteIssueView({
   const lockHeld = (() => {
     switch (true) {
       case locking !== undefined:
-        return pendingItemReason(locking.paused, "locking…");
+        return pendingItemReason(
+          locking.paused,
+          t("remote.locking"),
+          t("remote.offlineItem"),
+        );
       case unlocking !== undefined:
-        return pendingItemReason(unlocking.paused, "unlocking…");
+        return pendingItemReason(
+          unlocking.paused,
+          t("remote.unlocking"),
+          t("remote.offlineItem"),
+        );
       case !!offlineHold:
-        return OFFLINE_ITEM_REASON;
+        return t("remote.offlineItem");
       default:
         return undefined;
     }
@@ -479,7 +497,7 @@ export function RemoteIssueView({
     onSave: async ({ title, body }) => {
       await editIssue.mutateAsync({ number, title, body });
     },
-    successToast: "Issue updated",
+    successToast: t("remote.issueUpdated"),
   });
   // A different issue must never inherit this one's open delete/transfer/edit
   // dialogs — a render-time state adjustment, not an effect. The SHOWN identity
@@ -636,14 +654,14 @@ export function RemoteIssueView({
             <PlanIssueButton
               title=""
               body=""
-              disabledReason={ISSUE_SWITCH_LOADING_REASON}
+              disabledReason={issueSwitchReason}
             />
             {rowOpen && (
               <SolveIssueButton
                 repoPath={repoPath}
                 title=""
                 body=""
-                disabledReason={ISSUE_SWITCH_LOADING_REASON}
+                disabledReason={issueSwitchReason}
               />
             )}
             {rowOpen && canEdit && (
@@ -651,17 +669,17 @@ export function RemoteIssueView({
                 variant="outline"
                 size="xs"
                 disabled
-                reason={ISSUE_SWITCH_LOADING_REASON}
+                reason={issueSwitchReason}
               >
                 <PencilSimpleIcon data-icon="inline-start" />
-                Edit
+                {t("shared.edit")}
               </DisabledReasonButton>
             )}
             <DisabledReasonButton
               variant="outline"
               size="xs"
               disabled
-              reason={ISSUE_SWITCH_LOADING_REASON}
+              reason={issueSwitchReason}
             >
               <ArrowSquareOutIcon data-icon="inline-start" />
               {remoteLabel}
@@ -670,9 +688,9 @@ export function RemoteIssueView({
               <DisabledReasonButton
                 variant="outline"
                 size="xs"
-                aria-label="More actions"
+                aria-label={t("remote.moreActions")}
                 disabled
-                reason={ISSUE_SWITCH_LOADING_REASON}
+                reason={issueSwitchReason}
               >
                 <DotsThreeIcon className="size-4" weight="bold" />
               </DisabledReasonButton>
@@ -683,23 +701,21 @@ export function RemoteIssueView({
     );
   }
   if (arm === "offline") {
-    return shell(
-      <DiffPlaceholder message={offlinePendingMessage("this issue")} />,
-    );
+    return shell(<DiffPlaceholder message={t("remote.offlineIssueLoading")} />);
   }
   if (arm === "error" || !issue) {
     // The failure class isn't knowable here, so the headline claims only which
     // host the read was aimed at and the summary beneath carries the reason. The
     // host goes unnamed while its own probe hasn't answered, rather than guessed.
     const loadFailed = provider
-      ? `Couldn't load this issue from ${remoteLabel}.`
-      : "Couldn't load this issue from the remote.";
+      ? t("remote.loadIssueFromProviderFailed", { provider: remoteLabel })
+      : t("remote.loadIssueFromRemoteFailed");
     const errorSummary = details.error
       ? presentError(details.error).summary
       : null;
     return shell(
       <DiffPlaceholder
-        message={details.isError ? loadFailed : "Could not load this issue"}
+        message={details.isError ? loadFailed : t("remote.couldNotLoadIssue")}
         action={
           details.isError ? (
             <div className="flex flex-col items-center gap-2">
@@ -714,7 +730,7 @@ export function RemoteIssueView({
                 disabled={details.isFetching}
                 onClick={() => details.refetch()}
               >
-                {details.isFetching ? "Retrying…" : "Retry"}
+                {details.isFetching ? t("shared.retrying") : t("shared.retry")}
               </Button>
             </div>
           ) : undefined
@@ -729,19 +745,17 @@ export function RemoteIssueView({
   // items painted only inside an open menu (which can sit open as a hold
   // starts) refuse on the hold too. Either reason ranks BELOW any permission
   // reason: that one never lifts and is still true once the issue lands.
-  const staleReason = detailsPlaceholder
-    ? ISSUE_SWITCH_LOADING_REASON
-    : undefined;
-  const heldItemReason = detailsStale ? ISSUE_SWITCH_LOADING_REASON : undefined;
+  const staleReason = detailsPlaceholder ? issueSwitchReason : undefined;
+  const heldItemReason = detailsStale ? issueSwitchReason : undefined;
   // Offline, the selected issue's reads key on its number under the previous
   // issue's paint; held, every read keys on the shown issue, so they agree.
   const feedMismatch = detailsPlaceholder;
   const detailFailed = refreshFailed(details);
-  const detailNotice = detailNoticeMessage({
-    noun: "issue",
-    isError: detailFailed,
-    stale: detailsPlaceholder,
-  });
+  const detailNotice = detailFailed
+    ? t("remote.refreshIssueFailed")
+    : detailsPlaceholder
+      ? t("remote.offlinePreviousIssue")
+      : t("remote.offlineLastLoaded");
   // The shown issue's own writes, from the cache: this view outlives an issue
   // switch, so another issue's comment or close must not hold this one. Their
   // variables carry no lens, so a lens flip at the same number holds the other
@@ -790,14 +804,17 @@ export function RemoteIssueView({
       case detailsPlaceholder:
         return staleReason;
       case commenting !== undefined:
-        return pendingWriteReason(
-          commenting.paused,
-          COMMENT_POST_PENDING_REASON,
-        );
+        return commenting.paused
+          ? t("shared.offlineQueued")
+          : t("remote.postingComment");
       case closing !== undefined:
-        return pendingWriteReason(closing.paused, "Closing this issue…");
+        return closing.paused
+          ? t("shared.offlineQueued")
+          : t("remote.closingIssue");
       case reopening !== undefined:
-        return pendingWriteReason(reopening.paused, "Reopening this issue…");
+        return reopening.paused
+          ? t("shared.offlineQueued")
+          : t("remote.reopeningIssue");
       default:
         return undefined;
     }
@@ -875,11 +892,16 @@ export function RemoteIssueView({
     // Ahead of the riding draft: a cancelled confirm must leave the comment
     // unposted.
     const ok = await useConfirm.getState().ask({
-      title: `Close issue #${number}${CLOSE_TITLE_QUALIFIER[reason]}?`,
-      body: `Everyone watching is notified and the issue leaves the open list. Reopening puts it back, but the notification can't be unsent.${
-        withComment ? " Your draft posts as a comment first." : ""
-      }`,
-      confirmLabel: withComment ? "Close with comment" : "Close issue",
+      title:
+        reason === "not_planned"
+          ? t("remote.confirmCloseNotPlanned", { number })
+          : t("remote.confirmCloseCompleted", { number }),
+      body: t("remote.confirmCloseBody", {
+        draftNote: withComment ? t("remote.confirmCloseDraftNote") : "",
+      }),
+      confirmLabel: withComment
+        ? t("remote.closeWithComment")
+        : t("remote.closeIssue"),
       holdOffline: true,
     });
     // Ahead of the riding draft too: a close refused offline posts nothing.
@@ -888,7 +910,9 @@ export function RemoteIssueView({
       refuseWhileOffline() ||
       refuseIfSwitched(
         closeIn,
-        withComment ? "nothing was posted or closed" : "nothing was closed",
+        withComment
+          ? t("remote.nothingPostedOrClosed")
+          : t("remote.nothingWasClosed"),
       )
     )
       return;
@@ -901,8 +925,8 @@ export function RemoteIssueView({
       withComment &&
       refuseIfSwitched(
         closeIn,
-        "your comment was posted, but the issue wasn't closed",
-        "before the close started",
+        t("remote.commentPostedIssueNotClosed"),
+        t("remote.beforeCloseStarted"),
       )
     )
       return;
@@ -910,16 +934,13 @@ export function RemoteIssueView({
       await closeIssue.mutateAsync({ number, reason });
     } catch (e) {
       if (withComment) {
-        toastErrorWithNote(
-          e,
-          "Your comment was posted, but closing failed — try Close again.",
-        );
+        toastErrorWithNote(e, t("remote.commentPostedCloseFailed"));
       } else {
         onError(e);
       }
       return;
     }
-    toast.success(`Closed #${number}`);
+    toast.success(t("remote.closedIssue", { number }));
   }
 
   async function doReopen() {
@@ -933,8 +954,8 @@ export function RemoteIssueView({
       withComment &&
       refuseIfSwitched(
         reopenIn,
-        "your comment was posted, but the issue wasn't reopened",
-        "before the reopen started",
+        t("remote.commentPostedIssueNotReopened"),
+        t("remote.beforeReopenStarted"),
       )
     )
       return;
@@ -942,16 +963,13 @@ export function RemoteIssueView({
       await reopenIssue.mutateAsync(number);
     } catch (e) {
       if (withComment) {
-        toastErrorWithNote(
-          e,
-          "Your comment was posted, but reopening failed — try Reopen again.",
-        );
+        toastErrorWithNote(e, t("remote.commentPostedReopenFailed"));
       } else {
         onError(e);
       }
       return;
     }
-    toast.success(`Reopened #${number}`);
+    toast.success(t("remote.reopenedIssue", { number }));
   }
 
   function saveCommentEdit(commentId: string, body: string) {
@@ -962,7 +980,7 @@ export function RemoteIssueView({
     // left for an await to hold open.
     void editComment
       .mutateAsync({ number, commentId, body })
-      .then(() => toast.success("Comment updated"))
+      .then(() => toast.success(t("remote.commentUpdated")))
       .catch(onError);
   }
 
@@ -977,7 +995,7 @@ export function RemoteIssueView({
       onError(e);
       return;
     }
-    toast.success("Comment hidden");
+    toast.success(t("remote.commentHidden"));
   }
 
   async function unhideComment(commentId: string) {
@@ -988,7 +1006,7 @@ export function RemoteIssueView({
       onError(e);
       return;
     }
-    toast.success("Comment shown");
+    toast.success(t("remote.commentShown"));
   }
 
   function toggleReaction(subjectId: string, content: string, active: boolean) {
@@ -1076,11 +1094,16 @@ export function RemoteIssueView({
       return;
     }
     toast.success(
-      `${isGitLab ? "Moved" : "Transferred"} #${number}`,
+      isGitLab
+        ? t("remote.movedIssue", { number })
+        : t("remote.transferredIssue", { number }),
       url
         ? {
             description: url,
-            action: { label: "View", onClick: () => openUrl(url) },
+            action: {
+              label: t("remote.view"),
+              onClick: () => openUrl(url),
+            },
           }
         : undefined,
     );
@@ -1105,7 +1128,7 @@ export function RemoteIssueView({
       closeIfStillHere();
       return;
     }
-    toast.success(`Deleted #${number}`);
+    toast.success(t("remote.deletedIssue", { number }));
     closeIfStillHere();
     deselectIfStillHere(firedUnder);
   }
@@ -1120,7 +1143,7 @@ export function RemoteIssueView({
       onError(e);
       return;
     }
-    toast.success(wasPinned ? "Unpinned" : "Pinned");
+    toast.success(wasPinned ? t("remote.unpinned") : t("remote.pinned"));
   }
 
   async function doLock(reason: LockReason | null) {
@@ -1131,7 +1154,7 @@ export function RemoteIssueView({
       onError(e);
       return;
     }
-    toast.success("Conversation locked");
+    toast.success(t("remote.conversationLocked"));
   }
 
   async function doUnlock() {
@@ -1142,7 +1165,7 @@ export function RemoteIssueView({
       onError(e);
       return;
     }
-    toast.success("Conversation unlocked");
+    toast.success(t("remote.conversationUnlocked"));
   }
 
   async function removeComment(commentId: string) {
@@ -1159,7 +1182,7 @@ export function RemoteIssueView({
       closeIfStillOpen();
       return;
     }
-    toast.success("Comment deleted");
+    toast.success(t("remote.commentDeleted"));
     closeIfStillOpen();
   }
 
@@ -1281,12 +1304,12 @@ export function RemoteIssueView({
               reason={closeReason}
               onClick={() => doClose("completed")}
               title={
-                draftRidesStateChange
-                  ? "Closes and posts your draft as a comment"
-                  : undefined
+                draftRidesStateChange ? t("remote.closeDraftTitle") : undefined
               }
             >
-              {draftRidesStateChange ? "Close with comment" : "Close issue"}
+              {draftRidesStateChange
+                ? t("remote.closeWithComment")
+                : t("remote.closeIssue")}
             </DisabledReasonButton>
             {/* Close reasons are a GitHub concept; GitLab has none. */}
             {canWrite && (
@@ -1296,7 +1319,7 @@ export function RemoteIssueView({
                     <DisabledReasonButton
                       variant="outline"
                       size="icon-sm"
-                      aria-label="Other close options"
+                      aria-label={t("remote.otherCloseOptions")}
                       disabled={closeBlocked}
                       reason={closeReason}
                     />
@@ -1309,10 +1332,12 @@ export function RemoteIssueView({
                       room for a title, so the draft promise rides the label —
                       the same reason-in-label idiom the items above use. */}
                   <DropdownMenuItem onClick={() => doClose("completed")}>
-                    Close as completed{draftSuffix}
+                    {t("remote.closeAsCompleted")}
+                    {draftSuffix}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => doClose("not_planned")}>
-                    Close as not planned{draftSuffix}
+                    {t("remote.closeAsNotPlanned")}
+                    {draftSuffix}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1326,13 +1351,13 @@ export function RemoteIssueView({
             reason={triageReason ?? composerReason}
             onClick={doReopen}
             title={
-              draftRidesStateChange
-                ? "Reopens and posts your draft as a comment"
-                : undefined
+              draftRidesStateChange ? t("remote.reopenDraftTitle") : undefined
             }
           >
             <ArrowCounterClockwiseIcon data-icon="inline-start" />
-            {draftRidesStateChange ? "Reopen with comment" : "Reopen"}
+            {draftRidesStateChange
+              ? t("remote.reopenWithComment")
+              : t("shared.reopen")}
           </DisabledReasonButton>
         ))}
     </>
@@ -1341,7 +1366,7 @@ export function RemoteIssueView({
   return shell(
     <>
       <DegradedListNotice
-        noun="this issue"
+        noun={t("remote.issueNoun")}
         degraded={detailPane === "content-degraded"}
         message={detailNotice}
         onRetry={detailFailed ? () => details.refetch() : undefined}
@@ -1382,10 +1407,10 @@ export function RemoteIssueView({
               disabled={detailsPlaceholder}
               reason={staleReason}
               onClick={openIssueEdit}
-              title="Edit the title and description"
+              title={t("remote.editTitle")}
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Edit
+              {t("shared.edit")}
             </DisabledReasonButton>
           )}
           {/* The URL is the rendered issue's, the previous one mid-switch. */}
@@ -1395,7 +1420,7 @@ export function RemoteIssueView({
             disabled={detailsPlaceholder}
             reason={staleReason}
             onClick={() => openUrl(issue.url)}
-            title={`Open this issue on ${remoteLabel}`}
+            title={t("remote.openIssueOn", { provider: remoteLabel })}
             className="cursor-pointer"
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
@@ -1411,7 +1436,7 @@ export function RemoteIssueView({
                   <DisabledReasonButton
                     variant="outline"
                     size="xs"
-                    aria-label="More actions"
+                    aria-label={t("remote.moreActions")}
                     disabled={detailsPlaceholder}
                     reason={staleReason}
                   />
@@ -1429,7 +1454,9 @@ export function RemoteIssueView({
                     disabled={writeBlocked || pinHeld !== undefined}
                     onClick={() => void togglePin(issue.isPinned)}
                   >
-                    {issue.isPinned ? "Unpin issue" : "Pin issue"}
+                    {issue.isPinned
+                      ? t("remote.unpinIssue")
+                      : t("remote.pinIssue")}
                     {pinSuffix}
                   </DropdownMenuItem>
                 )}
@@ -1444,7 +1471,8 @@ export function RemoteIssueView({
                       disabled={lockBlocked || lockHeld !== undefined}
                       onClick={() => void doUnlock()}
                     >
-                      Unlock conversation{lockHeldSuffix}
+                      {t("remote.unlockConversation")}
+                      {lockHeldSuffix}
                     </DropdownMenuItem>
                   ) : isGitLab ? (
                     // GitLab locks without a reason — a plain item, no submenu.
@@ -1453,7 +1481,8 @@ export function RemoteIssueView({
                       disabled={lockBlocked || lockHeld !== undefined}
                       onClick={() => void doLock(null)}
                     >
-                      Lock conversation{lockHeldSuffix}
+                      {t("remote.lockConversation")}
+                      {lockHeldSuffix}
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuSub>
@@ -1464,7 +1493,8 @@ export function RemoteIssueView({
                         disabled={lockBlocked || lockHeld !== undefined}
                         className="data-disabled:opacity-50"
                       >
-                        Lock conversation…{lockHeldSuffix}
+                        {t("remote.lockConversationBusy")}
+                        {lockHeldSuffix}
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
                         {LOCK_REASONS.map(([label, reason]) => (
@@ -1474,7 +1504,7 @@ export function RemoteIssueView({
                             disabled={lockBlocked || lockHeld !== undefined}
                             onClick={() => void doLock(reason)}
                           >
-                            {label}
+                            {t(`remote.lockReason.${label}`)}
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuSubContent>
@@ -1489,7 +1519,7 @@ export function RemoteIssueView({
                     rendered issue's, which isn't the one you selected. */}
                 {canDuplicate && !detailsStale && (
                   <DropdownMenuItem onClick={duplicateIssue}>
-                    Duplicate issue
+                    {t("remote.duplicateIssue")}
                   </DropdownMenuItem>
                 )}
                 {/* Held, not absent, while stale: the menu can sit open across
@@ -1504,7 +1534,9 @@ export function RemoteIssueView({
                       setTransferOpen(true);
                     }}
                   >
-                    {isGitLab ? "Move issue…" : "Transfer issue…"}
+                    {isGitLab
+                      ? t("remote.moveIssue")
+                      : t("remote.transferIssue")}
                     {itemSuffix ||
                       (heldItemReason ? ` — ${heldItemReason}` : "")}
                   </DropdownMenuItem>
@@ -1518,7 +1550,8 @@ export function RemoteIssueView({
                     disabled={writeBlocked}
                     onClick={() => setDeleteOpen(true)}
                   >
-                    Delete issue…{itemSuffix}
+                    {t("remote.deleteIssue")}
+                    {itemSuffix}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -1527,12 +1560,16 @@ export function RemoteIssueView({
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant={isOpen ? "default" : "secondary"}>
-            {issue.state.toLowerCase()}
+            {issue.state === "OPEN"
+              ? t("local.status.open")
+              : t("local.status.closed")}
           </Badge>
-          {issue.isPinned && <Badge variant="secondary">pinned</Badge>}
+          {issue.isPinned && (
+            <Badge variant="secondary">{t("remote.pinned")}</Badge>
+          )}
           {issue.locked && (
             <Badge variant="secondary">
-              locked
+              {t("remote.locked")}
               {issue.activeLockReason
                 ? ` · ${issue.activeLockReason.replace(/_/g, "-")}`
                 : ""}
@@ -1542,12 +1579,12 @@ export function RemoteIssueView({
             login={issue.author}
             avatarUrl={issue.authorAvatarUrl}
           />
-          <span>{issue.author || "unknown"}</span>
+          <span>{issue.author || t("remote.unknownAuthor")}</span>
           {parseableDate(issue.createdAt) && (
             <>
               <span>•</span>
               <span>
-                opened <RelativeTime date={issue.createdAt} />
+                {t("remote.opened")} <RelativeTime date={issue.createdAt} />
               </span>
             </>
           )}
@@ -1574,11 +1611,12 @@ export function RemoteIssueView({
                     avatarUrl={issue.authorAvatarUrl}
                   />
                   <span className="font-medium">
-                    {issue.author || "unknown"}
+                    {issue.author || t("remote.unknownAuthor")}
                   </span>
                   {parseableDate(issue.createdAt) && (
                     <span className="text-muted-foreground">
-                      opened <RelativeTime date={issue.createdAt} />
+                      {t("remote.opened")}{" "}
+                      <RelativeTime date={issue.createdAt} />
                     </span>
                   )}
                   <span className="flex-1" />
@@ -1588,7 +1626,7 @@ export function RemoteIssueView({
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          aria-label="Description actions"
+                          aria-label={t("shared.descriptionActions")}
                           className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                         />
                       }
@@ -1597,9 +1635,11 @@ export function RemoteIssueView({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-44">
                       <DropdownMenuItem
-                        onClick={() => copyText(issue.url, "Link copied")}
+                        onClick={() =>
+                          copyText(issue.url, t("remote.linkCopied"))
+                        }
                       >
-                        Copy link
+                        {t("remote.copyLink")}
                       </DropdownMenuItem>
                       {/* Absent, not disabled, while the body belongs to the
                           previous issue — the same shape the comment menus take
@@ -1610,13 +1650,15 @@ export function RemoteIssueView({
                           <DropdownMenuItem
                             onClick={() => quoteReply(issue.body)}
                           >
-                            Quote reply
+                            {t("shared.quoteReply")}
                           </DropdownMenuItem>
                         )}
                       <DropdownMenuItem
-                        onClick={() => copyText(issue.body, "Markdown copied")}
+                        onClick={() =>
+                          copyText(issue.body, t("shared.markdownCopied"))
+                        }
                       >
-                        Copy markdown
+                        {t("shared.copyMarkdown")}
                       </DropdownMenuItem>
                       {/* Absent, not disabled, while the description belongs to
                           the previous issue: the dialog seeds from it, and a
@@ -1624,7 +1666,7 @@ export function RemoteIssueView({
                           reach the viewer to explain it. */}
                       {isOpen && canEdit && !detailsStale && (
                         <DropdownMenuItem onClick={openIssueEdit}>
-                          Edit
+                          {t("shared.edit")}
                         </DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
@@ -1634,7 +1676,7 @@ export function RemoteIssueView({
                   <Markdown refs={mentions.refs}>{issue.body}</Markdown>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">
-                    No description provided.
+                    {t("remote.noDescription")}
                   </p>
                 )}
                 {canReact && !reactionsReady && (
@@ -1680,7 +1722,7 @@ export function RemoteIssueView({
                   {feed.map((e) => e.node)}
                   {feed.length === 0 && (
                     <p className="text-xs text-muted-foreground">
-                      No comments yet.
+                      {t("shared.noComments")}
                     </p>
                   )}
                 </>
@@ -1689,7 +1731,7 @@ export function RemoteIssueView({
                   rows={3}
                   lines={2}
                   indent={false}
-                  name="the conversation"
+                  name={t("remote.conversation")}
                 />
               )}
             </div>
@@ -1734,13 +1776,13 @@ export function RemoteIssueView({
       {canComment ? (
         <CommentComposer
           ref={composerRef}
-          ariaLabel="Leave a comment"
-          placeholder="Leave a comment…"
+          ariaLabel={t("remote.leaveComment")}
+          placeholder={t("remote.leaveCommentPlaceholder")}
           value={compose.value}
           onChange={compose.set}
           onSubmit={submitComment}
           mentions={mentions}
-          submitLabel="Comment"
+          submitLabel={t("shared.comment")}
           busy={busy}
           reason={composerReason}
           // Close/reopen lead, Comment ends the row where a form's submit is
@@ -1758,9 +1800,9 @@ export function RemoteIssueView({
                   disabled={busy}
                   reason={composerReason}
                   onClick={() => compose.set("")}
-                  title="Discard this draft (e.g. a quote reply)"
+                  title={t("remote.discardDraft")}
                 >
-                  Clear
+                  {t("remote.clear")}
                 </DisabledReasonButton>
               )}
             </>
@@ -1776,8 +1818,11 @@ export function RemoteIssueView({
         form={edit.form}
         open={edit.open && hold.interactive}
         onOpenChange={edit.setOpen}
-        title="Edit issue"
-        description={`Updates the title and description of #${number} on ${remoteLabel}.`}
+        title={t("remote.editIssue")}
+        description={t("remote.updateIssueDescription", {
+          number,
+          provider: remoteLabel,
+        })}
         contentClassName="sm:max-w-lg"
         bodyTextareaClassName="max-h-72 min-h-24 resize-y font-mono"
         mentions={mentions}
@@ -1787,11 +1832,16 @@ export function RemoteIssueView({
         commentId={hold.interactive ? deletingCommentId : null}
         onClose={() => setDeletingCommentId(null)}
         pending={deletingComment !== undefined}
-        reason={pendingWriteReason(
-          deletingComment?.paused ?? false,
-          COMMENT_DELETE_PENDING_REASON,
-        )}
-        description={`This permanently deletes the comment on ${remoteLabel}. This cannot be undone.`}
+        reason={
+          deletingComment === undefined
+            ? undefined
+            : deletingComment.paused
+              ? t("shared.offlineQueued")
+              : t("remote.deletingComment")
+        }
+        description={t("remote.deleteCommentDescription", {
+          provider: remoteLabel,
+        })}
         onConfirm={(commentId) => void removeComment(commentId)}
       />
 
@@ -1818,7 +1868,9 @@ export function RemoteIssueView({
         onConfirm={() => void confirmDelete()}
         remoteLabel={remoteLabel}
         roleHint={
-          isGitLab ? "needs Owner access" : "requires admin or triage access"
+          isGitLab
+            ? t("remote.ownerAccessRequired")
+            : t("remote.adminOrTriageRequired")
         }
       />
     </>,

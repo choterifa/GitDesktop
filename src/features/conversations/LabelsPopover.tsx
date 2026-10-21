@@ -12,6 +12,7 @@ import {
   useRepoLabels,
 } from "@/lib/git/queries";
 import type { RemoteLens, RepoLabel } from "@/lib/git/types";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useRovingRows } from "@/lib/list-keyboard-nav";
 import {
   pendingWriteReason,
@@ -66,6 +67,7 @@ export function LabelsPopover({
    *  column. Default renders the inline row. */
   cells?: boolean;
 }) {
+  const tx = useCommonText();
   const repoLabels = useRepoLabels(repoPath, enabled, lens);
   const editLabels = useEditPrLabels(repoPath, lens);
   // The cache, not `editLabels`: a remount on this entity would read its own fresh
@@ -84,7 +86,7 @@ export function LabelsPopover({
       // pre-write labels. The hook's `onSettled` returns its invalidation, so
       // this hold lasts until the invalidated reads have refetched.
       case labelEdit.pending:
-        return pendingWriteReason(labelEdit.paused, SAVING_LAST_CHANGE_REASON);
+        return tx(pendingWriteReason(labelEdit.paused, SAVING_LAST_CHANGE_REASON));
       default:
         return undefined;
     }
@@ -149,7 +151,7 @@ export function LabelsPopover({
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Edit labels"
+            aria-label={tx("Edit labels")}
             disabled={!!heldReason}
             reason={heldReason}
           />
@@ -162,7 +164,7 @@ export function LabelsPopover({
         ) : (
           <TagIcon data-icon="inline-start" />
         )}
-        Labels
+        {tx("Labels")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner
@@ -177,11 +179,11 @@ export function LabelsPopover({
               render={<p />}
               className="px-1 pb-1.5 text-xs font-medium"
             >
-              Labels
+              {tx("Labels")}
             </Popover.Title>
             {rows.length === 0 && (
               <p className="px-1 py-1 text-xs text-muted-foreground">
-                {emptyPickerCopy(repoLabels, LABELS_PICKER_COPY)}
+                {tx(emptyPickerCopy(repoLabels, LABELS_PICKER_COPY))}
               </p>
             )}
             {/* Unstyled but NOT removable — see `useRovingRows`. */}
@@ -218,7 +220,7 @@ export function LabelsPopover({
                 render={<p />}
                 className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground"
               >
-                Changes apply when this closes. Tab cycles the rows; Esc closes.
+                {tx("Changes apply when this closes. Tab cycles the rows; Esc closes.")}
               </Popover.Description>
             )}
           </Popover.Popup>
@@ -234,7 +236,7 @@ export function LabelsPopover({
     return (
       <>
         {trigger}
-        <MetaValueCell label="Labels" empty={labels.length === 0}>
+        <MetaValueCell label={tx("Labels")} empty={labels.length === 0}>
           {chips}
         </MetaValueCell>
       </>

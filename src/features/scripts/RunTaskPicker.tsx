@@ -11,6 +11,7 @@ import { useTaskRunStore } from "@/lib/stores/taskRun";
 import { useUiStore } from "@/lib/stores/ui";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
+import { useScriptsText } from "./use-scripts-text";
 
 const INTERPRETER_LABELS: Record<string, string> = Object.fromEntries(
   INTERPRETERS.map((i) => [i.id, i.label]),
@@ -28,6 +29,7 @@ export function RunTaskPicker({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tx = useScriptsText();
   const tasks = useScripts().data?.tasks ?? [];
   const repoPath = useUiStore((s) => s.repoPath);
   const { keys, settled } = useTaskRepoKeys(repoPath);
@@ -96,7 +98,7 @@ export function RunTaskPicker({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={PALETTE_DIALOG_CLASS} showCloseButton={false}>
-        <DialogTitle className="sr-only">Run a task</DialogTitle>
+        <DialogTitle className="sr-only">{tx("Run a task")}</DialogTitle>
         <div className="shrink-0 border-b p-2">
           <Input
             autoFocus
@@ -106,13 +108,13 @@ export function RunTaskPicker({
               setHighlight(0);
             }}
             onKeyDown={onKeyDown}
-            placeholder="Run a task…"
-            aria-label="Search tasks"
+            placeholder={tx("Run a task…")}
+            aria-label={tx("Search tasks")}
           />
         </div>
         {items.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No matching tasks.
+            {tx("No matching tasks.")}
           </p>
         ) : (
           <ul ref={listRef} className="max-h-80 min-h-0 overflow-y-auto py-1">
@@ -148,7 +150,9 @@ export function RunTaskPicker({
                     )}
                   </span>
                   <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                    {INTERPRETER_LABELS[task.interpreter] ?? task.interpreter}
+                    {tx(
+                      INTERPRETER_LABELS[task.interpreter] ?? task.interpreter,
+                    )}
                   </span>
                 </button>
               </li>

@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Markdown } from "@/components/markdown/markdown";
@@ -45,10 +46,6 @@ import { toastError } from "@/lib/toast";
 import type { ExploreCloneTarget } from "./ExploreCloneDialog";
 import { starParts } from "./explore-utils";
 
-/** The not-yet-clonable note, shared by the fork toast and the inline fork card
- *  so the two can't drift. */
-const FORK_NOT_READY = "It may take a moment before the fork can be cloned.";
-
 /** The Explore detail pane: the selected repo's header, actions (clone / fork /
  *  star / view), and its lazily-fetched README. `features` gates fork/star, and
  *  `ownedNamespaces` (the screen's own-repos query) additionally gates fork; a
@@ -69,14 +66,14 @@ export function ExploreDetail({
   ownedNamespaces: readonly string[];
   onClone: (target: ExploreCloneTarget) => void;
 }) {
+  const { t } = useTranslation("explore");
   if (!repo) {
     return (
       <Empty className="border-none">
         <EmptyHeader>
-          <EmptyTitle>Select a repository</EmptyTitle>
+          <EmptyTitle>{t("detail.selectRepository")}</EmptyTitle>
           <EmptyDescription>
-            Pick a repository from the list to preview its README and clone,
-            fork, or star it.
+            {t("detail.selectRepositoryDescription")}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -108,6 +105,7 @@ function ExploreDetailBody({
   ownedNamespaces: readonly string[];
   onClone: (target: ExploreCloneTarget) => void;
 }) {
+  const { t, i18n } = useTranslation("explore");
   const label = providerLabel(provider);
   // A repo already in a namespace of yours is never a valid fork target — hidden,
   // not disabled, since there's nothing actionable to explain. The backend decides
@@ -174,9 +172,9 @@ function ExploreDetailBody({
   // per-call callbacks once the observer has no listeners.
   async function onFork() {
     const ok = await useConfirm.getState().ask({
-      title: `Fork ${repo.fullName}?`,
-      body: `Creates a fork on ${label} in the background. You can clone it once it's ready.`,
-      confirmLabel: "Fork",
+      title: t("fork.confirmTitle", { name: repo.fullName }),
+      body: t("fork.confirmBody", { provider: label }),
+      confirmLabel: t("fork.action"),
       holdOffline: true,
       scope: "app",
     });
@@ -192,8 +190,8 @@ function ExploreDetailBody({
       if (mounted.current) {
         setForked(result);
       } else {
-        toast.success(`Forked to ${result.fullName}`, {
-          description: result.ready ? undefined : FORK_NOT_READY,
+        toast.success(t("fork.success", { name: result.fullName }), {
+          description: result.ready ? undefined : t("fork.notReady"),
         });
       }
     } catch (e) {
@@ -206,7 +204,7 @@ function ExploreDetailBody({
   const starLoaded = starred.data !== undefined;
   const isStarred = starred.data ?? false;
 
-  const star = starParts(repo.stars ?? null);
+  const star = starParts(repo.stars ?? null, i18n.resolvedLanguage);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -223,17 +221,17 @@ function ExploreDetailBody({
           <div className="flex flex-wrap items-center gap-1.5">
             {repo.private && (
               <Badge variant="secondary" className="text-[10px]">
-                Private
+                {t("repository.private")}
               </Badge>
             )}
             {repo.fork && (
               <Badge variant="secondary" className="text-[10px]">
-                Fork
+                {t("repository.fork")}
               </Badge>
             )}
             {repo.archived && (
               <Badge variant="secondary" className="text-[10px]">
-                Archived
+                {t("repository.archived")}
               </Badge>
             )}
           </div>
@@ -244,8 +242,12 @@ function ExploreDetailBody({
             // both the count and its unit.
             <span
               role="img"
-              aria-label={star.label}
-              title={star.label}
+              aria-label={t(repo.stars === 1 ? "stars.one" : "stars.many", {
+                count: star.text,
+              })}
+              title={t(repo.stars === 1 ? "stars.one" : "stars.many", {
+                count: star.text,
+              })}
               className="flex items-center gap-0.5 tabular-nums"
             >
               <StarIcon className="size-3" aria-hidden />
@@ -255,7 +257,7 @@ function ExploreDetailBody({
           {repo.language && <span>{repo.language}</span>}
           {repo.updatedAt && parseableDate(repo.updatedAt) && (
             <span>
-              updated <RelativeTime date={repo.updatedAt} />
+              {t("detail.updated")} <RelativeTime date={repo.updatedAt} />
             </span>
           )}
         </div>
@@ -277,7 +279,7 @@ function ExploreDetailBody({
             })
           }
         >
-          Clone
+          {t("clone.submit")}
         </Button>
         {canFork && (
           <DisabledReasonButton
@@ -290,12 +292,12 @@ function ExploreDetailBody({
             {forkPending.pending && !forkPending.paused ? (
               <>
                 <Spinner />
-                Forking…
+                {t("fork.pending")}
               </>
             ) : (
               <>
                 <GitForkIcon />
-                Fork
+                {t("fork.action")}
               </>
             )}
           </DisabledReasonButton>
@@ -308,11 +310,11 @@ function ExploreDetailBody({
             variant="outline"
             aria-pressed={starLoaded ? isStarred : undefined}
             disabled={!starLoaded}
-            reason="Checking star state…"
+            reason={t("stars.checking")}
             onClick={toggleStar}
           >
             <StarIcon weight={isStarred ? "fill" : "regular"} />
-            {isStarred ? "Unstar" : "Star"}
+            {isStarred ? t("stars.remove") : t("stars.add")}
           </DisabledReasonButton>
         )}
         {repo.webUrl && (
@@ -322,7 +324,7 @@ function ExploreDetailBody({
             onClick={() => repo.webUrl && openUrl(repo.webUrl)}
           >
             <ArrowSquareOutIcon />
-            View on {label}
+            {t("detail.viewOn", { provider: label })}
           </Button>
         )}
       </div>
@@ -342,10 +344,12 @@ function ExploreDetailBody({
       >
         {forked && (
           <>
-            <p className="text-xs font-medium">Forked to {forked.fullName}</p>
+            <p className="text-xs font-medium">
+              {t("fork.success", { name: forked.fullName })}
+            </p>
             {!forked.ready && (
               <p className="text-[11px] text-muted-foreground">
-                {FORK_NOT_READY}
+                {t("fork.notReady")}
               </p>
             )}
             <Button
@@ -362,7 +366,7 @@ function ExploreDetailBody({
                 })
               }
             >
-              Clone the fork
+              {t("fork.clone")}
             </Button>
           </>
         )}
@@ -388,6 +392,7 @@ function ReadmeSection({
   loading: boolean;
   content: string | null;
 }) {
+  const { t } = useTranslation("explore");
   if (loading) {
     return (
       <div className="space-y-2">
@@ -399,7 +404,9 @@ function ReadmeSection({
     );
   }
   if (!content) {
-    return <p className="text-xs text-muted-foreground">No README.</p>;
+    return (
+      <p className="text-xs text-muted-foreground">{t("detail.noReadme")}</p>
+    );
   }
   return <Markdown>{content}</Markdown>;
 }

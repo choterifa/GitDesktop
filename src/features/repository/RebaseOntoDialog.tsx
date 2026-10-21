@@ -1,5 +1,6 @@
 import { InfoIcon, WarningIcon } from "@phosphor-icons/react";
 import { useEffectEvent, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SelectClipText } from "@/components/select-clip-text";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,7 @@ export function RebaseOntoDialog({
   /** The current branch tracks a remote — rebasing will need a force-push. */
   isPushed: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const [newBase, setNewBase] = useState("");
   const [oldBase, setOldBase] = useState("");
   const newBaseSelectId = useId();
@@ -105,7 +107,7 @@ export function RebaseOntoDialog({
     if (sameBranch) {
       return (
         <span className="text-muted-foreground">
-          Pick two different branches.
+          {t("dialogs.rebaseOnto.pickDifferent")}
         </span>
       );
     }
@@ -113,7 +115,7 @@ export function RebaseOntoDialog({
     if (comparison.isFetching && comparison.data === undefined) {
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Spinner className="size-3" /> Checking which commits will move…
+          <Spinner className="size-3" /> {t("dialogs.rebaseOnto.checking")}
         </span>
       );
     }
@@ -123,10 +125,7 @@ export function RebaseOntoDialog({
       return (
         <span className="flex items-start gap-1.5 text-warning">
           <WarningIcon className="mt-px size-3.5 shrink-0" />
-          <span>
-            Couldn't check which commits would move — make sure both branches
-            are reachable.
-          </span>
+          <span>{t("dialogs.rebaseOnto.checkFailed")}</span>
         </span>
       );
     }
@@ -135,7 +134,7 @@ export function RebaseOntoDialog({
         <span className="flex items-start gap-1.5 text-warning">
           <WarningIcon className="mt-px size-3.5 shrink-0" />
           <span>
-            Nothing to move — {currentLabel} has no commits beyond{" "}
+            {t("dialogs.rebaseOnto.nothingToMove", { current: currentLabel })}{" "}
             <span className="font-mono">{oldBase}</span>.
           </span>
         </span>
@@ -153,18 +152,19 @@ export function RebaseOntoDialog({
     >
       <DialogContent className="flex max-h-[85vh] flex-col">
         <DialogHeader>
-          <DialogTitle>Change base of {currentLabel}</DialogTitle>
+          <DialogTitle>
+            {t("dialogs.rebaseOnto.title", { current: currentLabel })}
+          </DialogTitle>
           <DialogDescription>
-            Replay only {currentLabel}'s own commits onto a different branch —
-            for when it was branched off the wrong one. Each one is rewritten
-            with a new commit id as it replays, and conflicts appear in the
-            changes list.
+            {t("dialogs.rebaseOnto.description", { current: currentLabel })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           <div className="space-y-2">
-            <Label htmlFor={newBaseSelectId}>New base</Label>
+            <Label htmlFor={newBaseSelectId}>
+              {t("dialogs.rebaseOnto.newBase")}
+            </Label>
             <Select
               items={Object.fromEntries(
                 otherBranches.map((b) => [b.name, b.name]),
@@ -186,7 +186,9 @@ export function RebaseOntoDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={oldBaseSelectId}>Original base</Label>
+            <Label htmlFor={oldBaseSelectId}>
+              {t("dialogs.rebaseOnto.originalBase")}
+            </Label>
             <Select
               items={Object.fromEntries(
                 otherBranches.map((b) => [b.name, b.name]),
@@ -206,8 +208,7 @@ export function RebaseOntoDialog({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              The branch it was accidentally based on — commits after this point
-              are what move.
+              {t("dialogs.rebaseOnto.originalBaseHelp")}
             </p>
           </div>
 
@@ -216,8 +217,8 @@ export function RebaseOntoDialog({
           {canRun && (
             <div className="space-y-2">
               <p className="text-xs text-foreground/80">
-                {movingCount} commit{movingCount === 1 ? "" : "s"} will move
-                onto <span className="font-mono">{newBase}</span>:
+                {t("dialogs.rebaseOnto.movingCount", { count: movingCount })}{" "}
+                <span className="font-mono">{newBase}</span>:
               </p>
               <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-muted/30 p-2">
                 {moving.slice(0, PREVIEW_CAP).map((c) => (
@@ -232,7 +233,9 @@ export function RebaseOntoDialog({
                 ))}
                 {movingCount > PREVIEW_CAP && (
                   <li className="text-[11px] text-muted-foreground">
-                    +{movingCount - PREVIEW_CAP} more
+                    {t("dialogs.rebaseOnto.more", {
+                      count: movingCount - PREVIEW_CAP,
+                    })}
                   </li>
                 )}
               </ul>
@@ -240,8 +243,9 @@ export function RebaseOntoDialog({
                 <span className="flex items-start gap-1.5 text-xs text-warning">
                   <InfoIcon className="mt-px size-3.5 shrink-0" />
                   <span>
-                    This rewrites {currentLabel}'s history — you'll need to
-                    force-push afterward.
+                    {t("dialogs.rebaseOnto.forcePushWarning", {
+                      current: currentLabel,
+                    })}
                   </span>
                 </span>
               )}
@@ -251,10 +255,10 @@ export function RebaseOntoDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("dialogs.common.cancel")}
           </Button>
           <Button onClick={run} disabled={!canRun}>
-            Rebase
+            {t("dialogs.rebaseOnto.rebase")}
           </Button>
         </DialogFooter>
       </DialogContent>

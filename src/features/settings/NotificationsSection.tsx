@@ -49,6 +49,7 @@ import { repoNameFromPath } from "@/lib/stores/notifications";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 /** Master-cell state for one column: every visible row on, every one off, or a
  *  mix — which the checkbox renders as its indeterminate state. */
@@ -64,6 +65,7 @@ const MIXED_CLASS =
 export const NotificationsSection = withForm({
   ...settingsFormOpts,
   render: function NotificationsSectionRender({ form }) {
+    const tx = useSettingsText();
     const aiEnabled = useAiEnabled();
     const rows = notificationRows(aiEnabled);
     const sources = useSelector(
@@ -91,7 +93,9 @@ export const NotificationsSection = withForm({
       draftSignature,
       savedNotifications,
     )
-      ? "Save or discard your changes first — repository overrides start from the saved defaults."
+      ? tx(
+          "Save or discard your changes first — repository overrides start from the saved defaults.",
+        )
       : null;
 
     function masterState(channel: Channel): MasterState {
@@ -116,28 +120,24 @@ export const NotificationsSection = withForm({
     return (
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-medium">Notifications</h2>
+          <h2 className="text-sm font-medium">{tx("Notifications")}</h2>
           {/* The agent-tasks clause names a row that Hide AI removes, so it is
               gated exactly like the same sentence in the user guide. */}
           <p className="text-xs text-muted-foreground">
-            Choose where each event lands: a row in the activity inbox (In-app),
-            an OS notification, or both. A source with both channels off records
-            nothing, and the CI sources
-            {aiEnabled ? ", plus Automation results," : ""} add a Notify on
-            choice so you can keep just the failures — results outside your
-            choice stay quiet. OS notifications fire only while GitDesktop is
-            unfocused
-            {aiEnabled
-              ? " — agent tasks also ping while you work elsewhere in the app."
-              : "."}{" "}
-            Pull request events are polled about once a minute while a hosted
-            repository (GitHub, GitLab, or Bitbucket) is open.
+            {tx(
+              aiEnabled
+                ? "Choose where each event lands: a row in the activity inbox (In-app), an OS notification, or both. A source with both channels off records nothing, and the CI sources, plus Automation results, add a Notify on choice so you can keep just the failures — results outside your choice stay quiet. OS notifications fire only while GitDesktop is unfocused — agent tasks also ping while you work elsewhere in the app. Pull request events are polled about once a minute while a hosted repository (GitHub, GitLab, or Bitbucket) is open."
+                : "Choose where each event lands: a row in the activity inbox (In-app), an OS notification, or both. A source with both channels off records nothing, and the CI sources add a Notify on choice so you can keep just the failures — results outside your choice stay quiet. OS notifications fire only while GitDesktop is unfocused. Pull request events are polled about once a minute while a hosted repository (GitHub, GitLab, or Bitbucket) is open.",
+            )}
           </p>
         </div>
 
-        <MatrixTable caption="Global notification channels">
+        <MatrixTable caption={tx("Global notification channels")}>
           <tr>
-            <RowLabelCell label="All notifications" className="font-medium" />
+            <RowLabelCell
+              label={tx("All notifications")}
+              className="font-medium"
+            />
             {CHANNELS.map((channel) => {
               const state = masterState(channel);
               return (
@@ -145,7 +145,10 @@ export const NotificationsSection = withForm({
                   <Checkbox
                     checked={state === true}
                     indeterminate={state === "mixed"}
-                    aria-label={channelAriaLabel("All notifications", channel)}
+                    aria-label={channelAriaLabel(
+                      tx("All notifications"),
+                      channel,
+                    )}
                     className={MIXED_CLASS}
                     onCheckedChange={(checked) =>
                       setColumn(channel, checked === true)
@@ -244,7 +247,7 @@ export const NotificationsSection = withForm({
           })}
         </MatrixTable>
 
-        <RepoOverridesBlock reason={overrideReason} />
+        <RepoOverridesBlock reason={overrideReason} tx={tx} />
       </section>
     );
   },
@@ -271,11 +274,16 @@ function keyBasename(key: string): string {
 function statusLine(
   name: string,
   override: RepoNotificationOverride | undefined,
+  tx: (source: string, options?: Record<string, unknown>) => string,
 ): string {
-  if (override?.muted) return `${name} is muted.`;
+  if (override?.muted) return tx("{{name}} is muted.", { name });
   const count = overrideCount(override);
-  if (count === 0) return `${name} follows these defaults.`;
-  return `${name} overrides ${count} ${count === 1 ? "setting" : "settings"}.`;
+  if (count === 0) return tx("{{name}} follows these defaults.", { name });
+  return tx("{{name}} overrides {{count}} {{setting}}.", {
+    name,
+    count,
+    setting: tx(count === 1 ? "setting" : "settings"),
+  });
 }
 
 interface OverrideRow {
@@ -291,7 +299,13 @@ interface OverrideRow {
  * these defaults, plus every other repository that has been customized. Both
  * lead to the same {@link useRepoNotificationsDialog} surface.
  */
-function RepoOverridesBlock({ reason }: { reason: string | null }) {
+function RepoOverridesBlock({
+  reason,
+  tx,
+}: {
+  reason: string | null;
+  tx: (source: string, options?: Record<string, unknown>) => string;
+}) {
   const repoPath = useUiStore((s) => s.repoPath);
   const openDialog = useRepoNotificationsDialog((s) => s.open);
   const settings = useSettings();
@@ -415,9 +429,11 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
 
   async function clearRow(row: OverrideRow) {
     const ok = await useConfirm.getState().ask({
-      title: `Clear notification overrides for ${row.name}?`,
-      body: "Its notifications return to the defaults above.",
-      confirmLabel: "Clear overrides",
+      title: tx("Clear notification overrides for {{name}}?", {
+        name: row.name,
+      }),
+      body: tx("Its notifications return to the defaults above."),
+      confirmLabel: tx("Clear overrides"),
       confirmVariant: "destructive",
       scope: "app",
     });
@@ -444,20 +460,20 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
   return (
     <div className="space-y-4 border-t pt-4">
       <div ref={footerRef} className="space-y-2">
-        <h3 className="text-xs font-medium">This repository</h3>
+        <h3 className="text-xs font-medium">{tx("This repository")}</h3>
         {repoPath === null ? (
           <DisabledReasonButton
             variant="outline"
             size="xs"
             disabled
-            reason="Open a repository to customize its notifications"
+            reason={tx("Open a repository to customize its notifications")}
           >
-            Customize…
+            {tx("Customize…")}
           </DisabledReasonButton>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {resolved ? statusLine(repoName, current) : ""}
+              {resolved ? statusLine(repoName, current, tx) : ""}
             </p>
             <DisabledReasonButton
               variant="outline"
@@ -466,7 +482,7 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
               reason={reason}
               onClick={() => openDialog(repoPath)}
             >
-              Customize…
+              {tx("Customize…")}
             </DisabledReasonButton>
           </div>
         )}
@@ -475,13 +491,13 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
       {otherKeys.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-medium">
-            Overrides in other repositories
+            {tx("Overrides in other repositories")}
           </h3>
           {recentIdentities.isPending ? (
             <ListRowSkeletons
               rows={Math.min(otherKeys.length, 4)}
               lines={1}
-              name="repositories with overrides"
+              name={tx("repositories with overrides")}
               indent={false}
             />
           ) : (
@@ -492,7 +508,7 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
               ref={listRef}
               role="group"
               tabIndex={0}
-              aria-label="Repositories with notification overrides"
+              aria-label={tx("Repositories with notification overrides")}
               className="border-t outline-none"
               onKeyDown={onListKeyDown}
             >
@@ -513,12 +529,12 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
                       {path === null && (
                         <span className="text-muted-foreground">
                           {" "}
-                          (not in recent repositories)
+                          ({tx("not in recent repositories")})
                         </span>
                       )}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {row.muted ? "Muted" : "Customized"}
+                      {row.muted ? tx("Muted") : tx("Customized")}
                     </span>
                     {path !== null && (
                       <DisabledReasonButton
@@ -528,7 +544,7 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
                         reason={reason}
                         onClick={() => openDialog(path)}
                       >
-                        Edit…
+                        {tx("Edit…")}
                       </DisabledReasonButton>
                     )}
                     <Button
@@ -536,7 +552,7 @@ function RepoOverridesBlock({ reason }: { reason: string | null }) {
                       size="xs"
                       onClick={() => clearRow(row)}
                     >
-                      Clear
+                      {tx("Clear")}
                     </Button>
                   </div>
                 );

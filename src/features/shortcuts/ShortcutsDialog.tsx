@@ -8,8 +8,9 @@ import {
 } from "@/components/ui/dialog";
 import { formatBinding } from "@/lib/hotkeys/binding";
 import { useEffectiveBindings } from "@/lib/hotkeys/hotkeys";
-import { ACTIONS, BUILT_IN_KEYS, CATEGORY_ORDER } from "@/lib/hotkeys/registry";
+import { ACTIONS, BUILT_IN_KEYS, CATEGORY_ORDER, actionCategoryKey, actionLabelKey } from "@/lib/hotkeys/registry";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
@@ -30,6 +31,7 @@ export function ShortcutsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("hotkeys");
   const bindings = useEffectiveBindings();
   const paletteBinding = bindings.get("command-palette");
 
@@ -37,11 +39,11 @@ export function ShortcutsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogTitle>{t("dialog.title")}</DialogTitle>
           <DialogDescription>
-            Every action is rebindable in Settings → Keyboard. Unbound actions (
-            — ) are still reachable from the command palette
-            {paletteBinding ? ` (${formatBinding(paletteBinding)})` : ""}.
+            {t("dialog.description", {
+              paletteBinding: paletteBinding ? ` (${formatBinding(paletteBinding)})` : "",
+            })}
           </DialogDescription>
         </DialogHeader>
         <div
@@ -52,7 +54,7 @@ export function ShortcutsDialog({
         >
           {CATEGORY_ORDER.map((category) => (
             <section key={category} className="mb-5">
-              <h3 className="mb-1.5 text-xs font-semibold">{category}</h3>
+              <h3 className="mb-1.5 text-xs font-semibold">{t(actionCategoryKey(category))}</h3>
               <ul className="space-y-1">
                 {ACTIONS.filter((a) => a.category === category).map(
                   (action) => {
@@ -62,7 +64,7 @@ export function ShortcutsDialog({
                         key={action.id}
                         className="flex items-center justify-between gap-3 text-xs"
                       >
-                        <span className="min-w-0 truncate">{action.label}</span>
+                        <span className="min-w-0 truncate">{t(actionLabelKey(action.id))}</span>
                         {binding ? (
                           <Kbd>{formatBinding(binding)}</Kbd>
                         ) : (
@@ -76,14 +78,14 @@ export function ShortcutsDialog({
             </section>
           ))}
           <section className="mb-5">
-            <h3 className="mb-1.5 text-xs font-semibold">Built-in</h3>
+            <h3 className="mb-1.5 text-xs font-semibold">{t("builtIn.heading")}</h3>
             <ul className="space-y-1">
               {BUILT_IN_KEYS.map((row) => (
                 <li
                   key={row.keys}
                   className="flex items-center justify-between gap-3 text-xs"
                 >
-                  <span className="min-w-0">{row.what}</span>
+                  <span className="min-w-0">{t(`builtIn.${row.id}`)}</span>
                   <Kbd>
                     {row.binding ? formatBinding(row.binding) : row.keys}
                   </Kbd>

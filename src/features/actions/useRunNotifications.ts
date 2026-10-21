@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   forgeFeatureReady,
   useForgeStatus,
@@ -24,6 +25,7 @@ import { isFailureConclusion, statusLabel } from "./status";
  * opening a repo (or switching branch) only primes the snapshot.
  */
 export function useRunNotifications(repoPath: string) {
+  const { t } = useTranslation("actions");
   const settings = useSettings();
   const gh = useForgeStatus(repoPath);
   const status = useRepoStatus(repoPath);
@@ -76,7 +78,11 @@ export function useRunNotifications(repoPath: string) {
         const ok = run.conclusion === "success";
         const bad = isFailureConclusion(run.conclusion);
         if (!ok && !bad) continue; // skipped/cancelled/neutral: stay quiet
-        const title = `${run.workflowName} ${statusLabel(run.status, run.conclusion).toLowerCase()} on ${run.headBranch}`;
+        const title = t("notifications.runFinished", {
+          name: run.workflowName,
+          status: statusLabel(run.status, run.conclusion).toLowerCase(),
+          branch: run.headBranch,
+        });
         emitNotification({
           source: "actionRuns",
           outcome: ok ? "success" : "failure",

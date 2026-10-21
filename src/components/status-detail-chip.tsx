@@ -1,5 +1,6 @@
 import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import {
   Popover,
@@ -48,6 +49,7 @@ export function StatusDetailChip({
   variant?: BadgeVariant | null;
   className?: string;
 }) {
+  const { t } = useTranslation("components");
   const v = variant ?? "default";
   if (!detail?.trim()) {
     return (
@@ -60,7 +62,7 @@ export function StatusDetailChip({
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`${label}, details`}
+        aria-label={t("statusDetail.details", { label })}
         className={cn(
           badgeVariants({ variant: v }),
           TRIGGER_TINT[v],

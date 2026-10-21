@@ -1,6 +1,7 @@
 import { CheckIcon, MinusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { RelativeTime, useRelativeNow } from "@/components/relative-time";
@@ -21,7 +22,7 @@ import type { Branch } from "@/lib/git/types";
 import { useRovingRows } from "@/lib/list-keyboard-nav";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { cn } from "@/lib/utils";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 
 type Mode = "archive" | "delete";
 
@@ -42,8 +43,6 @@ interface Candidate {
   /** Idle beyond the selected age window. */
   old: boolean;
 }
-
-const pluralBranches = (n: number) => `${n} branch${n === 1 ? "" : "es"}`;
 
 /**
  * What the dialog is entitled to say about the pull-request half of merged
@@ -123,34 +122,14 @@ export function worktreeCheckStateFrom(q: {
 /** Why a stale branch can still be off the list, per mode — the empty state
  *  names it rather than claiming nothing is stale, which the branches sitting on
  *  disk would contradict. */
-const EMPTY_EXCLUDED_REASON: Record<Mode, string> = {
-  archive: "already archived or checked out in another worktree",
-  delete: "protected by branch rules or checked out in another worktree",
-};
-
 /** The empty state's merged clause, per PR-check outcome. It names pull requests
  *  only where they were actually read: a failed read gets its own caveat below,
  *  and a check that never ran says nothing about them either way. The `pending`
  *  arm is unreachable — `checkingMerged` paints the skeleton over this empty
  *  state — and mirrors `checked` only to keep the record total. */
-const EMPTY_MERGED_CLAUSE: Record<PrCheckState, string> = {
-  checked:
-    ", directly or through a recent pull request, and nothing is idle for ",
-  pending:
-    ", directly or through a recent pull request, and nothing is idle for ",
-  failed: " and nothing is idle for ",
-  unavailable: " and nothing is idle for ",
-};
-
 /** What the candidate list is waiting on, per outstanding read. They settle
  *  independently, so the line names the one actually running rather than
  *  whichever came first. */
-const CHECKING_COPY: Record<"merged" | "worktrees" | "rules", string> = {
-  merged: "Checking which branches are merged…",
-  worktrees: "Checking which branches are checked out in another worktree…",
-  rules: "Checking branch protection rules…",
-};
-
 /** The one-line status above the candidate list while a check it depends on
  *  runs. A parked check has no progress to report, so it names what it's waiting
  *  on rather than implying the read is underway — and only the pull-request half
@@ -162,11 +141,12 @@ function CheckingLine({
   what: "merged" | "worktrees" | "rules";
   paused: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   return (
     <p className="px-1 py-1 text-[11px] text-muted-foreground">
       {paused
-        ? "Waiting for a connection to check which branches were merged through a pull request…"
-        : CHECKING_COPY[what]}
+        ? t("dialogs.cleanup.waitingForPrCheck")
+        : t(`dialogs.cleanup.checking.${what}`)}
     </p>
   );
 }
@@ -197,20 +177,22 @@ function RowBadge({
   merged: boolean;
   prMerged: string | null;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   if (error)
     return (
       <span className="text-destructive" title={error}>
-        failed
+        {t("dialogs.cleanup.failed")}
       </span>
     );
-  if (merged) return <span className="text-merged">merged</span>;
+  if (merged)
+    return <span className="text-merged">{t("dialogs.cleanup.merged")}</span>;
   if (prMerged)
     return (
       <span
         className="text-merged"
-        title={`Merged via pull request ${prMerged} — matched by branch name`}
+        title={t("dialogs.cleanup.mergedPrTitle", { pr: prMerged })}
       >
-        merged {prMerged}
+        {t("dialogs.cleanup.mergedPr", { pr: prMerged })}
       </span>
     );
   return null;
@@ -292,6 +274,7 @@ export function CleanupBranchesDialog({
    *  resumes on its own once the connection returns. */
   prCheckPaused: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const queryClient = useQueryClient();
   // Shared 30s clock: the idle-past-the-window classification below must
   // re-evaluate as time passes, and a render-position `Date.now()` is invisible
@@ -499,7 +482,7 @@ export function CleanupBranchesDialog({
     // A promote's branch sits in no checkout while it moves, so the worktree
     // exclusion can't see it.
     if (mode === "delete" && promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const fails = new Map<string, string>();
@@ -535,16 +518,22 @@ export function CleanupBranchesDialog({
     setProgress(null);
 
     const ok = names.length - fails.size;
-    const verb = mode === "archive" ? "Archived" : "Deleted";
+    const verb = t(`dialogs.cleanup.past.${mode}`);
     if (fails.size === 0) {
-      toast.success(`${verb} ${pluralBranches(ok)}`);
+      toast.success(t("dialogs.cleanup.success", { verb, count: ok }));
       onClose();
       return;
     }
     setFailed(fails);
     // The successful ones drop out of the candidate list on refetch, leaving the
     // failures on screen with their reason; the user can retry them.
-    toast.error(`${verb} ${ok}, ${fails.size} failed`);
+    toast.error(
+      t("dialogs.cleanup.partialFailure", {
+        verb,
+        count: ok,
+        failed: fails.size,
+      }),
+    );
   }
 
   function onPrimary() {
@@ -552,19 +541,23 @@ export function CleanupBranchesDialog({
     else void runBatch();
   }
 
-  const verb = mode === "archive" ? "Archive" : "Delete";
-  const gerund = mode === "archive" ? "Archiving" : "Deleting";
+  const verb = t(`dialogs.cleanup.action.${mode}`);
+  const gerund = t(`dialogs.cleanup.gerund.${mode}`);
   const primaryLabel = running
     ? `${gerund}… ${progress?.done ?? 0}/${progress?.total ?? 0}`
-    : `${verb} ${pluralBranches(selectedCount)}`;
+    : t("dialogs.cleanup.selectedAction", { verb, count: selectedCount });
   // The mode's own exclusions can empty the list while stale branches remain, so
   // both empty states name the exclusion instead of reporting none. One string
   // for the prose and the live region — a reader and a listener get the same
   // sentence.
   const allStaleExcluded = candidates.length === 0 && stale.length > 0;
   const emptyStatus = allStaleExcluded
-    ? `${pluralBranches(stale.length)} ${stale.length === 1 ? "is" : "are"} stale but excluded from ${verb}: ${EMPTY_EXCLUDED_REASON[mode]}.`
-    : "No stale branches.";
+    ? t("dialogs.cleanup.staleExcluded", {
+        count: stale.length,
+        verb: t(`dialogs.cleanup.action.${mode}`),
+        reason: t(`dialogs.cleanup.excludedReason.${mode}`),
+      })
+    : t("dialogs.cleanup.noStale");
 
   return (
     <>
@@ -576,21 +569,21 @@ export function CleanupBranchesDialog({
       >
         <DialogContent className="flex flex-col gap-4 sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Clean up branches</DialogTitle>
+            <DialogTitle>{t("dialogs.cleanup.title")}</DialogTitle>
             <DialogDescription>
-              Local branches already merged into{" "}
+              {t("dialogs.cleanup.descriptionPrefix")}{" "}
               <span className="font-mono">
-                {defaultBranch ?? "the default branch"}
+                {defaultBranch ?? t("dialogs.cleanup.defaultBranch")}
               </span>
               {/* The clause claims pull requests contribute, so it renders only
                   while that is true or underway — a FAILED check's note below
                   says the opposite, and the two must never disagree. */}
               {prCheckState === "checked" || prCheckState === "pending"
-                ? " — directly or through a recent pull request — or with no commits in a while. "
-                : ", or with no commits in a while. "}
+                ? t("dialogs.cleanup.mergedViaPrClause")
+                : t("dialogs.cleanup.noPrClause")}
               {mode === "archive"
-                ? "Archiving hides them from the switcher — unarchive anytime."
-                : "Deleting removes them permanently, including commits only on them."}
+                ? t("dialogs.cleanup.archiveDescription")
+                : t("dialogs.cleanup.deleteDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -599,7 +592,7 @@ export function CleanupBranchesDialog({
             <div
               className="inline-flex rounded-none ring-1 ring-border"
               role="group"
-              aria-label="Cleanup action"
+              aria-label={t("dialogs.cleanup.actionLabel")}
             >
               {(["archive", "delete"] as const).map((m) => (
                 <button
@@ -617,17 +610,17 @@ export function CleanupBranchesDialog({
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {m}
+                  {t(`dialogs.cleanup.action.${m}`)}
                 </button>
               ))}
             </div>
 
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Idle for</span>
+              <span>{t("dialogs.cleanup.idleFor")}</span>
               <div
                 className="inline-flex rounded-none ring-1 ring-border"
                 role="group"
-                aria-label="Inactivity window in days"
+                aria-label={t("dialogs.cleanup.inactivityWindow")}
               >
                 {AGE_WINDOWS.map((d) => (
                   <button
@@ -647,7 +640,7 @@ export function CleanupBranchesDialog({
                   </button>
                 ))}
               </div>
-              <span>days</span>
+              <span>{t("dialogs.cleanup.days")}</span>
             </div>
           </div>
 
@@ -660,7 +653,11 @@ export function CleanupBranchesDialog({
               type="button"
               disabled={running}
               onClick={toggleAll}
-              aria-label={allChecked ? "Deselect all" : "Select all"}
+              aria-label={
+                allChecked
+                  ? t("dialogs.cleanup.deselectAll")
+                  : t("dialogs.cleanup.selectAll")
+              }
               className="flex items-center gap-2 text-xs text-muted-foreground disabled:opacity-50"
             >
               <span
@@ -678,7 +675,10 @@ export function CleanupBranchesDialog({
                 ) : null}
               </span>
               <span>
-                {selectedCount} of {candidates.length} selected
+                {t("dialogs.cleanup.selectedOf", {
+                  selected: selectedCount,
+                  total: candidates.length,
+                })}
               </span>
             </button>
           )}
@@ -740,7 +740,9 @@ export function CleanupBranchesDialog({
                 <p className="sr-only">
                   {candidates.length === 0
                     ? emptyStatus
-                    : `${pluralBranches(candidates.length)} to review.`}
+                    : t("dialogs.cleanup.toReview", {
+                        count: candidates.length,
+                      })}
                 </p>
               )}
               {/* Announced even where the empty state carries it in prose: only
@@ -753,14 +755,12 @@ export function CleanupBranchesDialog({
                       : "sr-only"
                   }
                 >
-                  Pull requests couldn't be checked — a branch merged through
-                  one may be missing.
+                  {t("dialogs.cleanup.prCheckFailed")}
                 </p>
               ) : null}
               {worktreeCheckFailed ? (
                 <p className="px-1 py-1 text-[11px] text-muted-foreground">
-                  Worktree checkouts couldn't be read, so a branch checked out
-                  in another worktree may be listed.
+                  {t("dialogs.cleanup.worktreeCheckFailed")}
                 </p>
               ) : null}
             </div>
@@ -779,18 +779,21 @@ export function CleanupBranchesDialog({
                   emptyStatus
                 ) : (
                   <>
-                    No stale branches — nothing is merged into{" "}
+                    {t("dialogs.cleanup.noStaleForWindow", {
+                      days: windowDays,
+                    })}{" "}
                     <span className="font-mono">
-                      {defaultBranch ?? "the default branch"}
+                      {defaultBranch ?? t("dialogs.cleanup.defaultBranch")}
                     </span>
-                    {EMPTY_MERGED_CLAUSE[prCheckState]}
-                    {windowDays} days. Try a shorter window.
+                    {t(`dialogs.cleanup.mergedClause.${prCheckState}`, {
+                      days: windowDays,
+                    })}
                   </>
                 )}
                 {/* Carried by BOTH arms: an excluded-only list is just as
                     incomplete when the pull-request read failed. */}
                 {prCheckState === "failed"
-                  ? " Pull requests couldn't be checked, so a branch merged through one may be missing here."
+                  ? ` ${t("dialogs.cleanup.prCheckFailedHere")}`
                   : null}
               </p>
             ) : (
@@ -846,7 +849,7 @@ export function CleanupBranchesDialog({
               disabled={running}
               onClick={onClose}
             >
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <Button
               type="button"
@@ -863,14 +866,15 @@ export function CleanupBranchesDialog({
       <ConfirmDialog
         open={confirmDelete}
         onCancel={() => setConfirmDelete(false)}
-        title="Delete branches?"
+        title={t("dialogs.cleanup.confirmDeleteTitle")}
         body={
           <>
-            Permanently deletes {pluralBranches(selectedCount)}, including
-            commits that exist only on them. This can't be undone.
+            {t("dialogs.cleanup.confirmDeleteBody", { count: selectedCount })}
           </>
         }
-        confirmLabel={`Delete ${pluralBranches(selectedCount)}`}
+        confirmLabel={t("dialogs.cleanup.confirmDelete", {
+          count: selectedCount,
+        })}
         confirmVariant="destructive"
         onConfirm={() => {
           setConfirmDelete(false);

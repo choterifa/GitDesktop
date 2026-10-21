@@ -40,6 +40,7 @@ import { SessionConversation } from "./SessionConversation";
 import { SessionOpenMenu } from "./SessionOpenMenu";
 import { StatusIndicator } from "./status";
 import { type AgentSession, useSessionsStore } from "./store";
+import { useSessionText } from "./use-session-text";
 import { useSessionTerminal } from "./useSessionTerminal";
 import { WorktreeChangesView } from "./WorktreeChangesView";
 
@@ -84,6 +85,7 @@ function SessionCanvas({
   session: AgentSession;
   repoPath: string;
 }) {
+  const tx = useSessionText();
   const busyId = useSessionsStore((s) => s.busyId);
   const keep = useSessionsStore((s) => s.keep);
   const resume = useSessionsStore((s) => s.resume);
@@ -145,7 +147,7 @@ function SessionCanvas({
   ).length;
   // Actions are disabled while the agent runs or a keep/resume/discard is mid-flight.
   const blocked = session.running || busyId === session.id;
-  const title = session.turns[0]?.prompt.trim() || "Agent session";
+  const title = session.turns[0]?.prompt.trim() || tx("Agent session");
 
   const doKeep = () => {
     if (blocked || kept || !hasCommits) return;
@@ -236,7 +238,7 @@ function SessionCanvas({
                   disabled={blocked}
                   onClick={doDelete}
                 >
-                  Delete
+                  {tx("Delete")}
                 </Button>
                 <Button
                   size="sm"
@@ -244,10 +246,10 @@ function SessionCanvas({
                   disabled={blocked}
                   onClick={doCreatePr}
                 >
-                  Create PR
+                  {tx("Create PR")}
                 </Button>
                 <Button size="sm" disabled={blocked} onClick={doResume}>
-                  Resume
+                  {tx("Resume")}
                 </Button>
               </>
             ) : (
@@ -262,7 +264,7 @@ function SessionCanvas({
                       checked={squash}
                       onCheckedChange={(v) => setSquash(v === true)}
                     />
-                    Squash {commitCount}
+                    {tx("Squash {{count}}", { count: commitCount })}
                   </label>
                 )}
                 <Button
@@ -271,14 +273,14 @@ function SessionCanvas({
                   disabled={blocked}
                   onClick={doDiscard}
                 >
-                  Discard
+                  {tx("Discard")}
                 </Button>
                 <Button
                   size="sm"
                   disabled={blocked || !hasCommits}
                   onClick={doKeep}
                 >
-                  Keep
+                  {tx("Keep")}
                 </Button>
               </>
             )}
@@ -288,18 +290,18 @@ function SessionCanvas({
           <div className="flex items-center gap-2 border-t bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
             <UsersThreeIcon className="size-3.5 shrink-0" />
             <span>
-              Best of {ensemble.length}
-              {ensembleCost > 0 && ` · ${formatUsd(ensembleCost)} so far`}
-              {!kept && idleSiblings > 0 && " · Keep discards the other arms"}
+              {tx("Best of {{count}}", { count: ensemble.length })}
+              {ensembleCost > 0 && ` · ${formatUsd(ensembleCost)} ${tx("so far")}`}
+              {!kept && idleSiblings > 0 && ` · ${tx("Keep discards the other arms")}`}
             </span>
           </div>
         )}
         <div className="flex items-center justify-between gap-2 px-3 py-2.5">
           <Tabs value={segment} onValueChange={(v) => setSegment(v as Segment)}>
             <TabsList>
-              <TabsTrigger value="conversation">Conversation</TabsTrigger>
+              <TabsTrigger value="conversation">{tx("Conversation")}</TabsTrigger>
               <TabsTrigger value="changes">
-                Changes
+                {tx("Changes")}
                 {(hasCommits || session.running) && (
                   <>
                     <span
@@ -308,8 +310,8 @@ function SessionCanvas({
                     />
                     <span className="sr-only">
                       {session.running
-                        ? " (agent is making changes)"
-                        : " (changes ready to review)"}
+                        ? ` (${tx("agent is making changes")})`
+                        : ` (${tx("changes ready to review")})`}
                     </span>
                   </>
                 )}
@@ -331,10 +333,10 @@ function SessionCanvas({
                     variant={launchPopoverOpen ? "secondary" : "ghost"}
                   />
                 }
-                title="Open a terminal in the session's container"
+                title={tx("Open a terminal in the session's container")}
               >
                 <TerminalWindowIcon className="size-3.5" />
-                Terminal
+                {tx("Terminal")}
               </Popover.Trigger>
               <Popover.Portal container={portalContainer}>
                 <Popover.Positioner
@@ -344,7 +346,7 @@ function SessionCanvas({
                 >
                   <Popover.Popup className="w-80 bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10">
                     <p className="mb-2 text-xs font-medium">
-                      Open container terminal
+                      {tx("Open container terminal")}
                     </p>
                     {/* Remount on open so it re-checks whether one is up. */}
                     {launchPopoverOpen && (
@@ -377,10 +379,10 @@ function SessionCanvas({
               size="xs"
               variant={terminalOpen ? "secondary" : "ghost"}
               onClick={toggleTerminal}
-              title="Toggle the terminal"
+              title={tx("Toggle the terminal")}
             >
               <TerminalWindowIcon className="size-3.5" />
-              Terminal
+              {tx("Terminal")}
             </Button>
           )}
         </div>
@@ -406,16 +408,13 @@ function SessionCanvas({
       <ConfirmDialog
         open={confirmDiscard}
         onCancel={() => setConfirmDiscard(false)}
-        title="Discard this session?"
+        title={tx("Discard this session?")}
         body={
           <>
-            The agent's work on{" "}
-            <span className="font-mono">{session.branch}</span> will be
-            permanently deleted — its worktree and branch are removed. This
-            can't be undone.
+            {tx("The agent's work on {{branch}} will be permanently deleted — its worktree and branch are removed. This can't be undone.", { branch: session.branch })}
           </>
         }
-        confirmLabel="Discard"
+        confirmLabel={tx("Discard")}
         confirmVariant="destructive"
         onConfirm={() => {
           setConfirmDiscard(false);
@@ -426,15 +425,13 @@ function SessionCanvas({
       <ConfirmDialog
         open={confirmDelete}
         onCancel={() => setConfirmDelete(false)}
-        title="Delete this session?"
+        title={tx("Delete this session?")}
         body={
           <>
-            This removes the session and its conversation from the app. The work
-            stays on branch <span className="font-mono">{session.branch}</span>{" "}
-            — delete that from Branches if you no longer need it.
+            {tx("This removes the session and its conversation from the app. The work stays on branch {{branch}} — delete that from Branches if you no longer need it.", { branch: session.branch })}
           </>
         }
-        confirmLabel="Delete"
+        confirmLabel={tx("Delete")}
         confirmVariant="destructive"
         onConfirm={() => {
           setConfirmDelete(false);
@@ -447,13 +444,9 @@ function SessionCanvas({
       <Dialog open={confirmKeepEnsemble} onOpenChange={setConfirmKeepEnsemble}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Keep this arm and discard the rest?</DialogTitle>
+            <DialogTitle>{tx("Keep this arm and discard the rest?")}</DialogTitle>
             <DialogDescription>
-              Keeping on branch{" "}
-              <span className="font-mono">{session.branch}</span>. This is one
-              of {ensemble.length} best-of-N arms — discarding the other{" "}
-              {idleSiblings} permanently deletes their worktrees and branches.
-              This can't be undone.
+              {tx("Keeping on branch {{branch}}. This is one of {{count}} best-of-N arms — discarding the other {{others}} permanently deletes their worktrees and branches. This can't be undone.", { branch: session.branch, count: ensemble.length, others: idleSiblings })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -461,7 +454,7 @@ function SessionCanvas({
               variant="outline"
               onClick={() => setConfirmKeepEnsemble(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <Button
               variant="outline"
@@ -470,7 +463,7 @@ function SessionCanvas({
                 keep(session.id, squash);
               }}
             >
-              Keep only
+              {tx("Keep only")}
             </Button>
             <Button
               onClick={() => {
@@ -478,7 +471,7 @@ function SessionCanvas({
                 keepWinner(session.id, squash);
               }}
             >
-              Keep & discard {idleSiblings}
+              {tx("Keep & discard {{count}}", { count: idleSiblings })}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -502,6 +495,7 @@ function IsolationChip({
   isolation: AgentSession["isolation"];
   agent: AgentSession["agent"];
 }) {
+  const tx = useSessionText();
   const container = isolation === "container";
   const Icon = container ? CubeIcon : TreeStructureIcon;
   return (
@@ -509,19 +503,20 @@ function IsolationChip({
       className="inline-flex shrink-0 items-center gap-1 text-muted-foreground"
       title={
         container
-          ? "Runs in an ephemeral container — file writes are confined by the kernel."
+          ? tx("Runs in an ephemeral container — file writes are confined by the kernel.")
           : agent === "codex"
-            ? "Runs on the host in a throwaway worktree — Codex keeps its own OS-enforced sandbox."
-            : "Runs on the host in a throwaway worktree — file writes are confined by convention, not the kernel."
+            ? tx("Runs on the host in a throwaway worktree — Codex keeps its own OS-enforced sandbox.")
+            : tx("Runs on the host in a throwaway worktree — file writes are confined by convention, not the kernel.")
       }
     >
       <Icon weight="bold" className="size-3" />
-      {container ? "Container" : "Worktree"}
+      {container ? tx("Container") : tx("Worktree")}
     </span>
   );
 }
 
 function SessionChanges({ session }: { session: AgentSession }) {
+  const tx = useSessionText();
   const hasCommits = session.kept || session.headHash !== session.base;
   // While a turn is running, reflect the worktree's uncommitted changes live so
   // you can watch the agent work before the checkpoint commit lands. (A kept
@@ -533,7 +528,7 @@ function SessionChanges({ session }: { session: AgentSession }) {
     return (
       <DiffPlaceholder
         icon={SparkleIcon}
-        message="No changes yet. Send the agent a task in Conversation."
+        message={tx("No changes yet. Send the agent a task in Conversation.")}
       />
     );
   }

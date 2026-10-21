@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffectEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,8 +22,8 @@ const NONE = "__none__";
 const GITIGNORE_TEMPLATES = ["Node", "Python", "Rust", "Go"];
 const LICENSES = ["MIT", "Unlicense"];
 
-function selectItems(values: string[]): Record<string, string> {
-  return { [NONE]: "None", ...Object.fromEntries(values.map((v) => [v, v])) };
+function selectItems(values: string[], noneLabel: string): Record<string, string> {
+  return { [NONE]: noneLabel, ...Object.fromEntries(values.map((v) => [v, v])) };
 }
 
 const DEFAULTS = {
@@ -41,6 +42,7 @@ export function CreateRepoDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("welcome");
   const openRecorded = useOpenRecordedRepo();
   const globalDefaultBranch = useGlobalDefaultBranch();
 
@@ -65,7 +67,7 @@ export function CreateRepoDialog({
         // switch: the repository exists either way.
         await openRecorded(info);
         onOpenChange(false);
-        toast.success(`Created ${info.name}`);
+        toast.success(t("create.created", { name: info.name }));
       } catch (e) {
         toastError(e);
       }
@@ -78,7 +80,7 @@ export function CreateRepoDialog({
   async function pickParentDir() {
     const path = await openDialog({
       directory: true,
-      title: "Create repository in folder",
+      title: t("create.folderPickerTitle"),
     });
     if (path) form.setFieldValue("parentDir", path);
   }
@@ -94,10 +96,9 @@ export function CreateRepoDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Create a new repository</DialogTitle>
+            <DialogTitle>{t("create.title")}</DialogTitle>
             <DialogDescription>
-              Initializes a git repository on the "{defaultBranch}" branch
-              (change in Settings).
+              {t("create.description", { branch: defaultBranch })}
             </DialogDescription>
           </DialogHeader>
           <form.AppField
@@ -105,11 +106,14 @@ export function CreateRepoDialog({
             validators={{ onChange: ({ value }) => required(value) }}
           >
             {(field) => (
-              <field.TextField label="Name" placeholder="repository name" />
+              <field.TextField
+                label={t("create.name")}
+                placeholder={t("create.namePlaceholder")}
+              />
             )}
           </form.AppField>
           <form.AppField name="description">
-            {(field) => <field.TextField label="Description" />}
+            {(field) => <field.TextField label={t("create.descriptionLabel")} />}
           </form.AppField>
           <form.AppField
             name="parentDir"
@@ -119,12 +123,12 @@ export function CreateRepoDialog({
               <div className="flex items-end gap-2">
                 <div className="flex-1">
                   <field.TextField
-                    label="Local path"
-                    placeholder="Type, paste, or choose a folder…"
+                    label={t("create.localPath")}
+                    placeholder={t("create.pathPlaceholder")}
                   />
                 </div>
                 <Button type="button" variant="outline" onClick={pickParentDir}>
-                  Choose…
+                  {t("create.choose")}
                 </Button>
               </div>
             )}
@@ -132,7 +136,7 @@ export function CreateRepoDialog({
           <form.AppField name="initReadme">
             {(field) => (
               <field.CheckboxField
-                label="Initialize this repository with a README"
+                label={t("create.initializeReadme")}
                 className="flex cursor-pointer items-center gap-2 text-xs"
               />
             )}
@@ -141,16 +145,16 @@ export function CreateRepoDialog({
             <form.AppField name="gitignore">
               {(field) => (
                 <field.SelectField
-                  label="Git ignore"
-                  items={selectItems(GITIGNORE_TEMPLATES)}
+                  label={t("create.gitignore")}
+                  items={selectItems(GITIGNORE_TEMPLATES, t("create.none"))}
                 />
               )}
             </form.AppField>
             <form.AppField name="license">
               {(field) => (
                 <field.SelectField
-                  label="License"
-                  items={selectItems(LICENSES)}
+                  label={t("create.license")}
+                  items={selectItems(LICENSES, t("create.none"))}
                 />
               )}
             </form.AppField>
@@ -161,10 +165,10 @@ export function CreateRepoDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("create.cancel")}
             </Button>
             <form.AppForm>
-              <form.SubmitButton>Create repository</form.SubmitButton>
+              <form.SubmitButton>{t("create.submit")}</form.SubmitButton>
             </form.AppForm>
           </DialogFooter>
         </form>

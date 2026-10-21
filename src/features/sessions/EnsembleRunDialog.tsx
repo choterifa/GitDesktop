@@ -17,6 +17,7 @@ import {
   imageMissingAgentText,
   ModelPicker,
 } from "./AgentPickers";
+import { useSessionText } from "./use-session-text";
 
 /** One arm of a best-of-N run: which agent/model/effort attacks the task. */
 export interface EnsembleArm {
@@ -58,15 +59,14 @@ export function EnsembleRunDialog({
   imageAgents?: readonly AgentKind[];
   onRun: (arms: EnsembleArm[]) => void;
 }) {
+  const tx = useSessionText();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Run this task several ways</DialogTitle>
+          <DialogTitle>{tx("Run this task several ways")}</DialogTitle>
           <DialogDescription>
-            Each arm runs the same task in its own worktree with its own
-            agent/model — vary them to get genuinely different approaches, then
-            keep the best. Every arm is billed separately.
+            {tx("Each arm runs the same task in its own worktree with its own agent/model — vary them to get different approaches, then keep the best. Every arm is billed separately.")}
           </DialogDescription>
         </DialogHeader>
         {/* Remount on open so the arms re-seed from the current composer config. */}
@@ -100,6 +100,7 @@ function EnsembleArms({
   onCancel: () => void;
   onRun: (arms: EnsembleArm[]) => void;
 }) {
+  const tx = useSessionText();
   // A stable per-row key so React reconciles add/remove correctly — an index key
   // would mis-associate the controlled pickers when a middle arm is removed. The
   // key is dialog-only; it's stripped before the arms are run.
@@ -130,7 +131,7 @@ function EnsembleArms({
   const missingSummary = arms
     .map((arm, i) =>
       missingFromImage(arm.agent)
-        ? `Arm ${i + 1}: ${imageMissingAgentText(arm.agent)}`
+        ? tx("Arm {{number}}: {{reason}}", { number: i + 1, reason: imageMissingAgentText(arm.agent, tx) })
         : "",
     )
     .filter(Boolean)
@@ -176,7 +177,7 @@ function EnsembleArms({
               className="ml-auto text-muted-foreground"
               disabled={arms.length <= MIN_ARMS}
               onClick={() => removeArm(i)}
-              aria-label={`Remove arm ${i + 1}`}
+              aria-label={tx("Remove arm {{number}}", { number: i + 1 })}
             >
               <XIcon />
             </Button>
@@ -189,7 +190,7 @@ function EnsembleArms({
                   className="size-3.5 shrink-0"
                   aria-hidden
                 />
-                {imageMissingAgentText(arm.agent)}
+                {imageMissingAgentText(arm.agent, tx)}
               </p>
             )}
           </div>
@@ -204,28 +205,27 @@ function EnsembleArms({
           onClick={addArm}
         >
           <PlusIcon data-icon="inline-start" />
-          Add arm
+          {tx("Add arm")}
         </Button>
         <p className="min-w-0 text-right text-[11px] text-muted-foreground">
           {total != null ? (
             <>
-              Estimated{" "}
+              {tx("Estimated")}{" "}
               <span className="tabular-nums text-foreground">
                 ~{formatUsd(total)}
               </span>{" "}
-              · {arms.length} × {formatUsd(perSession ?? 0)} avg of your last{" "}
-              {sampleSize}
+              · {tx("{{count}} × {{cost}} avg of your last {{samples}}", { count: arms.length, cost: formatUsd(perSession ?? 0), samples: sampleSize })}
             </>
           ) : (
-            <>{arms.length} agents, each billed separately</>
+            <>{tx("{{count}} agents, each billed separately", { count: arms.length })}</>
           )}
-          {usesCopilot && " · Copilot arms are premium requests"}
+          {usesCopilot && ` · ${tx("Copilot arms are premium requests")}`}
         </p>
       </div>
 
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {tx("Cancel")}
         </Button>
         <Button
           onClick={() =>
@@ -238,7 +238,7 @@ function EnsembleArms({
             )
           }
         >
-          Run {arms.length} agents
+          {tx("Run {{count}} agents", { count: arms.length })}
         </Button>
       </DialogFooter>
     </>

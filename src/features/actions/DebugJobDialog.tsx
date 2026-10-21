@@ -5,6 +5,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +44,7 @@ export function DebugJobDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("actions");
   const settings = useSettings();
   const reviewAi = settings.data?.reviewAi;
   const { run, cancel, reset, generating, text, status } = useAiTextStream();
@@ -70,7 +72,7 @@ export function DebugJobDialog({
       setLoadingLogs(false);
     }
     if (!logs.trim()) {
-      setLogsError("No logs were available for this job.");
+      setLogsError(t("debug.noLogsForJob"));
       return;
     }
     const failedSteps = j.steps
@@ -102,10 +104,10 @@ export function DebugJobDialog({
 
   const busy = loadingLogs || generating;
   const agentPrompt = extractAgentPrompt(text);
-  const model = reviewAi?.model || "default model";
+  const model = reviewAi?.model || t("debug.defaultModel");
   const providerLabel = reviewAi
     ? PROVIDER_LABELS[reviewAi.provider]
-    : "the review model";
+    : t("debug.reviewModel");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -115,11 +117,14 @@ export function DebugJobDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <SparkleIcon className="size-4 text-primary" />
-                Debug “{job.name}” with AI
+                {t("debug.title", { name: job.name })}
               </DialogTitle>
               <DialogDescription>
-                {workflowName} · analyzed with {providerLabel} ({model}). The
-                result stays local unless you act on it.
+                {t("debug.description", {
+                  workflow: workflowName,
+                  provider: providerLabel,
+                  model,
+                })}
               </DialogDescription>
             </DialogHeader>
 
@@ -132,14 +137,14 @@ export function DebugJobDialog({
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Spinner className="size-3" />
                   {loadingLogs
-                    ? "Reading job logs…"
-                    : status || "Analyzing the failure…"}
+                    ? t("debug.readingLogs")
+                    : status || t("debug.analyzingFailure")}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   {reviewAi
-                    ? "Click Analyze to diagnose this failure."
-                    : "Configure a review model in Settings → AI provider to debug with AI."}
+                    ? t("debug.clickAnalyze")
+                    : t("debug.configureModel")}
                 </p>
               )}
             </div>
@@ -148,7 +153,7 @@ export function DebugJobDialog({
               {generating ? (
                 <Button variant="outline" size="sm" onClick={cancel}>
                   <XIcon data-icon="inline-start" />
-                  Cancel
+                  {t("states.cancel")}
                 </Button>
               ) : (
                 <Button
@@ -158,31 +163,30 @@ export function DebugJobDialog({
                   onClick={() => reviewAi && runDebug(job, reviewAi)}
                 >
                   <ArrowClockwiseIcon data-icon="inline-start" />
-                  {text.trim() || logsError ? "Re-run" : "Analyze"}
+                  {text.trim() || logsError
+                    ? t("debug.rerun")
+                    : t("debug.analyze")}
                 </Button>
               )}
               {agentPrompt && !generating && (
                 <Button
                   size="sm"
                   onClick={() =>
-                    copyText(
-                      agentPrompt,
-                      "Fix prompt copied — paste it to your agent",
-                    )
+                    copyText(agentPrompt, t("debug.fixPromptCopied"))
                   }
                 >
                   <SparkleIcon data-icon="inline-start" />
-                  Copy fix prompt
+                  {t("debug.copyFixPrompt")}
                 </Button>
               )}
               {text.trim() && !generating && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => copyText(text, "Diagnosis copied")}
+                  onClick={() => copyText(text, t("debug.diagnosisCopied"))}
                 >
                   <CopyIcon data-icon="inline-start" />
-                  Copy all
+                  {t("debug.copyAll")}
                 </Button>
               )}
               <Button
@@ -191,7 +195,7 @@ export function DebugJobDialog({
                 className="ml-auto"
                 onClick={() => onOpenChange(false)}
               >
-                Close
+                {t("states.close")}
               </Button>
             </div>
           </>

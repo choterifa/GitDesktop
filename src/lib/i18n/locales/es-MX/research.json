@@ -1,0 +1,75 @@
+{
+  "intent": {
+    "brainstorm": "Lluvia de ideas",
+    "deep": "Investigación profunda"
+  },
+  "header": {
+    "defaultTitle": "Investigación",
+    "agentTitle": "Agente y modelo que realizan esta investigación",
+    "backTitle": "Volver al espacio de agentes (conserva esta investigación)",
+    "back": "Volver",
+    "dismiss": "Descartar esta investigación"
+  },
+  "picker": {
+    "intent": "Objetivo de la investigación"
+  },
+  "composer": {
+    "brainstorm": {
+      "heading": "Explora ideas con información de la web y tu código",
+      "placeholder": "¿Qué quieres explorar? (por ejemplo: «formas de agregar un modo de acompañante en LAN»)…",
+      "note": "Busca varias posibilidades en la web y en tu repositorio, junto con antecedentes. Solo lectura: no modifica nada."
+    },
+    "deep": {
+      "heading": "Investiga una posibilidad a fondo y con fuentes",
+      "placeholder": "¿Qué debería investigar? (por ejemplo: «integrar un servidor axum en el proceso de Tauri»)…",
+      "note": "Consulta fuentes primarias y tu repositorio, y redacta un informe con citas. Solo lectura: puede tardar más y costar más que un plan."
+    },
+    "intro": "Un agente de solo lectura busca en la web y revisa tu repositorio; aquí recibirás un informe con fuentes. No modifica nada. Puedes convertir el resultado en un plan o guardarlo. También puedes iniciar varias investigaciones en paralelo.",
+    "topicLabel": "Describe el tema que quieres investigar",
+    "shortcutHint": "para investigar",
+    "submit": "Investigar"
+  },
+  "conversation": {
+    "you": "Tú",
+    "switchedTo": "Cambiaste a {{intent}}"
+  },
+  "status": {
+    "researching": "Investigando en la web…",
+    "exploring": "Explorando la web y tu repositorio…",
+    "stopped": "Detenida",
+    "starting": "Iniciando…"
+  },
+  "actions": {
+    "stop": "Detener",
+    "restart": "Reiniciar",
+    "copy": "Copiar",
+    "resave": "Guardar de nuevo",
+    "saveReport": "Guardar informe",
+    "distilling": "Sintetizando…",
+    "turnIntoPlan": "Convertir en plan",
+    "send": "Enviar"
+  },
+  "result": {
+    "estimatedCost": "Costo estimado de esta investigación",
+    "savedTo": "Guardado en",
+    "copyTitle": "Copiar el informe y el historial de la sesión al portapapeles"
+  },
+  "toast": {
+    "reportCopied": "Se copió el informe"
+  },
+  "notification": {
+    "failed": "La investigación falló",
+    "ready": "La investigación está lista"
+  },
+  "errors": {
+    "agentReported": "El agente de investigación informó de un error.",
+    "noOutput": "El agente de investigación no devolvió ningún resultado. Inténtalo de nuevo.",
+    "noReportToSave": "Todavía no hay ningún informe que guardar."
+  },
+  "followUp": {
+    "placeholder": "Profundiza o indica cómo continuar la investigación…",
+    "label": "Continuar la investigación",
+    "agentLocked": "No se puede cambiar de agente durante una conversación",
+    "keyboardHint": "↵ enviar · ⇧↵ nueva línea"
+  }
+}

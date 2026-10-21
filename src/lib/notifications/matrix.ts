@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { i18n } from "@/lib/i18n";
 import {
   type AutomationKindFilter,
   NOTIFICATION_SOURCES,
@@ -11,6 +12,18 @@ import {
 } from "@/lib/settings/api";
 import type { RepoNotificationOverride } from "./overrides";
 
+const tx = (source: string, options?: Record<string, unknown>) =>
+  i18n.t(source, { ns: "settings", keySeparator: false, ...options });
+
+function localizedRecord<T extends object>(source: T): T {
+  return new Proxy(source, {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver);
+      return typeof value === "string" ? tx(value) : value;
+    },
+  });
+}
+
 // The notification matrix's shared vocabulary and its two open-state stores.
 // Component-free on purpose: the table primitives and the dialog live in
 // features/notifications, and a module mixing them with these values can't
@@ -22,20 +35,17 @@ import type { RepoNotificationOverride } from "./overrides";
 export const CHANNELS = ["inApp", "os"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
-export const CHANNEL_LABELS: Record<Channel, string> = {
+export const CHANNEL_LABELS = localizedRecord<Record<Channel, string>>({
   inApp: "In-app",
   os: "OS",
-};
+});
 
 /** Spoken channel word inside a cell's aria-label — the column header is a
  *  `<th scope="col">`, but a checkbox still needs a name of its own. */
-const CHANNEL_ARIA: Record<Channel, string> = {
-  inApp: "in-app",
-  os: "OS",
-};
-
 /** Record-typed against the manifest, so a new source can't ship label-less. */
-export const SOURCE_LABELS: Record<NotificationSource, string> = {
+export const SOURCE_LABELS = localizedRecord<
+  Record<NotificationSource, string>
+>({
   prChecks: "CI checks finish",
   prActivity: "Pull requests opened, merged, or closed",
   prCreate: "Creating a pull request fails",
@@ -44,49 +54,53 @@ export const SOURCE_LABELS: Record<NotificationSource, string> = {
   reviews: "AI reviews I start",
   automations: "Automation results",
   agents: "Agent tasks finish",
-};
+});
 
 /** Second line under a row's label; a source with nothing to add carries none. */
-export const SOURCE_DESCRIPTIONS: Partial<Record<NotificationSource, string>> =
-  {
-    prCreate:
-      "Any failed create, including one that fails in the background after you've moved on",
-    prReviews:
-      "Approvals, change requests, comments, and requests for your review",
-    reviews: "A review or security audit finishing in the background",
-    automations: "Automated reviews ready, posted, or failed",
-    agents: "Sessions, plans, and research",
-  };
+export const SOURCE_DESCRIPTIONS = localizedRecord<
+  Partial<Record<NotificationSource, string>>
+>({
+  prCreate:
+    "Any failed create, including one that fails in the background after you've moved on",
+  prReviews:
+    "Approvals, change requests, comments, and requests for your review",
+  reviews: "A review or security audit finishing in the background",
+  automations: "Automated reviews ready, posted, or failed",
+  agents: "Sessions, plans, and research",
+});
 
 /** Sources hidden with the AI surfaces. */
 const AI_SOURCES: ReadonlySet<NotificationSource> = new Set<NotificationSource>(
   ["reviews", "automations", "agents"],
 );
 
-export const CHECK_SCOPE_LABELS: Record<PrCheckScopeFilter, string> = {
+export const CHECK_SCOPE_LABELS = localizedRecord<
+  Record<PrCheckScopeFilter, string>
+>({
   mine: "My pull requests only",
   all: "All open pull requests",
-};
+});
 
 /** Names the SET each filter delivers, never "All results": a class this app doesn't
  *  classify yet (cancelled, skipped) must not silently join an existing user's
  *  choice when it does. */
-export const OUTCOME_FILTER_LABELS: Record<OutcomeFilter, string> = {
+export const OUTCOME_FILTER_LABELS = localizedRecord<
+  Record<OutcomeFilter, string>
+>({
   all: "Successes and failures",
   failures: "Failures only",
   successes: "Successes only",
-};
+});
 
 /** Deliberately NOT the closed-set rule above: "Everything" IS the identity filter
  *  here, so a kind this app doesn't emit yet joins it by design rather than being
  *  silently excluded. Only "Failures only" names a closed set. */
-export const AUTOMATION_KIND_FILTER_LABELS: Record<
-  AutomationKindFilter,
-  string
-> = {
+export const AUTOMATION_KIND_FILTER_LABELS = localizedRecord<
+  Record<AutomationKindFilter, string>
+>({
   all: "Everything",
   failures: "Failures only",
-};
+});
 
 /** A source carrying a Notify-on sub-row — the CI sources on the outcome axis, plus
  *  automations on its kind axis. Named once here, since the label, the held reason,
@@ -94,13 +108,18 @@ export const AUTOMATION_KIND_FILTER_LABELS: Record<
 export type SubrowSource = OutcomeSource | "automations";
 
 /** Visible label on every Notify-on sub-row, on both the outcome and kind axes. */
-export const SUBROW_LABEL = "Notify on";
+export function subrowLabel(): string {
+  return tx("Notify on");
+}
 
 /** Accessible name for a Notify-on picker: each matrix holds one per CI source plus
  *  the automations row, so the visible word alone names none of them. Visible text
  *  first (WCAG 2.5.3). */
 export function subrowAriaLabel(source: SubrowSource): string {
-  return `${SUBROW_LABEL} — ${SOURCE_LABELS[source]}`;
+  return tx("{{label}} — {{source}}", {
+    label: subrowLabel(),
+    source: SOURCE_LABELS[source],
+  });
 }
 
 /** Why the CI-checks sub-rows are held while that source delivers nowhere. Named
@@ -112,11 +131,13 @@ const CHECKS_OFF_REASON =
 
 /** Why a qualifying sub-row is held, per source — the CI-checks sentence also covers
  *  its Watch neighbour, so those two rows print one line between them. */
-export const SUBROW_HELD_REASONS: Record<SubrowSource, string> = {
+export const SUBROW_HELD_REASONS = localizedRecord<
+  Record<SubrowSource, string>
+>({
   prChecks: CHECKS_OFF_REASON,
   actionRuns: "Turn on a workflow-runs channel to choose which results notify",
   automations: "Turn on an automations channel to choose which results notify",
-};
+});
 
 /** The rows the matrix renders, in manifest order. Hidden AI rows keep whatever
  *  the draft holds — they are omitted from the view, never rewritten. */
@@ -129,7 +150,10 @@ export function notificationRows(
 }
 
 export function channelAriaLabel(rowLabel: string, channel: Channel): string {
-  return `${rowLabel} — ${CHANNEL_ARIA[channel]}`;
+  return tx("{{label}} — {{channel}}", {
+    label: rowLabel,
+    channel: tx(channel === "inApp" ? "in-app" : "OS"),
+  });
 }
 
 /** JSON with object keys sorted, so a comparison is insensitive to key order. */

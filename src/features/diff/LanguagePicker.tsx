@@ -1,5 +1,6 @@
 import { CaretDownIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,6 +40,7 @@ export function LanguagePicker({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("diff");
   // The internal state tracks every transition even while controlled, so a
   // caller that stops passing `open` resumes from the state actually on screen.
   const [internalOpen, setInternalOpen] = useState(false);
@@ -65,18 +67,20 @@ export function LanguagePicker({
     !q || l.toLowerCase().includes(q) || labelOf(l).toLowerCase().includes(q);
 
   const groups = [
-    { label: "Custom", langs: customIds.filter(matches) },
-    { label: "Common", langs: common.filter(matches) },
-    { label: "All languages", langs: rest.filter(matches) },
+    { label: t("language.custom"), langs: customIds.filter(matches) },
+    { label: t("language.common"), langs: common.filter(matches) },
+    { label: t("language.all"), langs: rest.filter(matches) },
   ].filter((g) => g.langs.length > 0);
-  const showAuto = Boolean(autoLabel) && (!q || "auto".includes(q));
+  const showAuto =
+    Boolean(autoLabel) &&
+    (!q || t("language.auto").toLowerCase().includes(q) || "auto".includes(q));
 
   function close() {
     setOpen(false);
     setQuery("");
   }
 
-  const current = value ? labelOf(value) : (autoLabel ?? "Auto");
+  const current = value ? labelOf(value) : (autoLabel ?? t("language.auto"));
 
   function row(lang: string) {
     return (
@@ -129,7 +133,7 @@ export function LanguagePicker({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search languages…"
+            placeholder={t("language.search")}
             className="h-7"
           />
         </div>
@@ -159,7 +163,7 @@ export function LanguagePicker({
           ))}
           {groups.length === 0 && !showAuto && (
             <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-              No matching language
+              {t("language.noMatches")}
             </p>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL_X_HIDDEN } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -96,6 +97,7 @@ export function RepoAutomationsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("automations");
   const automations = useAutomations();
   const save = useSaveRepoAutomations(repoPath);
 
@@ -204,7 +206,7 @@ export function RepoAutomationsDialog({
       toastError(e);
       return;
     }
-    toast.success("Repository automations saved");
+    toast.success(t("repo.saved"));
     // The dialog survives a repo switch (RepositoryView is one instance), so a
     // save landing after one must not close the next repo's dialog.
     if (
@@ -224,12 +226,8 @@ export function RepoAutomationsDialog({
           scrolls while the header and footer stay pinned. */}
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Repository automations</DialogTitle>
-          <DialogDescription>
-            What runs automatically in this repository. Cells start from the
-            global defaults in Settings → Automations; change one here to
-            override it for this repository only.
-          </DialogDescription>
+          <DialogTitle>{t("repo.title")}</DialogTitle>
+          <DialogDescription>{t("repo.description")}</DialogDescription>
         </DialogHeader>
         <div className={cn(DIALOG_SCROLL_X_HIDDEN, "min-h-0 flex-1 space-y-3")}>
           {automations.isPending ? (
@@ -242,10 +240,10 @@ export function RepoAutomationsDialog({
                   size="xs"
                   onClick={resetToGlobal}
                   disabled={!hasOverrides}
-                  reason="No overrides to reset"
-                  title="Remove all overrides and inherit the global defaults"
+                  reason={t("repo.noOverrides")}
+                  title={t("repo.resetTitle")}
                 >
-                  Reset to global defaults
+                  {t("repo.reset")}
                 </DisabledReasonButton>
               </div>
               <LifecycleEditor cellState={cellState} onCellPatch={patchCell} />
@@ -254,7 +252,7 @@ export function RepoAutomationsDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("actions.cancel")}
           </Button>
           <DisabledReasonButton
             // Below `sm` the footer stacks and stretches the wrapper span; the
@@ -265,17 +263,17 @@ export function RepoAutomationsDialog({
             reason={(() => {
               switch (true) {
                 case save.isPending:
-                  return "Saving…";
+                  return t("states.saving");
                 case !automations.data && automations.isError:
-                  return "Couldn't load repository automations";
+                  return t("repo.loadFailed");
                 case !automations.data:
-                  return "Loading repository automations…";
+                  return t("repo.loading");
                 default:
-                  return "No changes to save";
+                  return t("states.noChanges");
               }
             })()}
           >
-            Save changes
+            {t("actions.saveChanges")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

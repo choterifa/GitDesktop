@@ -1,5 +1,6 @@
 import { CaretDownIcon, PlusIcon, TagIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { RelativeTime } from "@/components/relative-time";
@@ -24,7 +25,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import {
   forgeFeatureReady,
-  forgeProbeReason,
   forgeProbeState,
   useCreateTag,
   useForgeStatus,
@@ -45,16 +45,24 @@ import { CreateReleaseDialog } from "./CreateReleaseDialog";
 
 /** Latest / Pre-release / Draft badges for a tag that backs a release. */
 function ReleaseBadges({ release }: { release: ReleaseInfo }) {
+  const { t } = useTranslation("tags");
   return (
     <>
-      {release.isLatest && <Badge variant="default">Latest</Badge>}
-      {release.isPrerelease && <Badge variant="secondary">Pre-release</Badge>}
-      {release.isDraft && <Badge variant="secondary">Draft</Badge>}
+      {release.isLatest && (
+        <Badge variant="default">{t("badges.latest")}</Badge>
+      )}
+      {release.isPrerelease && (
+        <Badge variant="secondary">{t("badges.prerelease")}</Badge>
+      )}
+      {release.isDraft && (
+        <Badge variant="secondary">{t("badges.draft")}</Badge>
+      )}
     </>
   );
 }
 
 export function TagsPanel({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("tags");
   const gh = useForgeStatus(repoPath);
   // Release READS are provider-neutral (GitHub + GitLab); the badge/detail light up
   // for any provider with releases implemented. Publishing follows the per-action
@@ -67,13 +75,16 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
       case canCreateRelease:
         return undefined;
       case probe !== null:
-        return forgeProbeReason(probe, "publish a release");
+        return t(
+          probe === "checking" ? "probe.checking" : "probe.unreachable",
+          { action: t("probe.actions.publishRelease") },
+        );
       case gh.data?.provider === "gitlab" && Boolean(gh.data?.installed):
-        return "Sign in with the GitLab CLI (glab) to publish a release.";
+        return t("panel.signInGitLabCli");
       case gh.data?.provider === "gitlab":
-        return "Install the GitLab CLI (glab) to publish a release.";
+        return t("panel.installGitLabCli");
       default:
-        return "Connect this repository to GitHub or GitLab to publish a release.";
+        return t("panel.connectForge");
     }
   })();
   const tagList = useTagList(repoPath);
@@ -160,7 +171,7 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
       toastError(e);
       return;
     }
-    toast.success(`Created tag ${name}`);
+    toast.success(t("toasts.tagCreated", { name }));
     const live = newTagSessionRef.current;
     if (live === session) onNewTagOpenChange(false);
     // A closed dialog has no typed name to protect; a reopened one does.
@@ -173,13 +184,15 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 border-b p-2">
-        <h2 className="px-1 text-xs font-medium text-muted-foreground">Tags</h2>
+        <h2 className="px-1 text-xs font-medium text-muted-foreground">
+          {t("panel.title")}
+        </h2>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" size="xs" className="ml-auto">
                 <PlusIcon data-icon="inline-start" />
-                New
+                {t("panel.new")}
                 <CaretDownIcon data-icon="inline-end" />
               </Button>
             }
@@ -190,18 +203,18 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
               title={releaseReason}
               onClick={() => setCreateReleaseOpen(true)}
             >
-              New release…
+              {t("panel.newRelease")}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!headOid}
-              title={headOid ? undefined : "No commit to tag yet."}
+              title={headOid ? undefined : t("panel.noCommitToTag")}
               onClick={() => {
                 setNewTagName("");
                 newTagSessionRef.current = {};
                 setNewTagOpen(true);
               }}
             >
-              New tag (on current commit)…
+              {t("panel.newTagOnCurrentCommit")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -211,7 +224,7 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
           ref={filterRef}
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          placeholder="Filter tags"
+          placeholder={t("panel.filterTags")}
           className="h-7"
           autoComplete="off"
         />
@@ -223,9 +236,7 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
           <ListRowSkeletons rows={2} lines={2} name="tags" />
         ) : visible.length === 0 ? (
           <p className="px-3 py-4 text-xs text-muted-foreground">
-            {rows.length > 0
-              ? "No tags match the filter."
-              : "No tags yet. The New menu above creates a tag on the current commit or publishes a release."}
+            {rows.length > 0 ? t("panel.noTagsMatch") : t("panel.noTagsYet")}
           </p>
         ) : (
           <div onKeyDown={onListKeyDown}>
@@ -256,7 +267,9 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
                     {row.release && <ReleaseBadges release={row.release} />}
                   </p>
                   <p className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground">
-                    {row.release ? "release · " : "tag · "}
+                    {row.release
+                      ? `${t("panel.releaseLabel")} · `
+                      : `${t("panel.tagLabel")} · `}
                     {parseableDate(row.date) ? (
                       <RelativeTime date={row.date} />
                     ) : (
@@ -286,11 +299,11 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
             }}
           >
             <DialogHeader>
-              <DialogTitle>New tag</DialogTitle>
+              <DialogTitle>{t("panel.newTag")}</DialogTitle>
               <DialogDescription>
-                Creates a lightweight tag on the current commit (
-                <span className="font-mono">{headOid?.slice(0, 7)}</span>). Push
-                it or create a release from its detail view.
+                {t("panel.newTagDescriptionBeforeHash")} (
+                <span className="font-mono">{headOid?.slice(0, 7)}</span>).{" "}
+                {t("panel.newTagDescriptionAfterHash")}
               </DialogDescription>
             </DialogHeader>
             <Input
@@ -307,14 +320,14 @@ export function TagsPanel({ repoPath }: { repoPath: string }) {
                 variant="outline"
                 onClick={() => onNewTagOpenChange(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={!newTagName.trim() || createTag.isPending}
               >
                 {createTag.isPending && <Spinner data-icon="inline-start" />}
-                Create tag
+                {t("panel.createTag")}
               </Button>
             </DialogFooter>
           </form>

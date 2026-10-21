@@ -14,8 +14,6 @@ import {
   useRetryFocusRescue,
 } from "@/features/conversations/ConversationListPanel";
 import {
-  detailNoticeMessage,
-  offlinePendingMessage,
   refreshFailed,
   resolveDetailPane,
 } from "@/features/conversations/remote-section-state";
@@ -75,6 +73,7 @@ import {
   ValidityChip,
   validityLabel,
 } from "./severity";
+import { useSecurityFindingsText } from "./use-security-findings-text";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -85,11 +84,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function linkLabelText(
+  label: string,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string {
+  const host = /^(View|Open) on (.+)$/.exec(label);
+  return host ? tx(`${host[1]} on {{host}}`, { host: host[2] }) : tx(label);
+}
+
 function DetailShell({
   title,
   chip,
   htmlUrl,
-  linkLabel = "View on GitHub",
+  linkLabel,
   linkTitle,
   meta,
   children,
@@ -108,6 +115,8 @@ function DetailShell({
   meta: ReactNode;
   children: ReactNode;
 }) {
+  const tx = useSecurityFindingsText();
+  const localizedLinkLabel = linkLabelText(linkLabel ?? "View on GitHub", tx);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b p-4">
@@ -124,7 +133,7 @@ function DetailShell({
               onClick={() => openUrl(htmlUrl)}
             >
               <ArrowSquareOutIcon data-icon="inline-start" />
-              {linkLabel}
+              {localizedLinkLabel}
             </Button>
           ) : null}
         </div>
@@ -143,12 +152,15 @@ function DetailShell({
 
 /** GitHub reports `direct` / `transitive`; anything else is shown as it arrived,
  *  so a value we don't know yet is never dropped or mislabeled. */
-function relationshipLabel(relationship: string): string {
+function relationshipLabel(
+  relationship: string,
+  tx: (source: string) => string,
+): string {
   switch (relationship.toLowerCase()) {
     case "direct":
-      return "Direct";
+      return tx("Direct");
     case "transitive":
-      return "Transitive";
+      return tx("Transitive");
     default:
       return relationship;
   }
@@ -189,9 +201,10 @@ function CvssSection({ cvss }: { cvss: CvssOut }) {
 }
 
 function ReferencesSection({ references }: { references: ReferenceOut[] }) {
+  const tx = useSecurityFindingsText();
   return (
     <section className="mt-4">
-      <h3 className="mb-1.5 text-xs font-semibold">References</h3>
+      <h3 className="mb-1.5 text-xs font-semibold">{tx("References")}</h3>
       <ul>
         {references.map((r, i) => (
           <li key={`${r.url}-${i}`}>
@@ -265,6 +278,7 @@ function CweChip({ cwe }: { cwe: CweOut }) {
 }
 
 function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
       // Falls back to the identity field, never invented prose: a doubly-degraded
@@ -274,7 +288,7 @@ function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
       htmlUrl={alert.htmlUrl}
       meta={
         <>
-          <Row label="Package">
+          <Row label={tx("Package")}>
             <span className="font-mono">{alert.packageName}</span>{" "}
             <span className="text-muted-foreground">
               {alert.ecosystem}
@@ -284,11 +298,11 @@ function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
           {/* Next to the package: whether this is your dependency or something
               underneath it decides who can act on it. Omitted when unstated. */}
           {alert.relationship ? (
-            <Row label="Dependency">
-              {relationshipLabel(alert.relationship)}
+            <Row label={tx("Dependency")}>
+              {relationshipLabel(alert.relationship, tx)}
             </Row>
           ) : null}
-          <Row label="Manifest">
+          <Row label={tx("Manifest")}>
             <PathText path={alert.manifestPath} className="font-mono" />
           </Row>
           {/* Always the global database: Dependabot alerts reference published
@@ -308,11 +322,11 @@ function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
               <span className="tabular-nums">{alert.cvssScore}</span>
             </Row>
           ) : null}
-          <Row label="Affected">
-            {alert.vulnerableVersionRange ?? "Not stated"}
+          <Row label={tx("Affected")}>
+            {alert.vulnerableVersionRange ?? tx("Not stated")}
           </Row>
-          <Row label="Patched">
-            {alert.firstPatchedVersion ?? "No patched version yet"}
+          <Row label={tx("Patched")}>
+            {alert.firstPatchedVersion ?? tx("No patched version yet")}
           </Row>
           {alert.cwes.length > 0 ? (
             <Row label="CWE">
@@ -324,7 +338,7 @@ function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
             </Row>
           ) : null}
           {parseableDate(alert.createdAt) ? (
-            <Row label="Opened">
+            <Row label={tx("Opened")}>
               <RelativeTime date={alert.createdAt} />
             </Row>
           ) : null}
@@ -345,21 +359,40 @@ function AlertDetail({ alert }: { alert: DependabotAlertOut }) {
 
 /** Sentence-case a raw wire value, leaving the rest of it as it arrived so an
  *  unrecognized level still reads instead of collapsing to "Unspecified". */
-function capitalizeFirst(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+function localizedWireLabel(
+  value: string,
+  tx: (source: string) => string,
+): string {
+  const normalized = value.toLowerCase();
+  const knownLabels: Record<string, string> = {
+    error: "Error",
+    warning: "Warning",
+    note: "Note",
+    open: "Open",
+    dismissed: "Dismissed",
+    fixed: "Fixed",
+    withdrawn: "Withdrawn",
+  };
+  const source = knownLabels[normalized];
+  return source ? tx(source) : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /** `path:line`, or a placeholder when the path came through empty — a line
  *  number hung off nothing reads as a location. Must stay in step with
  *  `PathLabel` in FindingsPanel, which renders the same value in the list. */
-function locationText(path: string, line: number | null): string {
-  return path ? (line === null ? path : `${path}:${line}`) : "No file path";
+function locationText(
+  path: string,
+  line: number | null,
+  noFilePath: string,
+): string {
+  return path ? (line === null ? path : `${path}:${line}`) : noFilePath;
 }
 
 function CodeScanningDetail({ alert }: { alert: CodeScanningAlertOut }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
-      title={alert.ruleName || alert.ruleId || "Unidentified rule"}
+      title={alert.ruleName || alert.ruleId || tx("Unidentified rule")}
       chip={
         <CodeScanningChip
           securitySeverity={alert.securitySeverity}
@@ -372,16 +405,18 @@ function CodeScanningDetail({ alert }: { alert: CodeScanningAlertOut }) {
           {/* Omitted outright when the id is empty — the title already carries
               the fallback, matching how a missing date drops its row. */}
           {alert.ruleId ? (
-            <Row label="Rule">
+            <Row label={tx("Rule")}>
               <span className="font-mono">{alert.ruleId}</span>
             </Row>
           ) : null}
           {/* The SARIF level, spelled out — the chip shows it only when the rule
               carries no security severity to outrank it. */}
           {alert.severity ? (
-            <Row label="Level">{capitalizeFirst(alert.severity)}</Row>
+            <Row label={tx("Level")}>
+              {localizedWireLabel(alert.severity, tx)}
+            </Row>
           ) : null}
-          <Row label="Tool">
+          <Row label={tx("Tool")}>
             {alert.toolName}
             {alert.toolVersion ? (
               <span className="text-muted-foreground">
@@ -390,20 +425,20 @@ function CodeScanningDetail({ alert }: { alert: CodeScanningAlertOut }) {
               </span>
             ) : null}
           </Row>
-          <Row label="Location">
+          <Row label={tx("Location")}>
             <span className="font-mono">
-              {locationText(alert.path, alert.startLine)}
+              {locationText(alert.path, alert.startLine, tx("No file path"))}
             </span>
           </Row>
           {alert.ref ? (
-            <Row label="Ref">
+            <Row label={tx("Ref")}>
               <span className="font-mono">{alert.ref}</span>
             </Row>
           ) : null}
           {/* No State row: the fetch pins state=open, so it could only ever
               read "open". */}
           {parseableDate(alert.createdAt) ? (
-            <Row label="Opened">
+            <Row label={tx("Opened")}>
               <RelativeTime date={alert.createdAt} />
             </Row>
           ) : null}
@@ -421,28 +456,31 @@ function CodeScanningDetail({ alert }: { alert: CodeScanningAlertOut }) {
 }
 
 function SecretScanningDetail({ alert }: { alert: SecretScanningAlertOut }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
       title={
-        alert.secretTypeDisplayName || alert.secretType || "Unknown secret type"
+        alert.secretTypeDisplayName ||
+        alert.secretType ||
+        tx("Unknown secret type")
       }
       chip={<ValidityChip validity={alert.validity} />}
       htmlUrl={alert.htmlUrl}
       meta={
         <>
-          <Row label="Type">
-            {alert.secretTypeDisplayName || alert.secretType || "Unknown"}
+          <Row label={tx("Type")}>
+            {alert.secretTypeDisplayName || alert.secretType || tx("Unknown")}
           </Row>
-          <Row label="Validity">{validityLabel(alert.validity)}</Row>
+          <Row label={tx("Validity")}>{validityLabel(alert.validity, tx)}</Row>
           {/* No State row: the fetch pins state=open, so it could only ever
               read "open". */}
           {/* Only for a confirmed public leak — a null means GitHub didn't say,
               and "No" would read as a clearance it never gave. */}
           {alert.publiclyLeaked === true ? (
-            <Row label="Publicly leaked">Yes</Row>
+            <Row label={tx("Publicly leaked")}>{tx("Yes")}</Row>
           ) : null}
           {parseableDate(alert.createdAt) ? (
-            <Row label="Opened">
+            <Row label={tx("Opened")}>
               <RelativeTime date={alert.createdAt} />
             </Row>
           ) : null}
@@ -452,13 +490,16 @@ function SecretScanningDetail({ alert }: { alert: SecretScanningAlertOut }) {
       {/* The locations of a secret are a separate paginated endpoint we don't
           fetch, so this says so instead of implying the alert has no detail. */}
       <p className="text-xs text-muted-foreground">
-        Open this alert on GitHub to see where the secret appears and manage it.
+        {tx(
+          "Open this alert on GitHub to see where the secret appears and manage it.",
+        )}
       </p>
     </DetailShell>
   );
 }
 
 function AdvisoryDetail({ advisory }: { advisory: RepoAdvisoryOut }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
       title={advisory.summary || advisory.ghsaId}
@@ -483,7 +524,9 @@ function AdvisoryDetail({ advisory }: { advisory: RepoAdvisoryOut }) {
               />
             </Row>
           ) : null}
-          <Row label="State">{advisory.state}</Row>
+          <Row label={tx("State")}>
+            {localizedWireLabel(advisory.state, tx)}
+          </Row>
           {advisory.cvssScore !== null ? (
             <Row label="CVSS">
               <span className="tabular-nums">{advisory.cvssScore}</span>
@@ -492,17 +535,17 @@ function AdvisoryDetail({ advisory }: { advisory: RepoAdvisoryOut }) {
           {/* Dates that don't exist are omitted outright — a withdrawn-at of
               "never" would read as a claim the advisory stands. */}
           {advisory.publishedAt && parseableDate(advisory.publishedAt) ? (
-            <Row label="Published">
+            <Row label={tx("Published")}>
               <RelativeTime date={advisory.publishedAt} />
             </Row>
           ) : null}
           {advisory.updatedAt && parseableDate(advisory.updatedAt) ? (
-            <Row label="Updated">
+            <Row label={tx("Updated")}>
               <RelativeTime date={advisory.updatedAt} />
             </Row>
           ) : null}
           {advisory.withdrawnAt && parseableDate(advisory.withdrawnAt) ? (
-            <Row label="Withdrawn">
+            <Row label={tx("Withdrawn")}>
               <RelativeTime date={advisory.withdrawnAt} />
             </Row>
           ) : null}
@@ -511,15 +554,17 @@ function AdvisoryDetail({ advisory }: { advisory: RepoAdvisoryOut }) {
     >
       {advisory.vulnerabilities.length > 0 && (
         <section className="mb-4">
-          <h3 className="mb-1.5 text-xs font-semibold">Affected packages</h3>
+          <h3 className="mb-1.5 text-xs font-semibold">
+            {tx("Affected packages")}
+          </h3>
           <ul className="space-y-1 text-xs">
             {advisory.vulnerabilities.map((v) => (
               <li key={`${v.ecosystem}/${v.packageName}`}>
                 <span className="font-mono">{v.packageName}</span>{" "}
                 <span className="text-muted-foreground">{v.ecosystem}</span>
                 <span className="block text-[11px] text-muted-foreground">
-                  {v.vulnerableVersionRange ?? "Range not stated"} →{" "}
-                  {v.patchedVersions ?? "No patched version listed"}
+                  {v.vulnerableVersionRange ?? tx("Range not stated")} →{" "}
+                  {v.patchedVersions ?? tx("No patched version listed")}
                 </span>
               </li>
             ))}
@@ -567,10 +612,11 @@ function glBlobUrl(
 
 /** The pipeline these findings were read from, one click from the detail. */
 function GlPipelineRow({ data }: { data: GlFindingsOut }) {
+  const tx = useSecurityFindingsText();
   const pipeline = data.pipeline;
   if (!pipeline?.webUrl) return null;
   return (
-    <Row label="Pipeline">
+    <Row label={tx("Pipeline")}>
       <button
         type="button"
         title={pipeline.webUrl}
@@ -594,6 +640,7 @@ function GlSecureDetail({
   /** The category's own name for a finding whose report gave none. */
   fallbackTitle: string;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
       title={finding.name || fallbackTitle}
@@ -602,16 +649,20 @@ function GlSecureDetail({
       linkLabel="View file on GitLab"
       meta={
         <>
-          <Row label="File">
+          <Row label={tx("File")}>
             <span className="font-mono">
-              {locationText(finding.file, finding.startLine)}
+              {locationText(
+                finding.file,
+                finding.startLine,
+                tx("No file path"),
+              )}
             </span>
           </Row>
           {finding.scannerName ? (
             <Row label="Scanner">{finding.scannerName}</Row>
           ) : null}
           {finding.identifiers.length > 0 ? (
-            <Row label="Identifiers">
+            <Row label={tx("Identifiers")}>
               <span className="flex flex-wrap gap-1">
                 {finding.identifiers.map((identifier, i) => {
                   const label =
@@ -656,9 +707,10 @@ function GlQualityDetail({
   finding: GlCodeQualityFindingOut;
   data: GlFindingsOut;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
-      title={finding.checkName || "Unidentified check"}
+      title={finding.checkName || tx("Unidentified check")}
       chip={<CqChip severity={finding.severity} />}
       htmlUrl={glBlobUrl(data, finding.path, finding.line)}
       linkLabel="View file on GitLab"
@@ -666,9 +718,9 @@ function GlQualityDetail({
         <>
           {/* No Severity row — the chip above already names it in the
               CodeClimate ladder's own words. */}
-          <Row label="Path">
+          <Row label={tx("Path")}>
             <span className="font-mono">
-              {locationText(finding.path, finding.line)}
+              {locationText(finding.path, finding.line, tx("No file path"))}
             </span>
           </Row>
           <GlPipelineRow data={data} />
@@ -692,9 +744,14 @@ function BbAnnotationDetail({
   report: BbReportOut;
   annotation: BbAnnotationOut;
 }) {
+  const tx = useSecurityFindingsText();
   return (
     <DetailShell
-      title={bbReportLabel(report)}
+      title={
+        !report.title && !report.reporter && !report.externalId
+          ? tx("Report")
+          : bbReportLabel(report)
+      }
       // Omitted outright when the report stated no severity: every rung the chip
       // could name would be a claim the report never made.
       chip={
@@ -714,35 +771,43 @@ function BbAnnotationDetail({
       meta={
         <>
           {annotation.annotationType ? (
-            <Row label="Type">
-              {bbAnnotationTypeLabel(annotation.annotationType)}
+            <Row label={tx("Type")}>
+              {tx(bbAnnotationTypeLabel(annotation.annotationType))}
             </Row>
           ) : null}
           {annotation.path ? (
-            <Row label="Location">
+            <Row label={tx("Location")}>
               <span className="font-mono">
-                {locationText(annotation.path, annotation.line)}
+                {locationText(
+                  annotation.path,
+                  annotation.line,
+                  tx("No file path"),
+                )}
               </span>
             </Row>
           ) : null}
           {report.reporter ? (
-            <Row label="Reporter">{report.reporter}</Row>
+            <Row label={tx("Reporter")}>{report.reporter}</Row>
           ) : null}
           {/* The report's own description, which nothing else surfaces. A
               tolerated empty string is falsy, so it drops the row like a null. */}
           {report.details ? (
-            <Row label="Report details">{report.details}</Row>
+            <Row label={tx("Report details")}>{report.details}</Row>
           ) : null}
           {/* The annotation's own verdict and the report's are separate states,
               so neither ever stands in for the other under one label. */}
           {annotation.result ? (
-            <Row label="Result">{bbResultLabel(annotation.result)}</Row>
+            <Row label={tx("Result")}>
+              {tx(bbResultLabel(annotation.result))}
+            </Row>
           ) : null}
           {report.result ? (
-            <Row label="Report result">{bbResultLabel(report.result)}</Row>
+            <Row label={tx("Report result")}>
+              {tx(bbResultLabel(report.result))}
+            </Row>
           ) : null}
           {annotation.createdOn && parseableDate(annotation.createdOn) ? (
-            <Row label="Created">
+            <Row label={tx("Created")}>
               <RelativeTime date={annotation.createdOn} />
             </Row>
           ) : null}
@@ -824,6 +889,7 @@ export function FindingDetailView({
   repoPath: string;
   active: boolean;
 }) {
+  const tx = useSecurityFindingsText();
   const selectedFinding = useUiStore((s) => s.selectedFinding);
   const limits = useUiStore((s) => s.findingsLimits);
   const forge = useForgeStatus(repoPath);
@@ -936,8 +1002,8 @@ export function FindingDetailView({
               data={data}
               fallbackTitle={
                 selectedFinding.category === "sast"
-                  ? "Unidentified rule"
-                  : "Unknown secret type"
+                  ? tx("Unidentified rule")
+                  : tx("Unknown secret type")
               }
             />
           );
@@ -1003,7 +1069,9 @@ export function FindingDetailView({
         tabIndex={-1}
         className="p-6 text-center text-sm text-muted-foreground outline-none"
       >
-        {offlinePendingMessage("this finding")}
+        {tx("You're offline — {{subject}} will load once you're back online.", {
+          subject: tx("this finding"),
+        })}
       </div>
     );
   }
@@ -1014,7 +1082,7 @@ export function FindingDetailView({
         tabIndex={-1}
         className="flex flex-col items-center gap-3 p-6 text-center text-sm text-muted-foreground outline-none"
       >
-        <p>Couldn't load this finding.</p>
+        <p>{tx("Couldn't load this finding.")}</p>
         <Button
           ref={retryRef}
           variant="outline"
@@ -1023,7 +1091,7 @@ export function FindingDetailView({
           disabled={query.isFetching}
           onClick={() => query.refetch()}
         >
-          {query.isFetching ? "Retrying…" : "Retry"}
+          {query.isFetching ? tx("Retrying…") : tx("Retry")}
         </Button>
       </div>
     );
@@ -1042,11 +1110,14 @@ export function FindingDetailView({
           // The finding is read from its category's list, whose key doesn't
           // change with the selection, so no previous finding is ever shown
           // as placeholder.
-          message={detailNoticeMessage({
-            noun: "finding",
-            isError: refreshFailed(query),
-            stale: false,
-          })}
+          message={
+            refreshFailed(query)
+              ? tx(
+                  "Couldn't refresh this {{noun}} — showing the last loaded version.",
+                  { noun: tx("finding") },
+                )
+              : tx("You're offline — showing the last loaded version.")
+          }
           onRetry={refreshFailed(query) ? () => query.refetch() : undefined}
           className="shrink-0 border-b px-4 py-1.5"
         />
@@ -1061,7 +1132,7 @@ export function FindingDetailView({
       tabIndex={-1}
       className="p-6 text-center text-sm text-muted-foreground outline-none"
     >
-      This finding is no longer in the list.
+      {tx("This finding is no longer in the list.")}
     </div>
   );
 }

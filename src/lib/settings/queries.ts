@@ -3,6 +3,10 @@ import { useCallback, useMemo } from "react";
 import { PROVIDERS_REQUIRING_KEY } from "@/lib/ai/providers";
 import type { AiProviderId } from "@/lib/ai/types";
 import { getSecret } from "@/lib/git/api";
+import {
+  changeAppLanguage,
+  type AppLanguage,
+} from "@/lib/i18n";
 import { repoIdentityQueryOptions } from "@/lib/git/repo-identity-query";
 import { useMutation } from "@/lib/started-mutation";
 import { commitTheme, type ThemeSetting } from "@/lib/theme";
@@ -145,6 +149,30 @@ export function useApplyTheme() {
         if (latest?.theme !== next) return;
         queryClient.setQueryData(settingsKeys.settings, current);
         commitTheme(current.theme);
+      });
+    },
+    [queryClient, saveSettings],
+  );
+}
+
+/** Apply and persist the UI language immediately, with the same optimistic
+ * settings-cache behavior as the theme picker. */
+export function useApplyLanguage() {
+  const queryClient = useQueryClient();
+  const saveSettings = useSaveSettings();
+  return useCallback(
+    (current: AppSettings, next: AppLanguage) => {
+      if (next === current.language) return;
+      const updated = { ...current, language: next };
+      queryClient.setQueryData(settingsKeys.settings, updated);
+      void changeAppLanguage(next).catch(() => undefined);
+      void saveSettings.mutateAsync(updated).catch(() => {
+        const latest = queryClient.getQueryData<AppSettings>(
+          settingsKeys.settings,
+        );
+        if (latest?.language !== next) return;
+        queryClient.setQueryData(settingsKeys.settings, current);
+        void changeAppLanguage(current.language).catch(() => undefined);
       });
     },
     [queryClient, saveSettings],

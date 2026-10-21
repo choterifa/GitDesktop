@@ -7,6 +7,7 @@ import {
 } from "@/lib/git/host";
 import { useGhScopes } from "@/lib/git/queries";
 import { useUiStore } from "@/lib/stores/ui";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 /**
  * Offers the in-app reconnect (and a copyable `gh auth refresh -s <scope>`) when
@@ -44,8 +45,8 @@ export function ScopeRefreshHint({
   return (
     <div className="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-[11px]">
       <p className="text-muted-foreground">
-        {action} needs the <span className="font-mono">{scope}</span> scope,
-        which your GitHub sign-in is missing.
+        {action} {tr("needs the")} <span className="font-mono">{scope}</span>{" "}
+        {tr("scope,\r\n        which your GitHub sign-in is missing.")}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button
@@ -60,13 +61,13 @@ export function ScopeRefreshHint({
             })
           }
         >
-          Reconnect GitHub…
+          {tr("Reconnect GitHub…")}
         </Button>
       </div>
       {hostSafe && (
         <>
           <p className="mt-2 text-muted-foreground">
-            Or run this, then reopen:
+            {tr("Or run this, then reopen:")}
           </p>
           <div className="mt-1.5 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono">
@@ -74,7 +75,7 @@ export function ScopeRefreshHint({
             </code>
             <CopyIconButton
               text={cmd}
-              label="Copy command"
+              label={tr("Copy command")}
               toast="Command copied"
             />
           </div>

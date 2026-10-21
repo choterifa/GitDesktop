@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { i18n } from "@/lib/i18n";
 import { confirmDiscardParkedWrites } from "@/lib/parked-writes";
 import { toastError } from "@/lib/toast";
 import { installUpdate, type Update } from "@/lib/updater";
@@ -21,7 +22,9 @@ export async function installUpdateWithToast(
 ): Promise<void> {
   if (installing) return;
   installing = true;
-  const id = toast.loading(`Downloading v${update.version}…`);
+  const id = toast.loading(
+    i18n.t("downloading", { ns: "updates", version: update.version }),
+  );
   try {
     const installed = await installUpdate(
       update,
@@ -29,8 +32,15 @@ export async function installUpdateWithToast(
         const pct = total ? Math.round((downloaded / total) * 100) : null;
         toast.loading(
           pct !== null
-            ? `Downloading v${update.version}… ${pct}%`
-            : `Downloading v${update.version}…`,
+            ? i18n.t("downloadingProgress", {
+                ns: "updates",
+                version: update.version,
+                percent: pct,
+              })
+            : i18n.t("downloading", {
+                ns: "updates",
+                version: update.version,
+              }),
           { id },
         );
       },
@@ -38,13 +48,19 @@ export async function installUpdateWithToast(
         // Settled while the prompt is open: the download is done, and a spinner
         // at 100% would read as still working.
         const proceed = await confirmDiscardParkedWrites("update", () =>
-          toast(`Downloaded v${update.version} — waiting for you to confirm`, {
-            id,
-            duration: Number.POSITIVE_INFINITY,
-          }),
+          toast(
+            i18n.t("downloadedWaiting", {
+              ns: "updates",
+              version: update.version,
+            }),
+            { id, duration: Number.POSITIVE_INFINITY },
+          ),
         );
         if (proceed) {
-          toast.loading(`Installing v${update.version}…`, { id });
+          toast.loading(
+            i18n.t("installing", { ns: "updates", version: update.version }),
+            { id },
+          );
           onProceed?.();
         }
         return proceed;
@@ -55,7 +71,7 @@ export async function installUpdateWithToast(
       return;
     }
     // relaunch() restarts the app, so this rarely shows.
-    toast.success("Update installed — restarting…", { id });
+    toast.success(i18n.t("installedRestarting", { ns: "updates" }), { id });
   } catch (e) {
     toast.dismiss(id);
     toastError(e);

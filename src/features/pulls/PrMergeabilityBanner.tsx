@@ -18,12 +18,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
-import { offlinePendingMessage } from "@/features/conversations/remote-section-state";
 import { clipTitleFromText } from "@/lib/clip-title";
 import { type ForgeProvider, providerLabel } from "@/lib/git/types";
 import { PR_NOUN } from "@/lib/pulls/pr-state";
 import { useAiEnabled, useReviewConfigured } from "@/lib/settings/queries";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /** Why both resolve actions are unavailable on a fork PR — one wording for the two
  *  buttons, which are blocked by the same thing. */
@@ -47,21 +47,51 @@ const MAX_REQUIREMENT_NAMES = 4;
 export function blockedMergeLine(
   requirements: string[],
   requiredApprovals?: number | null,
+  tx?: ReturnType<typeof usePullsText>,
 ): string {
   const approvals =
     requiredApprovals && requiredApprovals > 0
-      ? `${requiredApprovals} approving review${requiredApprovals === 1 ? "" : "s"}`
+      ? tx
+        ? tx(
+            requiredApprovals === 1
+              ? "{{count}} approving review"
+              : "{{count}} approving reviews",
+            { count: requiredApprovals },
+          )
+        : `${requiredApprovals} approving review${requiredApprovals === 1 ? "" : "s"}`
       : null;
   if (requirements.length === 0)
     return approvals
-      ? `Merge is blocked by the base branch's protection rules, which require ${approvals}.`
-      : "Merge is blocked by the base branch's protection rules.";
+      ? tx
+        ? tx(
+            "Merge is blocked by the base branch's protection rules, which require {{approvals}}.",
+            { approvals },
+          )
+        : `Merge is blocked by the base branch's protection rules, which require ${approvals}.`
+      : tx
+        ? tx("Merge is blocked by the base branch's protection rules.")
+        : "Merge is blocked by the base branch's protection rules.";
   const shown = requirements.slice(0, MAX_REQUIREMENT_NAMES);
   const extra = requirements.length - shown.length;
   const names =
-    extra > 0 ? `${shown.join(", ")} and ${extra} more` : shown.join(", ");
-  const line = `Merge is blocked — waiting on: ${names}.`;
-  return approvals ? `${line} The rules also require ${approvals}.` : line;
+    extra > 0
+      ? tx
+        ? tx("{{names}}, and {{count}} more", {
+            names: shown.join(", "),
+            count: extra,
+          })
+        : `${shown.join(", ")} and ${extra} more`
+      : shown.join(", ");
+  const line = tx
+    ? tx("Merge is blocked — waiting on: {{requirements}}.", {
+        requirements: names,
+      })
+    : `Merge is blocked — waiting on: ${names}.`;
+  return approvals
+    ? tx
+      ? `${line} ${tx("The rules also require {{approvals}}.", { approvals })}`
+      : `${line} The rules also require ${approvals}.`
+    : line;
 }
 
 /** GitLab's `detailed_merge_status` values that name a rule refusing the merge, said
@@ -122,14 +152,28 @@ function terminated(line: string): string {
  *  enum lookup is gated on the enum's own shape and free-form prose is shown exactly
  *  as GitLab wrote it. An enum value this app hasn't learned yet is humanized rather
  *  than shown as a token: GitLab's word beats silence about a merge that will refuse. */
-export function gitlabBlockedLine(detail: string): string | null {
+export function gitlabBlockedLine(
+  detail: string,
+  tx?: ReturnType<typeof usePullsText>,
+): string | null {
   const raw = detail.trim();
   if (raw === "") return null;
-  if (!/^[a-z_]+$/.test(raw)) return terminated(`Merge is blocked — ${raw}`);
+  if (!/^[a-z_]+$/.test(raw))
+    return terminated(
+      tx
+        ? tx("Merge is blocked — {{detail}}", { detail: raw })
+        : `Merge is blocked — ${raw}`,
+    );
   if (GITLAB_UNARMED_MERGE_STATUSES.has(raw)) return null;
   const reason = GITLAB_BLOCKED_REASONS[raw];
-  if (reason) return `Merge is blocked — ${reason}.`;
-  return `Merge is blocked — ${raw.replace(/_/g, " ")}.`;
+  if (reason)
+    return tx
+      ? tx("Merge is blocked — {{reason}}.", { reason: tx(reason) })
+      : `Merge is blocked — ${reason}.`;
+  const status = raw.replace(/_/g, " ");
+  return tx
+    ? tx("Merge is blocked — {{status}}.", { status })
+    : `Merge is blocked — ${status}.`;
 }
 
 /** What a control held open through the PR-switch window says. Shared with the view's
@@ -212,75 +256,68 @@ const ARM_MESSAGE: Record<
     blockedReason: string | null;
     promotionKind: PromotionKind;
     pendingOffline: boolean;
+    tx: ReturnType<typeof usePullsText>;
   }) => ReactNode
 > = {
-  pending: ({ pendingOffline }) =>
+  pending: ({ pendingOffline, tx }) =>
     pendingOffline
-      ? offlinePendingMessage("the conflict check")
-      : "Checking for conflicts…",
-  clean: ({ base }) => (
+      ? tx("You're offline — {{subject}} will load once you're back online.", {
+          subject: tx("the conflict check"),
+        })
+      : tx("Checking for conflicts…"),
+  clean: ({ base, tx }) => (
     <>
-      {"No conflicts with "}
-      <span className="font-mono">{base}</span>
+      {tx("No conflicts with")} <span className="font-mono">{base}</span>
       {"."}
     </>
   ),
   // Neither the forge nor the local prediction has an answer to give: a fork's head
   // can't be predicted from our remote, and Bitbucket reports no mergeability.
-  unchecked: ({ base, provider }) => (
-    <>
-      {"Conflicts with "}
-      <span className="font-mono">{base}</span>
-      {` can't be checked for this ${prNounFor(provider)}.`}
-    </>
-  ),
-  conflicting: ({ base, provider }) => (
-    <>
-      {`This ${prNounFor(provider)} has conflicts with `}
-      <span className="font-mono">{base}</span>
-      {"."}
-      {/* GitHub runs no pull_request checks on a conflicting PR, so an
-          empty checks list there means "never ran", not "passed". */}
-      {provider === "github" ? " Checks won't run until they're resolved." : ""}
-    </>
-  ),
+  unchecked: ({ base, provider, tx }) =>
+    tx("Conflicts with {{base}} can't be checked for this {{noun}}.", {
+      base,
+      noun: tx(prNounFor(provider)),
+    }),
+  conflicting: ({ base, provider, tx }) =>
+    tx(
+      provider === "github"
+        ? "This {{noun}} has conflicts with {{base}}. Checks won't run until they're resolved."
+        : "This {{noun}} has conflicts with {{base}}.",
+      { noun: tx(prNounFor(provider)), base },
+    ),
   // The qualifier only rides along when the forge answer never landed; where the forge
   // simply has none to give (Bitbucket) there is nothing that failed to say.
-  predicted: ({ base, provider, forgeUnreachable }) => (
-    <>
-      {forgeUnreachable
-        ? `Couldn't reach ${providerLabel(provider)} to check mergeability. Merging into `
-        : "Merging into "}
-      <span className="font-mono">{base}</span>
-      {/* Names the staleness: the prediction runs on remote-tracking refs
-          and never fetches, so it can only be as fresh as the last fetch. */}
-      {" is predicted to conflict (checked locally from your last fetch)."}
-    </>
-  ),
-  unknown: () => "Couldn't determine mergeability.",
+  predicted: ({ base, provider, forgeUnreachable, tx }) =>
+    forgeUnreachable
+      ? tx(
+          "Couldn't reach {{provider}} to check mergeability. Merging into {{base}} is predicted to conflict (checked locally from your last fetch).",
+          { provider: providerLabel(provider), base },
+        )
+      : tx(
+          "Merging into {{base}} is predicted to conflict (checked locally from your last fetch).",
+          { base },
+        ),
+  unknown: ({ tx }) => tx("Couldn't determine mergeability."),
   // The local prediction needs no network, so a clean one is a real answer even with
   // the forge unreachable — and the only one this arm can stand behind.
-  unreachable: ({ base, provider, predictedClean }) => (
-    <>
-      {`Couldn't reach ${providerLabel(provider)} to check mergeability.`}
-      {predictedClean ? (
-        <>
-          {" No conflicts with "}
-          <span className="font-mono">{base}</span>
-          {" in your last fetch."}
-        </>
-      ) : null}
-    </>
-  ),
-  updating: ({ base, provider }) => (
-    <>
-      {`${providerLabel(provider)} is updating this branch from `}
-      <span className="font-mono">{base}</span>
-      {"…"}
-    </>
-  ),
-  resume: ({ provider }) =>
-    `An unfinished conflict resolution exists for this ${prNounFor(provider)}.`,
+  unreachable: ({ base, provider, predictedClean, tx }) =>
+    predictedClean
+      ? tx(
+          "Couldn't reach {{provider}} to check mergeability. No conflicts with {{base}} in your last fetch.",
+          { provider: providerLabel(provider), base },
+        )
+      : tx("Couldn't reach {{provider}} to check mergeability.", {
+          provider: providerLabel(provider),
+        }),
+  updating: ({ base, provider, tx }) =>
+    tx("{{provider}} is updating this branch from {{base}}…", {
+      provider: providerLabel(provider),
+      base,
+    }),
+  resume: ({ provider, tx }) =>
+    tx("An unfinished conflict resolution exists for this {{noun}}.", {
+      noun: tx(prNounFor(provider)),
+    }),
   // The behind clause rides along in the `behind` arm's own words, because the update
   // controls come with it — a bare refusal beside an Update branch button would leave
   // the button unexplained.
@@ -291,19 +328,25 @@ const ARM_MESSAGE: Record<
     blockedApprovals,
     blockedReason,
     promotionKind,
+    tx,
   }) => (
     <>
       {/* GitLab names its own reason and gets no requirements join — rules and
           branch protections are a GitHub read, and there is nothing to join it to. */}
-      {blockedReason ?? blockedMergeLine(blockedRequirements, blockedApprovals)}
+      {blockedReason
+        ? tx(blockedReason)
+        : blockedMergeLine(blockedRequirements, blockedApprovals, tx)}
       {/* The behind clause exists to explain the Update controls beside it, so it
           goes wherever they go: on a promotion pull request they'd invert the
           flow, and a count with no route out would read as a demand. */}
       {behindBy > 0 && promotionKind === null ? (
         <>
-          {` It is also ${behindBy} commit${behindBy === 1 ? "" : "s"} behind `}
-          <span className="font-mono">{base}</span>
-          {"."}
+          {tx(
+            behindBy === 1
+              ? "It is also {{count}} commit behind {{base}}."
+              : "It is also {{count}} commits behind {{base}}.",
+            { count: behindBy, base },
+          )}
         </>
       ) : null}
     </>
@@ -314,30 +357,29 @@ const ARM_MESSAGE: Record<
   // NOT close on merge — merging the head into the base ADDS a commit the head
   // lacks — so the copy says it needs no closing. Only the reason clause differs
   // between the two kinds; a configured head is no claim about the default branch.
-  behind: ({ base, head, behindBy, promotionKind }) =>
-    promotionKind !== null ? (
-      <>
-        <span className="font-mono">{base}</span>
-        {` has ${behindBy} commit${behindBy === 1 ? "" : "s"} that `}
-        <span className="font-mono">{head}</span>
-        {" doesn't. "}
-        <span className="font-mono">{head}</span>
-        {PROMOTION_REASON[promotionKind]}
-        {
-          ", so this gap is expected and doesn't need closing. Updating the branch would merge "
-        }
-        <span className="font-mono">{base}</span>
-        {" back into "}
-        <span className="font-mono">{head}</span>
-        {"."}
-      </>
-    ) : (
-      <>
-        {`This branch is ${behindBy} commit${behindBy === 1 ? "" : "s"} behind `}
-        <span className="font-mono">{base}</span>
-        {"."}
-      </>
-    ),
+  behind: ({ base, head, behindBy, promotionKind, tx }) =>
+    promotionKind !== null
+      ? tx(
+          behindBy === 1
+            ? "{{base}} has {{count}} commit that {{head}} doesn't. {{head}}{{reason}} So this gap is expected and doesn't need closing. Updating the branch would merge {{base}} back into {{head}}."
+            : "{{base}} has {{count}} commits that {{head}} doesn't. {{head}}{{reason}} So this gap is expected and doesn't need closing. Updating the branch would merge {{base}} back into {{head}}.",
+          {
+            base,
+            head,
+            count: behindBy,
+            reason: tx(
+              promotionKind === "default"
+                ? " is the repository's default branch."
+                : " is a promotion branch for this repository.",
+            ),
+          },
+        )
+      : tx(
+          behindBy === 1
+            ? "This branch is {{count}} commit behind {{base}}."
+            : "This branch is {{count}} commits behind {{base}}.",
+          { count: behindBy, base },
+        ),
 };
 
 /**
@@ -449,6 +491,7 @@ export function PrMergeabilityBanner({
 }) {
   // Same gating pair as ConflictBanner's batch AI action, so the two surfaces offer
   // AI resolution under identical conditions.
+  const tx = usePullsText();
   const aiEnabled = useAiEnabled();
   const reviewConfigured = useReviewConfigured();
 
@@ -456,8 +499,8 @@ export function PrMergeabilityBanner({
 
   const conflicting = arm === "conflicting" || arm === "predicted";
   const resolveLabel = hasResolveWorktree
-    ? "Continue resolving"
-    : "Resolve conflicts";
+    ? tx("Continue resolving")
+    : tx("Resolve conflicts");
   // The AI walk gets its file list from the merge outcome, not this prediction, so it
   // stays offered even when the preview couldn't name the files.
   const canResolveWithAi = aiEnabled && reviewConfigured;
@@ -474,7 +517,9 @@ export function PrMergeabilityBanner({
         </li>
       ))}
       {extraFiles > 0 && (
-        <li title={conflictFiles.join("\n")}>and {extraFiles} more</li>
+        <li title={conflictFiles.join("\n")}>
+          {tx("and {{count}} more", { count: extraFiles })}
+        </li>
       )}
     </ul>
   );
@@ -490,25 +535,32 @@ export function PrMergeabilityBanner({
   const updateBusyReason = (() => {
     switch (true) {
       case arm === "updating":
-        return `${providerLabel(provider)} is still updating this branch.`;
+        return tx("{{provider}} is still updating this branch.", {
+          provider: providerLabel(provider),
+        });
       case updateSubmitting:
-        return "Submitting the update…";
+        return tx("Submitting the update…");
       case updateAwaitingDefault:
-        return "Checking which branch is the default…";
+        return tx("Checking which branch is the default…");
       case updateAwaitingRules:
-        return "Checking this repository's promotion branches…";
+        return tx("Checking this repository's promotion branches…");
       default:
-        return PR_SWITCH_LOADING_REASON;
+        return tx(PR_SWITCH_LOADING_REASON);
     }
   })();
-  const updateDisabledReason =
-    updateBlockedReason ?? (updateBusy ? updateBusyReason : updateHeldReason);
+  const updateDisabledReason = updateBlockedReason
+    ? tx(updateBlockedReason)
+    : updateBusy
+      ? updateBusyReason
+      : updateHeldReason
+        ? tx(updateHeldReason)
+        : undefined;
   // "Update branch" doesn't say which way the commits travel; the tooltip does.
   // The caret gets its own wording rather than this one — its menu holds the
   // REBASE variant, which rewrites rather than merges (and names that in its own
   // confirm), so borrowing the button's label there would misdescribe it.
-  const updateOperation = `Merges ${base} into ${head}`;
-  const updateOptionsLabel = "Other ways to update this branch";
+  const updateOperation = tx("Merges {{base}} into {{head}}", { base, head });
+  const updateOptionsLabel = tx("Other ways to update this branch");
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b px-3 py-1.5 text-xs">
@@ -538,6 +590,7 @@ export function PrMergeabilityBanner({
             blockedReason,
             promotionKind,
             pendingOffline,
+            tx,
           })}
         </span>
       </span>
@@ -554,7 +607,7 @@ export function PrMergeabilityBanner({
               disabled={retryBusy}
               onClick={onRetry}
             >
-              Retry
+              {tx("Retry")}
             </Button>
           )}
           {/* Discard rides along wherever a worktree exists, not just the resume
@@ -567,7 +620,7 @@ export function PrMergeabilityBanner({
               disabled={busy}
               onClick={onDiscard}
             >
-              Discard
+              {tx("Discard")}
             </Button>
           )}
           {conflicting && canResolveWithAi && (
@@ -575,18 +628,30 @@ export function PrMergeabilityBanner({
               variant="ghost"
               size="xs"
               disabled={busy || forkBlocked || resolveHeldReason !== undefined}
-              reason={forkBlocked ? FORK_BLOCKED_REASON : resolveHeldReason}
+              reason={
+                forkBlocked
+                  ? tx(FORK_BLOCKED_REASON)
+                  : resolveHeldReason
+                    ? tx(resolveHeldReason)
+                    : undefined
+              }
               onClick={onResolveWithAi}
             >
               <SparkleIcon data-icon="inline-start" />
-              Resolve with AI
+              {tx("Resolve with AI")}
             </DisabledReasonButton>
           )}
           <DisabledReasonButton
             variant="ghost"
             size="xs"
             disabled={busy || forkBlocked || resolveHeldReason !== undefined}
-            reason={forkBlocked ? FORK_BLOCKED_REASON : resolveHeldReason}
+            reason={
+              forkBlocked
+                ? tx(FORK_BLOCKED_REASON)
+                : resolveHeldReason
+                  ? tx(resolveHeldReason)
+                  : undefined
+            }
             onClick={onResolve}
           >
             {resolveLabel}
@@ -615,7 +680,7 @@ export function PrMergeabilityBanner({
               {updateBusy && arm !== "updating" && (
                 <Spinner data-icon="inline-start" />
               )}
-              Update branch
+              {tx("Update branch")}
             </DisabledReasonButton>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -623,7 +688,7 @@ export function PrMergeabilityBanner({
                   <DisabledReasonButton
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Update branch options"
+                    aria-label={tx("Update branch options")}
                     disabled={updateDisabled}
                     reason={updateDisabledReason}
                     title={updateOptionsLabel}
@@ -637,7 +702,7 @@ export function PrMergeabilityBanner({
                   disabled={updateDisabled}
                   onClick={onUpdateWithRebase}
                 >
-                  Update with rebase…
+                  {tx("Update with rebase…")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -652,7 +717,7 @@ export function PrMergeabilityBanner({
             disabled={retryBusy}
             onClick={onRetry}
           >
-            Retry
+            {tx("Retry")}
           </Button>
         </div>
       )}

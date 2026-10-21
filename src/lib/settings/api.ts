@@ -302,6 +302,8 @@ export const DIFF_VIEW_MODES = ["unified", "split"] as const;
 export const CHANGES_VIEW_MODES = ["list", "tree"] as const;
 
 export interface AppSettings {
+  /** UI language. Missing values in older settings heal to the Mexican Spanish default. */
+  language: "es-MX" | "en";
   ai: AiSettings;
   /** Provider/model for AI PR review (independent of the commit model). */
   reviewAi: AiSettings;
@@ -460,6 +462,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  language: "es-MX",
   ai: {
     provider: "anthropic",
     model: "claude-haiku-4-5",
@@ -740,6 +743,10 @@ function healEnumerated(settings: AppSettings): AppSettings {
   const { defaultAgent, ...rest } = settings;
   return {
     ...rest,
+    language:
+      settings.language === "en" || settings.language === "es-MX"
+        ? settings.language
+        : DEFAULT_SETTINGS.language,
     ...(defaultAgent && DEFAULT_AGENT_IDS.includes(defaultAgent)
       ? { defaultAgent }
       : {}),

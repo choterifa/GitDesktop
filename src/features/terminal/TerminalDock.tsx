@@ -4,6 +4,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { lazy, Suspense, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { LazyPanelFallback } from "@/components/lazy-panel-fallback";
 import { Button } from "@/components/ui/button";
 import type { AgentSession } from "@/features/sessions/store";
@@ -52,6 +53,7 @@ export function TerminalDock({
   onRestart: () => void;
   onStop: () => void;
 }) {
+  const { t } = useTranslation("terminal");
   const [height, setHeight] = useState(lastHeight);
 
   // Nothing launched yet → render nothing (the parent's port popover gates a
@@ -94,14 +96,14 @@ export function TerminalDock({
       />
       <div className="flex shrink-0 items-center gap-1.5 px-2 py-1 text-[11px]">
         <TerminalWindowIcon className="size-3.5 text-muted-foreground" />
-        <span className="font-medium">Terminal</span>
+        <span className="font-medium">{t("title")}</span>
         <span className="text-muted-foreground">
-          {isContainer ? "· container" : "· worktree"}
+          {isContainer ? t("container") : t("worktree")}
         </span>
         {isContainer && launch.ports.length > 0 && (
           <span
             className="font-mono text-muted-foreground"
-            title="Published ports"
+            title={t("publishedPorts")}
           >
             {launch.ports.join(" ")}
           </span>
@@ -112,10 +114,10 @@ export function TerminalDock({
           className="ml-1"
           onClick={onRestart}
           title={
-            isContainer ? "Restart / reconnect the shell" : "Restart the shell"
+            isContainer ? t("restartReconnect") : t("restartShell")
           }
           aria-label={
-            isContainer ? "Restart or reconnect the shell" : "Restart the shell"
+            isContainer ? t("restartReconnect") : t("restartShell")
           }
         >
           <ArrowClockwiseIcon />
@@ -125,9 +127,9 @@ export function TerminalDock({
             size="xs"
             variant="ghost"
             onClick={onStop}
-            title="Stop the container (frees its ports)"
+            title={t("stopContainer")}
           >
-            Stop
+            {t("stop")}
           </Button>
         )}
         <Button
@@ -135,8 +137,8 @@ export function TerminalDock({
           variant="ghost"
           className="ml-auto text-muted-foreground"
           onClick={() => onOpenChange(false)}
-          title="Hide the terminal (toggle with the terminal hotkey)"
-          aria-label="Hide terminal"
+          title={t("hideWithHotkey")}
+          aria-label={t("hide")}
         >
           <XIcon />
         </Button>
@@ -144,7 +146,7 @@ export function TerminalDock({
       <Suspense
         fallback={
           <LazyPanelFallback
-            name="the terminal"
+            name={t("loading")}
             className="min-h-0 flex-1 p-1"
           />
         }

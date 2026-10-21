@@ -5,13 +5,11 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  offlinePendingMessage,
-  refreshFailed,
-} from "@/features/conversations/remote-section-state";
+import { refreshFailed } from "@/features/conversations/remote-section-state";
 import { starParts } from "@/features/explore/explore-utils";
 import { clipTitleFromText } from "@/lib/clip-title";
 import { forgeRepoUrl } from "@/lib/git/api";
@@ -24,16 +22,7 @@ import {
 } from "@/lib/git/types";
 import { parseableDate } from "@/lib/time";
 import { toastError } from "@/lib/toast";
-import { Empty, fmt } from "./primitives";
-
-// Each provider's recency field measures a different thing — GitHub `pushed_at`,
-// GitLab `last_activity_at`, Bitbucket `updated_on` — so the verb names what the
-// timestamp actually reports instead of flattening all three to "updated".
-const ACTIVE_VERB: Record<ForgeProvider, string> = {
-  github: "pushed",
-  gitlab: "active",
-  bitbucket: "updated",
-};
+import { Empty } from "./primitives";
 
 // The provider's own full fork list, which this card summarizes to 10 rows.
 // Bitbucket names that page "descendants": `/forks` 404s there (probed
@@ -57,6 +46,7 @@ function CompareCell({
   entry: ForgeForkEntry;
   baseBranch: string;
 }) {
+  const { t } = useTranslation("repository");
   const [requested, setRequested] = useState(false);
   // The control the user clicked unmounts as its result arrives, so focus would
   // fall to <body>. react-query's notify batching can land the result after any
@@ -112,8 +102,8 @@ function CompareCell({
         aria-live="polite"
         className="tabular-nums"
       >
-        {fmt(divergence.data.aheadBy)} ahead · {fmt(divergence.data.behindBy)}{" "}
-        behind
+        {t("insights.aheadCount", { count: divergence.data.aheadBy })} ·{" "}
+        {t("insights.behindCount", { count: divergence.data.behindBy })}
       </span>
     );
   }
@@ -122,26 +112,28 @@ function CompareCell({
   if (divergence.isPaused) {
     return (
       <span ref={offlineRef} tabIndex={-1} aria-live="polite">
-        {offlinePendingMessage("this comparison")}
+        {t("insights.offlineComparison")}
       </span>
     );
   }
   if (failed) {
     return (
       <span aria-live="polite" className="flex items-center gap-1">
-        Couldn't compare
+        {t("insights.couldntCompare")}
         <Button
           ref={retryRef}
           type="button"
           size="xs"
           variant="ghost"
-          aria-label={`Retry comparing ${entry.fullName} with this repository`}
+          aria-label={t("insights.retryComparingFork", {
+            name: entry.fullName,
+          })}
           onClick={() => {
             pendingFocusRef.current = true;
             void divergence.refetch();
           }}
         >
-          Retry
+          {t("insights.retry")}
         </Button>
       </span>
     );
@@ -152,13 +144,13 @@ function CompareCell({
       type="button"
       size="xs"
       variant="ghost"
-      aria-label={`Compare ${entry.fullName} with this repository`}
+      aria-label={t("insights.compareFork", { name: entry.fullName })}
       onClick={() => {
         pendingFocusRef.current = true;
         setRequested(true);
       }}
     >
-      Compare
+      {t("insights.compare")}
     </Button>
   );
 }
@@ -176,6 +168,7 @@ function ForkRow({
   baseBranch: string | null;
   canCompare: boolean;
 }) {
+  const { t } = useTranslation("repository");
   // Zero stars says nothing a reader needs, and at ten-row density the repeated
   // "0" reads as noise — so the segment drops entirely rather than showing it.
   const star = (entry.stars ?? 0) > 0 ? starParts(entry.stars) : null;
@@ -191,7 +184,8 @@ function ForkRow({
       key: "active",
       node: (
         <span>
-          {ACTIVE_VERB[provider]} <RelativeTime date={entry.activeAt} />
+          {t(`insights.forkActivityVerb.${provider}`)}{" "}
+          <RelativeTime date={entry.activeAt} />
         </span>
       ),
     });
@@ -235,8 +229,8 @@ function ForkRow({
           // is a fork, so the glyph only has to distinguish private ones.
           <span
             role="img"
-            aria-label="Private fork"
-            title="Private fork"
+            aria-label={t("insights.privateFork")}
+            title={t("insights.privateFork")}
             className="flex shrink-0 self-center text-muted-foreground"
           >
             <LockSimpleIcon className="size-3" aria-hidden />
@@ -284,6 +278,7 @@ export function ForkActivityCard({
   provider: ForgeProvider;
   canCompare: boolean;
 }) {
+  const { t } = useTranslation("repository");
   async function openAllForks() {
     try {
       const url = await forgeRepoUrl(repoPath);
@@ -297,9 +292,9 @@ export function ForkActivityCard({
   // A counted-but-unlisted fork is the private-fork case: the provider reports it
   // in the total and withholds the row.
   if (data.forks.length === 0 && (data.totalCount ?? 0) > 0) {
-    return <Empty>No forks visible to you.</Empty>;
+    return <Empty>{t("insights.noVisibleForks")}</Empty>;
   }
-  if (data.forks.length === 0) return <Empty>No forks yet.</Empty>;
+  if (data.forks.length === 0) return <Empty>{t("insights.noForksYet")}</Empty>;
 
   return (
     <div className="space-y-3">
@@ -323,7 +318,7 @@ export function ForkActivityCard({
           onClick={openAllForks}
         >
           <ArrowSquareOutIcon data-icon="inline-start" />
-          All forks on {providerLabel(provider)}
+          {t("insights.allForksOn", { provider: providerLabel(provider) })}
         </Button>
       </div>
     </div>

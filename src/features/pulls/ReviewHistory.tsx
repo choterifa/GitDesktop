@@ -34,6 +34,7 @@ import { formatDuration, validEpochMs } from "@/lib/time";
 import { toastError } from "@/lib/toast";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { ThoughtsDisclosure } from "./ThoughtsDisclosure";
+import { usePullsText } from "./use-pulls-text";
 
 /**
  * The "Previous reviews" disclosure — past AI reviews for this PR (both modes) plus
@@ -59,6 +60,7 @@ export function ReviewHistory({
 }) {
   // Stored review text cites `#N` the same way a live run does, so it linkifies
   // against this repo's forge.
+  const tx = usePullsText();
   const provider = useForgeStatus(repoPath).data?.provider;
   const refs = provider ? { provider, repoPath, lens } : undefined;
   const history = useReviewHistory(repoPath, lens, prKind, prRef);
@@ -174,7 +176,7 @@ export function ReviewHistory({
           ) : (
             <CaretRightIcon className="size-3" />
           )}
-          Previous reviews ({records.length})
+          {tx("Previous reviews ({{count}})", { count: records.length })}
         </button>
         {open &&
           (confirmingClear ? (
@@ -183,8 +185,10 @@ export function ReviewHistory({
                   phase test), so say so whenever there is one to lose. */}
               <span className="text-muted-foreground">
                 {partialRecords.length > 0
-                  ? "Clear this PR's history, including the kept partial output?"
-                  : "Clear this PR's history?"}
+                  ? tx(
+                      "Clear this PR's history, including the kept partial output?",
+                    )
+                  : tx("Clear this PR's history?")}
               </span>
               <DisabledReasonButton
                 variant="ghost"
@@ -194,14 +198,14 @@ export function ReviewHistory({
                 reason={ACT_PENDING_REASON}
                 onClick={() => void clearHistory()}
               >
-                Yes
+                {tx("Yes")}
               </DisabledReasonButton>
               <Button
                 variant="ghost"
                 size="xs"
                 onClick={() => setConfirmingClear(false)}
               >
-                No
+                {tx("No")}
               </Button>
             </span>
           ) : (
@@ -211,7 +215,7 @@ export function ReviewHistory({
               className="ml-auto text-muted-foreground"
               onClick={() => setConfirmingClear(true)}
             >
-              Clear history
+              {tx("Clear history")}
             </Button>
           ))}
       </div>
@@ -255,7 +259,7 @@ export function ReviewHistory({
                       <CaretRightIcon className="size-3 shrink-0" />
                     )}
                     <Badge variant="secondary" className="shrink-0">
-                      {r.mode === "security" ? "Security" : "Review"}
+                      {r.mode === "security" ? tx("Security") : tx("Review")}
                     </Badge>
                     {/* Says in words what the tone shows — kept output is not a review. */}
                     {partial && (
@@ -264,8 +268,8 @@ export function ReviewHistory({
                         className="shrink-0 border-warning/40 bg-warning/10 text-warning"
                       >
                         {partialReviewReason(r).timedOut
-                          ? "Timed out — partial output"
-                          : "Stopped early"}
+                          ? tx("Timed out — partial output")
+                          : tx("Stopped early")}
                       </Badge>
                     )}
                     <span className="truncate font-mono text-muted-foreground">
@@ -291,8 +295,8 @@ export function ReviewHistory({
                     type="button"
                     aria-label={
                       partial
-                        ? "Delete this kept partial output from history"
-                        : "Delete this review from history"
+                        ? tx("Delete this kept partial output from history")
+                        : tx("Delete this review from history")
                     }
                     className="shrink-0 text-muted-foreground hover:text-destructive"
                     onClick={() => void del.mutateAsync(r.id).catch(toastError)}
@@ -310,7 +314,7 @@ export function ReviewHistory({
                           onChange={(e) => setDraft(e.target.value)}
                           rows={8}
                           className="max-h-72 min-h-24 resize-y font-mono text-xs"
-                          aria-label="Edit the previous review's findings"
+                          aria-label={tx("Edit the previous review's findings")}
                         />
                         <div className="flex items-center gap-2">
                           <DisabledReasonButton
@@ -319,13 +323,15 @@ export function ReviewHistory({
                             reason={ACT_PENDING_REASON}
                             onClick={() => void saveEdit(r.id)}
                           >
-                            Save
+                            {tx("Save")}
                           </DisabledReasonButton>
                           <Button variant="ghost" size="xs" onClick={closeEdit}>
-                            Cancel
+                            {tx("Cancel")}
                           </Button>
                           <span className="text-muted-foreground">
-                            Trimmed text is what the next review builds on.
+                            {tx(
+                              "Trimmed text is what the next review builds on.",
+                            )}
                           </span>
                         </div>
                       </div>
@@ -351,7 +357,7 @@ export function ReviewHistory({
                               onClick={() => startEdit(r.id, reviewText(r))}
                             >
                               <PencilSimpleIcon data-icon="inline-start" />
-                              Trim before re-running
+                              {tx("Trim before re-running")}
                             </Button>
                           )}
                           <Button
@@ -362,13 +368,13 @@ export function ReviewHistory({
                               copyText(
                                 reviewText(r),
                                 partial
-                                  ? "Partial output copied"
-                                  : "Review copied",
+                                  ? tx("Partial output copied")
+                                  : tx("Review copied"),
                               )
                             }
                           >
                             <CopyIcon data-icon="inline-start" />
-                            Copy
+                            {tx("Copy")}
                           </Button>
                         </div>
                       </>

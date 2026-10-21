@@ -38,6 +38,7 @@ import { EMPTY_SYNTAX, type SyntaxConfig } from "@/lib/syntax/store";
 import { toastError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { settingsFormOpts } from "./settings-form";
+import { useSettingsText } from "./use-settings-text";
 
 const EMPTY_LANG: CustomLanguage = {
   id: "",
@@ -71,6 +72,7 @@ function ImportSlot({
   fileName?: string;
   onChoose: () => void;
 }) {
+  const tx = useSettingsText();
   return (
     <div className="flex flex-col gap-1.5 rounded border bg-muted/30 p-2.5">
       <p className="truncate font-mono text-[11px]" title={fileName ?? kind}>
@@ -84,7 +86,8 @@ function ImportSlot({
         className="mt-0.5 w-full"
         onClick={onChoose}
       >
-        <UploadSimpleIcon /> {fileName ? "Replace…" : "Choose file…"}
+        <UploadSimpleIcon />
+        {fileName ? tx("Replace…") : tx("Choose file…")}
       </Button>
     </div>
   );
@@ -104,6 +107,7 @@ function CustomLanguageDialog({
   onSave: (lang: CustomLanguage) => void;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   const [draft, setDraft] = useState<CustomLanguage>(initial ?? EMPTY_LANG);
   // Filenames imported into each slot, for inline confirmation.
   const [imported, setImported] = useState<{ lc?: string; tm?: string }>({});
@@ -122,14 +126,14 @@ function CustomLanguageDialog({
     try {
       const picked = await openDialog({
         multiple: false,
-        filters: [{ name: "VSCode language config", extensions: ["json"] }],
+        filters: [{ name: tx("VSCode language config"), extensions: ["json"] }],
       });
       if (typeof picked !== "string") return;
       const result: ImportResult | null = importGrammar(
         await readTextFile(picked),
       );
       if (!result) {
-        toast.error("Couldn't read a grammar from that file");
+        toast.error(tx("Couldn't read a grammar from that file"));
         return;
       }
       setDraft((d) => ({
@@ -141,11 +145,16 @@ function CustomLanguageDialog({
       const slot = result.kind === "tmLanguage" ? "tm" : "lc";
       setImported((p) => ({ ...p, [slot]: fileName }));
       if (result.grammar) {
-        toast.success(`Loaded TextMate grammar from ${fileName}`);
+        toast.success(
+          tx("Loaded TextMate grammar from {{fileName}}", { fileName }),
+        );
       } else {
         const filled: ImportedGrammar = result.fields;
         toast.success(
-          `Imported ${Object.keys(filled).join(", ")} from ${fileName}`,
+          tx("Imported {{fields}} from {{fileName}}", {
+            fields: Object.keys(filled).join(", "),
+            fileName,
+          }),
         );
       }
     } catch (e) {
@@ -174,34 +183,35 @@ function CustomLanguageDialog({
       <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>
-            {initial ? "Edit custom language" : "New custom language"}
+            {initial ? tx("Edit custom language") : tx("New custom language")}
           </DialogTitle>
           <DialogDescription>
-            A lightweight grammar for diff highlighting — keywords, comments,
-            strings, and numbers. Import from a VSCode file or fill it in by
-            hand.
+            {tx(
+              "A lightweight grammar for diff highlighting — keywords, comments, strings, and numbers. Import from a VSCode file or fill it in by hand.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
           <div className="space-y-2 rounded border border-dashed p-3">
             <p className="text-xs font-medium">
-              Import from VSCode language files
+              {tx("Import from VSCode language files")}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              Each fills the fields below — import either, or both to combine.
-              Edit anything afterward.
+              {tx(
+                "Each fills the fields below — import either, or both to combine. Edit anything afterward.",
+              )}
             </p>
             <div className="grid grid-cols-2 gap-2">
               <ImportSlot
                 kind="language-configuration.json"
-                hint="comments & strings"
+                hint={tx("comments & strings")}
                 fileName={imported.lc}
                 onChoose={importFile}
               />
               <ImportSlot
                 kind=".tmLanguage.json"
-                hint="keywords, comments & strings"
+                hint={tx("keywords, comments & strings")}
                 fileName={imported.tm}
                 onChoose={importFile}
               />
@@ -211,8 +221,9 @@ function CustomLanguageDialog({
           {draft.tmGrammar && (
             <div className="flex items-center justify-between gap-3 rounded border border-success/30 bg-success/10 px-3 py-2 text-xs">
               <span className="text-success">
-                ✓ Full TextMate grammar loaded — rendered with Shiki (VSCode
-                fidelity). The fields below are ignored while it's loaded.
+                {tx(
+                  "✓ Full TextMate grammar loaded — rendered with Shiki (VSCode fidelity). The fields below are ignored while it's loaded.",
+                )}
               </span>
               <Button
                 type="button"
@@ -221,7 +232,7 @@ function CustomLanguageDialog({
                 className="shrink-0"
                 onClick={() => set("tmGrammar", undefined)}
               >
-                Remove grammar
+                {tx("Remove grammar")}
               </Button>
             </div>
           )}
@@ -235,7 +246,7 @@ function CustomLanguageDialog({
             {/* Left: identity + the long keyword list */}
             <div className="flex flex-col gap-5">
               <div className="space-y-2">
-                <Label htmlFor="cl-name">Name</Label>
+                <Label htmlFor="cl-name">{tx("Name")}</Label>
                 <Input
                   id="cl-name"
                   autoFocus
@@ -245,13 +256,15 @@ function CustomLanguageDialog({
                 />
                 {builtinClash && (
                   <p className="text-xs text-warning">
-                    A built-in language is already called “{toLangId(name)}”.
-                    Saving will override it everywhere.
+                    {tx(
+                      "A built-in language is already called “{{language}}”. Saving will override it everywhere.",
+                      { language: toLangId(name) },
+                    )}
                   </p>
                 )}
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2">
-                <Label htmlFor="cl-keywords">Keywords</Label>
+                <Label htmlFor="cl-keywords">{tx("Keywords")}</Label>
                 <Textarea
                   id="cl-keywords"
                   value={draft.keywords}
@@ -260,21 +273,21 @@ function CustomLanguageDialog({
                   className="min-h-32 flex-1 font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Separated by spaces, commas, or new lines.
+                  {tx("Separated by spaces, commas, or new lines.")}
                 </p>
               </div>
             </div>
 
             {/* Right: comments, strings, options */}
             <div className="flex flex-col gap-5">
-              <LabeledGroup label="Comments">
+              <LabeledGroup label={tx("Comments")}>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1.5">
                     <Label
                       htmlFor="cl-line"
                       className="text-[11px] font-normal text-muted-foreground"
                     >
-                      Line
+                      {tx("Line")}
                     </Label>
                     <Input
                       id="cl-line"
@@ -289,7 +302,7 @@ function CustomLanguageDialog({
                       htmlFor="cl-block-start"
                       className="text-[11px] font-normal text-muted-foreground"
                     >
-                      Block start
+                      {tx("Block start")}
                     </Label>
                     <Input
                       id="cl-block-start"
@@ -304,7 +317,7 @@ function CustomLanguageDialog({
                       htmlFor="cl-block-end"
                       className="text-[11px] font-normal text-muted-foreground"
                     >
-                      Block end
+                      {tx("Block end")}
                     </Label>
                     <Input
                       id="cl-block-end"
@@ -318,7 +331,7 @@ function CustomLanguageDialog({
               </LabeledGroup>
 
               <div className="space-y-2">
-                <Label htmlFor="cl-strings">String delimiters</Label>
+                <Label htmlFor="cl-strings">{tx("String delimiters")}</Label>
                 <Input
                   id="cl-strings"
                   value={draft.stringDelimiters}
@@ -327,7 +340,7 @@ function CustomLanguageDialog({
                   className="w-40 font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Each character starts and ends a string.
+                  {tx("Each character starts and ends a string.")}
                 </p>
               </div>
 
@@ -336,7 +349,7 @@ function CustomLanguageDialog({
                   checked={draft.caseInsensitive}
                   onCheckedChange={(checked) => set("caseInsensitive", checked)}
                 />
-                Match keywords case-insensitively
+                {tx("Match keywords case-insensitively")}
               </label>
             </div>
           </div>
@@ -344,10 +357,10 @@ function CustomLanguageDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           <Button onClick={save} disabled={!name}>
-            {initial ? "Save language" : "Add language"}
+            {initial ? tx("Save language") : tx("Add language")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -358,6 +371,7 @@ function CustomLanguageDialog({
 export const SyntaxSection = withForm({
   ...settingsFormOpts,
   render: function SyntaxSectionRender({ form }) {
+    const tx = useSettingsText();
     const repoPath = useUiStore((s) => s.repoPath);
     const repoName = useUiStore((s) => s.repoName);
     const [scope, setScope] = useState<"global" | "repo">("global");
@@ -472,12 +486,11 @@ export const SyntaxSection = withForm({
     return (
       <section className="space-y-6">
         <div>
-          <h2 className="text-sm font-medium">Syntax highlighting</h2>
+          <h2 className="text-sm font-medium">{tx("Syntax highlighting")}</h2>
           <p className="text-xs text-muted-foreground">
-            Map a file extension to a language for diff highlighting — handy for
-            wrapper extensions (a <code className="font-mono">.dbj</code> that's
-            really JavaScript) or formats the diff viewer doesn't know yet. You
-            can also set this per file from the diff toolbar.
+            {tx(
+              "Map a file extension to a language for diff highlighting — handy for wrapper extensions (a .dbj that's really JavaScript) or formats the diff viewer doesn't know yet. You can also set this per file from the diff toolbar.",
+            )}
           </p>
         </div>
 
@@ -495,7 +508,7 @@ export const SyntaxSection = withForm({
                 )}
                 onClick={() => setScope("global")}
               >
-                Just me
+                {tx("Just me")}
               </button>
               <button
                 type="button"
@@ -508,24 +521,27 @@ export const SyntaxSection = withForm({
                 )}
                 onClick={() => setScope("repo")}
               >
-                This repository
+                {tx("This repository")}
               </button>
             </div>
             <p className="text-xs text-muted-foreground">
               {activeScope === "repo"
-                ? `Saved to ${repoName ?? "the repo"}'s .gitdesktop/syntax.json — commit it to share with your team. Your personal settings win on conflict.`
-                : "Applies to every repository you open, just for you."}
+                ? tx(
+                    "Saved to {{repo}}'s .gitdesktop/syntax.json — commit it to share with your team. Your personal settings win on conflict.",
+                    { repo: repoName ?? tx("the repo") },
+                  )
+                : tx("Applies to every repository you open, just for you.")}
             </p>
           </div>
         )}
 
         <div className="space-y-3">
           <h3 className="text-xs font-medium text-muted-foreground">
-            Extension mappings
+            {tx("Extension mappings")}
           </h3>
           {entries.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              No mappings yet. Add one below.
+              {tx("No mappings yet. Add one below.")}
             </p>
           )}
           <div className="space-y-2">
@@ -544,7 +560,9 @@ export const SyntaxSection = withForm({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Remove .${ext} mapping`}
+                  aria-label={tx("Remove .{{extension}} mapping", {
+                    extension: ext,
+                  })}
                   className="ml-auto"
                   onClick={() => removeMapping(ext)}
                 >
@@ -565,7 +583,7 @@ export const SyntaxSection = withForm({
                 }
               }}
               placeholder="dbj"
-              aria-label="File extension"
+              aria-label={tx("File extension")}
               className="w-24 font-mono"
             />
             <span className="text-muted-foreground">→</span>
@@ -573,7 +591,7 @@ export const SyntaxSection = withForm({
               value={newLang}
               onValueChange={setNewLang}
               customLanguages={allLangs}
-              autoLabel="Pick a language"
+              autoLabel={tx("Pick a language")}
               onClear={() => setNewLang("")}
               triggerClassName="w-44"
             />
@@ -584,7 +602,7 @@ export const SyntaxSection = withForm({
               disabled={!newExt.trim() || !newLang}
               onClick={addMapping}
             >
-              <PlusIcon /> Add
+              <PlusIcon /> {tx("Add")}
             </Button>
           </div>
         </div>
@@ -592,20 +610,20 @@ export const SyntaxSection = withForm({
         <div className="space-y-3 border-t pt-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-medium text-muted-foreground">
-              Custom languages
+              {tx("Custom languages")}
             </h3>
             <Button
               variant="outline"
               size="sm"
               onClick={() => setEditing("new")}
             >
-              <PlusIcon /> Add custom language
+              <PlusIcon /> {tx("Add custom language")}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Define a minimal grammar for a language the viewer doesn't support
-            (import one from a VSCode grammar), then map an extension to it
-            above.
+            {tx(
+              "Define a minimal grammar for a language the viewer doesn't support (import one from a VSCode grammar), then map an extension to it above.",
+            )}
           </p>
           {customLanguages.length > 0 && (
             <div className="space-y-2">
@@ -622,7 +640,7 @@ export const SyntaxSection = withForm({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Edit ${cl.name}`}
+                      aria-label={tx("Edit {{name}}", { name: cl.name })}
                       onClick={() => setEditing(cl)}
                     >
                       <PencilSimpleIcon />
@@ -630,7 +648,7 @@ export const SyntaxSection = withForm({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Remove ${cl.name}`}
+                      aria-label={tx("Remove {{name}}", { name: cl.name })}
                       onClick={() => removeLang(cl.id)}
                     >
                       <XIcon />

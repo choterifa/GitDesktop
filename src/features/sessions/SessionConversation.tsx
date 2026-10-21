@@ -13,6 +13,7 @@ import { AgentNarration } from "./AgentNarration";
 import { AgentTranscript } from "./AgentTranscript";
 import { SessionComposer, type SessionComposerHandle } from "./SessionComposer";
 import { type AgentSession, type SessionTurn, useSessionsStore } from "./store";
+import { useSessionText } from "./use-session-text";
 
 /**
  * The conversation column of the agent canvas: a document-style log of turns
@@ -29,6 +30,7 @@ export function SessionConversation({
   session: AgentSession;
   repoPath: string;
 }) {
+  const tx = useSessionText();
   const resume = useSessionsStore((s) => s.resume);
   const busy = useSessionsStore((s) => s.busyId === session.id);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -132,7 +134,7 @@ export function SessionConversation({
               className="absolute bottom-3 left-1/2 flex items-center gap-1.5 border bg-background px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors hover:bg-muted focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
             >
               <ArrowDownIcon className="size-3.5" />
-              Latest
+              {tx("Latest")}
             </m.button>
           )}
         </AnimatePresence>
@@ -141,8 +143,7 @@ export function SessionConversation({
         {session.kept ? (
           <div className="flex items-center gap-2 px-1 py-1">
             <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
-              Kept on <span className="font-mono">{session.branch}</span> —
-              resume to continue the conversation.
+              {tx("Kept on")} <span className="font-mono">{session.branch}</span> — {tx("resume to continue the conversation.")}
             </span>
             <Button
               size="sm"
@@ -150,7 +151,7 @@ export function SessionConversation({
               disabled={busy}
               onClick={() => resume(session.id)}
             >
-              Resume
+              {tx("Resume")}
             </Button>
           </div>
         ) : (
@@ -192,6 +193,7 @@ function TurnView({
   resendable: boolean;
   onEditResend: () => void;
 }) {
+  const tx = useSessionText();
   const running = turn.status === "running" || turn.status === "committing";
   // A turn that finished with no narration and no commit (or errored) produced
   // nothing — offer to edit & resend it so a failure is easy to retry. Normal,
@@ -203,13 +205,13 @@ function TurnView({
   return (
     <div className="flex flex-col gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
       <div className="flex flex-col gap-1.5">
-        <RoleLabel>You</RoleLabel>
+        <RoleLabel>{tx("You")}</RoleLabel>
         <div className="bg-muted/50 px-3 py-2 text-xs leading-relaxed break-words whitespace-pre-wrap">
           {turn.prompt}
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <RoleLabel agent>Agent</RoleLabel>
+        <RoleLabel agent>{tx("Agent")}</RoleLabel>
         {turn.segments?.length ? (
           <AgentTranscript
             segments={turn.segments}
@@ -223,7 +225,7 @@ function TurnView({
         ) : (
           !running &&
           turn.status !== "error" && (
-            <p className="px-0.5 text-xs text-muted-foreground">No response.</p>
+            <p className="px-0.5 text-xs text-muted-foreground">{tx("No response.")}</p>
           )
         )}
         <TurnStatus
@@ -249,16 +251,19 @@ function TurnStatus({
   canResend: boolean;
   onEditResend: () => void;
 }) {
+  const tx = useSessionText();
   const cancelled = turn.status === "error" && turn.error === "Cancelled.";
   const failed = turn.status === "error" && !cancelled;
   const text = running
     ? turn.statusText ||
-      (turn.status === "committing" ? "Committing this turn…" : "Working…")
+      (turn.status === "committing" ? tx("Committing this turn…") : tx("Working…"))
     : turn.status === "error"
-      ? (turn.error ?? "Failed")
+      ? turn.error === "Cancelled."
+        ? tx("Cancelled.")
+        : (turn.error ?? tx("Failed"))
       : turn.commitHash
-        ? "Committed"
-        : "No changes";
+        ? tx("Committed")
+        : tx("No changes");
 
   return (
     <div
@@ -276,11 +281,11 @@ function TurnStatus({
         <button
           type="button"
           onClick={onEditResend}
-          title="Edit & resend"
+          title={tx("Edit & resend")}
           className="ml-1 inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none"
         >
           <ArrowCounterClockwiseIcon className="size-3" />
-          Edit &amp; resend
+          {tx("Edit & resend")}
         </button>
       )}
     </div>

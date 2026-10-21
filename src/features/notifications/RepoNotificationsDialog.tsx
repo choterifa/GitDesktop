@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSettingsText } from "@/features/settings/use-settings-text";
 import { clipTitleFromText } from "@/lib/clip-title";
 import { useRepoIdentity } from "@/lib/git/queries";
 import { useModalGateRegistration } from "@/lib/hotkeys/modal-gate";
@@ -38,10 +39,10 @@ import {
   SOURCE_DESCRIPTIONS,
   SOURCE_LABELS,
   SUBROW_HELD_REASONS,
-  SUBROW_LABEL,
   type SubrowSource,
   sortedJson,
   subrowAriaLabel,
+  subrowLabel,
   useRepoNotificationsDialog,
 } from "@/lib/notifications/matrix";
 import {
@@ -143,11 +144,16 @@ export function MatrixCell({ children }: { children: ReactNode }) {
   return <td className="px-2 py-1.5 text-center align-top">{children}</td>;
 }
 
-const OVERRIDDEN_CHIP = (
-  <span className="border px-1 text-[10px] text-muted-foreground">
-    overridden
-  </span>
-);
+function OverriddenChip() {
+  const tx = useSettingsText();
+  return (
+    <span className="border px-1 text-[10px] text-muted-foreground">
+      {tx("overridden")}
+    </span>
+  );
+}
+
+const OVERRIDDEN_CHIP = <OverriddenChip />;
 
 interface MatrixSelectProps<T extends string> {
   /** Visible label, associated with the trigger through `htmlFor`. */
@@ -262,8 +268,13 @@ function MatrixSelectRow<T extends string>(props: MatrixSelectProps<T>) {
 export function WatchRow(
   props: Omit<MatrixSelectProps<PrCheckScopeFilter>, "label" | "items">,
 ) {
+  const tx = useSettingsText();
   return (
-    <MatrixSelectRow {...props} label="Watch" items={CHECK_SCOPE_LABELS} />
+    <MatrixSelectRow
+      {...props}
+      label={tx("Watch")}
+      items={CHECK_SCOPE_LABELS}
+    />
   );
 }
 
@@ -278,7 +289,7 @@ export function OutcomeRow({
   return (
     <MatrixSelectRow
       {...props}
-      label={SUBROW_LABEL}
+      label={subrowLabel()}
       ariaLabel={subrowAriaLabel(source)}
       items={OUTCOME_FILTER_LABELS}
     />
@@ -297,7 +308,7 @@ export function AutomationKindsRow(
   return (
     <MatrixSelectRow
       {...props}
-      label={SUBROW_LABEL}
+      label={subrowLabel()}
       ariaLabel={subrowAriaLabel("automations")}
       items={AUTOMATION_KIND_FILTER_LABELS}
     />
@@ -334,13 +345,14 @@ function bodyState({
  *  memo on a rejected load, so a refetch re-opens the file itself, and the
  *  identity query's own refetch re-runs the lookup. */
 function BaselineLoadFailed({ onRetry }: { onRetry: () => void }) {
+  const tx = useSettingsText();
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Couldn't load your notification settings.
+        {tx("Couldn't load your notification settings.")}
       </p>
       <Button variant="outline" size="xs" onClick={onRetry}>
-        Retry
+        {tx("Retry")}
       </Button>
     </div>
   );
@@ -352,6 +364,7 @@ function BaselineLoadFailed({ onRetry }: { onRetry: () => void }) {
  * back to the global value drops its override (inherits again).
  */
 export function RepoNotificationsDialogHost() {
+  const tx = useSettingsText();
   const repoPath = useRepoNotificationsDialog((s) => s.repoPath);
   const close = useRepoNotificationsDialog((s) => s.close);
   // Retained so the body keeps its repo through the close fade instead of
@@ -374,11 +387,11 @@ export function RepoNotificationsDialogHost() {
           row, the matrix, and the Watch select scroll as one body. */}
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Repository notifications</DialogTitle>
+          <DialogTitle>{tx("Repository notifications")}</DialogTitle>
           <DialogDescription>
-            What notifies from this repository. Cells start from your defaults
-            in Settings → Notifications; change one here to override it for this
-            repository only.
+            {tx(
+              "What notifies from this repository. Cells start from your defaults in Settings → Notifications; change one here to override it for this repository only.",
+            )}
           </DialogDescription>
         </DialogHeader>
         {shownRepo !== null && (
@@ -405,6 +418,7 @@ function RepoNotificationsBody({
   open: boolean;
   onClose: () => void;
 }) {
+  const tx = useSettingsText();
   const aiEnabled = useAiEnabled();
   const settings = useSettings();
   const overrides = useNotificationOverrides();
@@ -460,7 +474,7 @@ function RepoNotificationsBody({
   const rows = notificationRows(aiEnabled);
   const muted = draft.muted === true;
   const mutedReason = muted
-    ? "Muted — nothing from this repository notifies."
+    ? tx("Muted — nothing from this repository notifies.")
     : null;
   // A sub-row is held for the same reason it is in the global matrix — a source
   // delivering on no channel has nothing to watch and no result to filter — read
@@ -566,7 +580,7 @@ function RepoNotificationsBody({
       // a dialog opened AFTER this save started throws away that dialog's edits
       // (the next open reseeds the draft from disk). Same repo is not the same
       // dialog, so the generation is what decides.
-      toast.success("Repository notifications saved");
+      toast.success(tx("Repository notifications saved"));
       const live = useRepoNotificationsDialog.getState();
       if (live.repoPath === repoPath && live.generation === savedGeneration)
         onClose();
@@ -580,9 +594,10 @@ function RepoNotificationsBody({
   // Why Save is held, in precedence order. The error arm keeps it unreachable
   // while there is no baseline to save against.
   function saveBlockedReason(): string | null {
-    if (save.isPending) return "Saving…";
-    if (state === "error") return "Couldn't load your notification settings";
-    if (!dirty) return "No changes to save";
+    if (save.isPending) return tx("Saving…");
+    if (state === "error")
+      return tx("Couldn't load your notification settings");
+    if (!dirty) return tx("No changes to save");
     return null;
   }
   const saveReason = saveBlockedReason();
@@ -611,7 +626,7 @@ function RepoNotificationsBody({
                 checked={muted}
                 onCheckedChange={(checked) => toggleMuted(checked === true)}
               />
-              Mute this repository
+              {tx("Mute this repository")}
             </label>
             {mutedReason ? (
               <p
@@ -621,7 +636,9 @@ function RepoNotificationsBody({
                 {mutedReason}
               </p>
             ) : null}
-            <MatrixTable caption="Notification channels for this repository">
+            <MatrixTable
+              caption={tx("Notification channels for this repository")}
+            >
               {rows.map((source) => {
                 const channels = effectiveChannels(global, draft, source);
                 const label = SOURCE_LABELS[source];
@@ -704,10 +721,12 @@ function RepoNotificationsBody({
                 size="xs"
                 onClick={() => setEdited(EMPTY_OVERRIDE)}
                 disabled={!hasOverrides}
-                reason="No overrides to reset"
-                title="Remove all overrides and inherit the global defaults"
+                reason={tx("No overrides to reset")}
+                title={tx(
+                  "Remove all overrides and inherit the global defaults",
+                )}
               >
-                Reset to global defaults
+                {tx("Reset to global defaults")}
               </DisabledReasonButton>
             </div>
           </>
@@ -715,7 +734,7 @@ function RepoNotificationsBody({
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
-          Cancel
+          {tx("Cancel")}
         </Button>
         <DisabledReasonButton
           // Below `sm` the footer stacks and stretches the wrapper span; the
@@ -725,7 +744,7 @@ function RepoNotificationsBody({
           disabled={saveReason !== null}
           reason={saveReason}
         >
-          Save changes
+          {tx("Save changes")}
         </DisabledReasonButton>
       </DialogFooter>
     </>

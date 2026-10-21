@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@/components/markdown/markdown";
 import { RelativeTime } from "@/components/relative-time";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import { useRetained } from "@/lib/use-retained";
  * root, so a cross-repo notification can open it without a repo switch.
  */
 export function AutomationResultDialog() {
+  const { t } = useTranslation("automations");
   const openId = useAutomationResults((s) => s.openId);
   const setOpen = useAutomationResults((s) => s.setOpen);
   const result = useAutomationResults((s) =>
@@ -38,7 +40,11 @@ export function AutomationResultDialog() {
       <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            AI {shownResult?.mode === "security" ? "security audit" : "review"}
+            {t(
+              shownResult?.mode === "security"
+                ? "result.securityTitle"
+                : "result.reviewTitle",
+            )}
           </DialogTitle>
           <DialogDescription>
             {shownResult?.hash && (
@@ -66,8 +72,8 @@ export function AutomationResultDialog() {
               className="shrink-0 border-warning/40 bg-warning/10 text-warning"
             >
               {shownResult.timedOut === true
-                ? "Timed out — partial output"
-                : "Stopped early"}
+                ? t("result.timedOutPartial")
+                : t("result.stoppedEarly")}
             </Badge>
             {typeof shownResult.error === "string" && shownResult.error && (
               <span

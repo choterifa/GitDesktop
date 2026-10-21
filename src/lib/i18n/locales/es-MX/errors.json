@@ -1,0 +1,67 @@
+{
+  "kind": {
+    "git": "Error de Git",
+    "conflict": "Conflicto de fusión",
+    "pullRebaseWouldDrop": "Se bloqueó la actualización",
+    "busy": "Operación en curso",
+    "branchHeld": "Rama en uso",
+    "pushUpstreamNameMismatch": "Se bloqueó el envío",
+    "notARepo": "No es un repositorio de Git",
+    "gitNotFound": "No se encontró Git",
+    "ghNotFound": "No se encontró GitHub CLI",
+    "gh": "Error de GitHub",
+    "issuesDisabled": "Issues desactivados",
+    "glabNotFound": "No se encontró GitLab CLI",
+    "glab": "Error de GitLab",
+    "bitbucketNotConfigured": "Bitbucket no está configurado",
+    "bitbucket": "Error de Bitbucket",
+    "jira": "Error de Jira",
+    "keyring": "Error al guardar credenciales",
+    "invalidArgument": "Dato no válido",
+    "command": "Falló el comando",
+    "io": "Error de entrada/salida",
+    "timeout": "Se agotó el tiempo de espera"
+  },
+  "action": {
+    "details": "Detalles",
+    "copy": "Copiar",
+    "view": "Ver"
+  },
+  "dialog": {
+    "close": "Cerrar",
+    "copied": "Copiado",
+    "copy": "Copiar"
+  },
+  "unexpected": "Error inesperado",
+  "ignore": {
+    "alreadyOne": "La entrada ya está en {{file}}",
+    "alreadyMany": "Las {{count}} entradas ya están en {{file}}",
+    "addedSome": "Se agregaron {{added}} de {{total}} entradas a {{file}}",
+    "addedAllOne": "Se agregó 1 entrada a {{file}}",
+    "addedAll": "Se agregaron {{count}} entradas a {{file}}"
+  },
+  "conflict": {
+    "merge": "Se pausó la fusión. Resuelve los conflictos y crea el commit.",
+    "rebase": "Se pausó el rebase. Resuelve los conflictos y continúa.",
+    "cherry-pick": "Se pausó el cherry-pick. Resuelve los conflictos y continúa.",
+    "revert": "Se pausó la reversión. Resuelve los conflictos y continúa.",
+    "stash-pop": "El stash pop encontró conflictos. Resuélvelos; el stash se conservó.",
+    "stash-apply": "El stash apply encontró conflictos. Resuélvelos; el stash se conservó.",
+    "stash-restore": "La restauración encontró conflictos. Resuélvelos; los cambios recuperados están en tu árbol de trabajo.",
+    "paused": "Se pausó {{operation}}. Resuelve los conflictos y {{finish}}.",
+    "unknown": "Se pausó la operación. Resuelve los conflictos y continúa."
+  },
+  "summary": {
+    "forcePushStale": "Se bloqueó el envío forzado porque el remoto cambió desde la última descarga. Descarga y revisa los commits nuevos; intégralos a tu rama antes de volver a enviar.",
+    "forcePushRemoteUpdated": "Se bloqueó el envío forzado porque el remoto tiene commits que tu rama aún no integra. Tráelos a tu rama y vuelve a enviar.",
+    "remoteReadOnly": "El remoto indica que este repositorio es de solo lectura, normalmente porque es un espejo o está archivado. Cambiar las credenciales no resolverá el problema. Si es un espejo, envía los cambios al repositorio de origen.",
+    "remoteCredentialsMissing": "No hay credenciales guardadas para este remoto y GitDesktop no permite que Git las solicite. Agrégalas a tu administrador de credenciales de Git e inténtalo de nuevo.",
+    "remoteAuthFailed": "El remoto rechazó las credenciales. Actualízalas en tu administrador de credenciales de Git e inténtalo de nuevo.",
+    "remoteForbidden": "El remoto reconoce la cuenta, pero no tiene permiso para esta operación en el repositorio. Pide acceso a una persona administradora o confirma que estés usando la cuenta correcta.",
+    "remoteSshKeyRefused": "El remoto rechazó la conexión SSH porque no se ofreció una clave autorizada. Agrega o carga una clave SSH con acceso a este remoto e inténtalo de nuevo.",
+    "windowsLongPath": "Algunas rutas del repositorio superan el límite predeterminado de Windows. Los comandos de GitDesktop ya las admiten; otras herramientas requieren activar las rutas largas en Windows y configurar core.longpaths en Git.",
+    "secretPushBlocked": "GitHub bloqueó el envío porque detectó un posible secreto. Los commits no se agregaron al repositorio. Quita el secreto de los commits y vuelve a enviar; si es una detección incorrecta, abre el enlace de desbloqueo que aparece en los detalles.",
+    "networkUnreachable": "No se pudo conectar con {{host}}. Revisa tu conexión a internet.",
+    "pullDecisionStale": "La rama cambió. Vuelve a actualizarla."
+  }
+}

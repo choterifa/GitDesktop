@@ -5,6 +5,7 @@ import {
   WarningIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useEffectEvent, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SelectClipText } from "@/components/select-clip-text";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,38 +40,9 @@ export interface MergeRunOptions {
   strategy: MergeConflictStrategy;
 }
 
-const PICKER_COPY: Record<
-  PickerMode,
-  { title: (current: string) => string; description: string; action: string }
-> = {
-  merge: {
-    title: (c) => `Merge into ${c}`,
-    description: "Merge conflicts, if any, will appear in the changes list.",
-    action: "Merge",
-  },
-  squash: {
-    title: (c) => `Squash and merge into ${c}`,
-    description:
-      "Combines the selected branch's changes into staged changes for a single commit.",
-    action: "Squash and merge",
-  },
-  rebase: {
-    title: (c) => `Rebase ${c} onto`,
-    description:
-      "Replays your branch's commits on top of the selected branch, each rewritten with a new commit id. Aborted automatically on conflicts.",
-    action: "Rebase",
-  },
-};
-
 /** Labels for the on-conflict select — without them Base UI shows the raw value
  *  ("theirs") in the trigger; the popup renders from this map too, so the two
  *  can never drift. */
-const CONFLICT_STRATEGY_ITEMS: Record<MergeConflictStrategy, string> = {
-  none: "Stop and let me resolve",
-  ours: "Prefer current branch",
-  theirs: "Prefer incoming branch",
-};
-
 /**
  * The merge / squash / rebase picker. Open when `mode` is set (null = closed).
  * Owns the selected branch, the advanced merge options (merge mode only), and
@@ -93,6 +65,12 @@ export function BranchMergePickerDialog({
   otherBranches: Branch[];
   currentLabel: string;
 }) {
+  const { t } = useTranslation("repositoryOperations");
+  const conflictStrategyItems: Record<MergeConflictStrategy, string> = {
+    none: t("mergePicker.strategy.none"),
+    ours: t("mergePicker.strategy.ours"),
+    theirs: t("mergePicker.strategy.theirs"),
+  };
   const [pickerBranch, setPickerBranch] = useState("");
   const shownMode = useRetained(mode);
   const branchSelectId = useId();
@@ -129,7 +107,7 @@ export function BranchMergePickerDialog({
     if (mergePreview.isFetching) {
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Spinner className="size-3" /> Checking…
+          <Spinner className="size-3" /> {t("mergePicker.checking")}
         </span>
       );
     }
@@ -139,21 +117,21 @@ export function BranchMergePickerDialog({
       // --no-ff suppresses the fast-forward, so reflect that when it's ticked.
       return mergeNoFf ? (
         <span className="flex items-center gap-1.5 text-info">
-          <InfoIcon className="size-3.5 shrink-0" /> Fast-forward available —
-          will create a merge commit
+          <InfoIcon className="size-3.5 shrink-0" />{" "}
+          {t("mergePicker.fastForwardCommit")}
         </span>
       ) : (
         <span className="flex items-center gap-1.5 text-info">
-          <LightningIcon className="size-3.5 shrink-0" /> Fast-forward — no
-          merge commit needed
+          <LightningIcon className="size-3.5 shrink-0" />{" "}
+          {t("mergePicker.fastForward")}
         </span>
       );
     }
     if (p.status === "up-to-date") {
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <CheckIcon className="size-3.5 shrink-0" /> Already up to date —
-          nothing to merge
+          <CheckIcon className="size-3.5 shrink-0" />{" "}
+          {t("mergePicker.upToDate")}
         </span>
       );
     }
@@ -162,8 +140,8 @@ export function BranchMergePickerDialog({
       // means it really will be clean (any conflicts auto-resolved).
       return (
         <span className="flex items-center gap-1.5 text-success">
-          <CheckIcon className="size-3.5 shrink-0" /> Clean merge — creates a
-          merge commit
+          <CheckIcon className="size-3.5 shrink-0" />{" "}
+          {t("mergePicker.cleanMerge")}
         </span>
       );
     }
@@ -173,15 +151,20 @@ export function BranchMergePickerDialog({
     const n = p.conflicts.length;
     const files = p.conflicts.slice(0, 4).join(", ");
     const more = n > 4 ? `, +${n - 4}` : "";
-    const noun = n === 1 ? "file" : "files";
-    const still = mergeStrategy !== "none" ? "still " : "";
+    const conflictText =
+      n > 0
+        ? t(n === 1 ? "mergePicker.conflictOne" : "mergePicker.conflictOther", {
+            count: n,
+            still: mergeStrategy !== "none" ? t("mergePicker.still") : "",
+          })
+        : t("mergePicker.conflictGeneric", {
+            still: mergeStrategy !== "none" ? t("mergePicker.still") : "",
+          });
     return (
       <span className="flex items-start gap-1.5 text-warning">
         <WarningIcon className="mt-px size-3.5 shrink-0" />
         <span>
-          {n > 0
-            ? `${n} ${noun} will ${still}conflict`
-            : `This merge will ${still}conflict`}
+          {conflictText}
           {files && `: ${files}${more}`}
         </span>
       </span>
@@ -198,14 +181,16 @@ export function BranchMergePickerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {shownMode ? PICKER_COPY[shownMode].title(currentLabel) : ""}
+            {shownMode
+              ? t(`mergePicker.${shownMode}Title`, { current: currentLabel })
+              : ""}
           </DialogTitle>
           <DialogDescription>
-            {shownMode ? PICKER_COPY[shownMode].description : ""}
+            {shownMode ? t(`mergePicker.${shownMode}Description`) : ""}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label htmlFor={branchSelectId}>Branch</Label>
+          <Label htmlFor={branchSelectId}>{t("mergePicker.branch")}</Label>
           <Select
             items={Object.fromEntries(
               otherBranches.map((b) => [b.name, b.name]),
@@ -233,14 +218,14 @@ export function BranchMergePickerDialog({
                 checked={mergeNoFf}
                 onCheckedChange={(c) => setMergeNoFf(c === true)}
               />
-              Always create a merge commit
+              {t("mergePicker.alwaysCreateCommit")}
             </label>
             <div className="space-y-1.5">
               <Label htmlFor={conflictSelectId} className="text-xs">
-                On conflict
+                {t("mergePicker.onConflict")}
               </Label>
               <Select
-                items={CONFLICT_STRATEGY_ITEMS}
+                items={conflictStrategyItems}
                 value={mergeStrategy}
                 onValueChange={(v) =>
                   v && setMergeStrategy(v as MergeConflictStrategy)
@@ -250,22 +235,24 @@ export function BranchMergePickerDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(CONFLICT_STRATEGY_ITEMS).map(
-                    ([strategy, label]) => (
-                      <SelectItem key={strategy} value={strategy}>
-                        {label}
-                      </SelectItem>
-                    ),
-                  )}
+                  {Object.keys(conflictStrategyItems).map((strategy) => (
+                    <SelectItem key={strategy} value={strategy}>
+                      {t(`mergePicker.strategy.${strategy}`)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {mergeStrategy !== "none" &&
                 mergePreview.data?.status !== "fast-forward" &&
                 mergePreview.data?.status !== "up-to-date" && (
                   <p className="text-[11px] text-muted-foreground">
-                    Conflicting changes from the{" "}
-                    {mergeStrategy === "ours" ? "incoming" : "current"} side are
-                    discarded.
+                    {t("mergePicker.discardSide", {
+                      side: t(
+                        mergeStrategy === "ours"
+                          ? "mergePicker.incoming"
+                          : "mergePicker.current",
+                      ),
+                    })}
                   </p>
                 )}
             </div>
@@ -273,10 +260,10 @@ export function BranchMergePickerDialog({
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("mergePicker.cancel")}
           </Button>
           <Button onClick={runPicker} disabled={!pickerBranch}>
-            {shownMode ? PICKER_COPY[shownMode].action : ""}
+            {shownMode ? t(`mergePicker.${shownMode}Action`) : ""}
           </Button>
         </DialogFooter>
       </DialogContent>

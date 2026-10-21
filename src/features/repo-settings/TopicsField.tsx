@@ -1,6 +1,7 @@
 import { XIcon } from "@phosphor-icons/react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 /** How a provider turns a raw typed token into a committed topic, which
  *  keystrokes commit the buffer, and whether there's a hard cap. GitHub slugs
@@ -152,7 +153,7 @@ export function TopicsField({
             ref={(el) => {
               chipRefs.current[index] = el;
             }}
-            aria-label={`Remove topic ${topic}`}
+            aria-label={tr("Remove topic {{topic}}", { topic })}
             className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-none text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50"
             // Don't steal focus from the add-input on mousedown, or its
             // onBlur→commit would flush a half-typed draft into a spurious chip.

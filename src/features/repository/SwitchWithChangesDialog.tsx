@@ -1,4 +1,5 @@
 import { WarningIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,6 +44,7 @@ export function SwitchWithChangesDialog({
   onBringChanges: () => void;
   onStashAndSwitch: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const shownTarget = useRetained(target);
   // Bringing the changes has already been refused, so it can only fail again:
   // stashing takes the primary and the dead offer stays visible but inert,
@@ -57,17 +59,20 @@ export function SwitchWithChangesDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>You have changes in progress</DialogTitle>
+          <DialogTitle>{t("dialogs.switch.title")}</DialogTitle>
           <DialogDescription>
-            Bring your uncommitted changes along to {shownTarget?.name}, or
-            stash them so {currentLabel} stays as you left it.{" "}
+            {t("dialogs.switch.description", {
+              target: shownTarget?.name,
+              current: currentLabel,
+            })}{" "}
             {reapply ? (
               <>
-                Stashed changes are put back on {shownTarget?.name} once the
-                switch lands.
+                {t("dialogs.switch.reapplyDescription", {
+                  target: shownTarget?.name,
+                })}
               </>
             ) : (
-              '"Pop latest stash" restores stashed changes later.'
+              t("dialogs.switch.popDescription")
             )}
           </DialogDescription>
         </DialogHeader>
@@ -82,7 +87,7 @@ export function SwitchWithChangesDialog({
             <span>
               {hint}
               {refused && reapply
-                ? " Reapply is set, so your changes still come along."
+                ? ` ${t("dialogs.switch.reapplyHint")}`
                 : null}
             </span>
           </p>
@@ -92,32 +97,28 @@ export function SwitchWithChangesDialog({
             checked={reapply}
             onCheckedChange={(v) => onReapplyChange(v === true)}
           />
-          Reapply after switching
+          {t("dialogs.switch.reapply")}
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("dialogs.common.cancel")}
           </Button>
           <Button
             variant={refused ? "default" : "outline"}
             onClick={onStashAndSwitch}
           >
-            Stash and switch
+            {t("dialogs.switch.stashAndSwitch")}
           </Button>
           <DisabledReasonButton
             // Below `sm` the footer stacks and stretches the wrapper span; the
             // Button fills it to match the plain siblings beside it.
             className="w-full"
             disabled={refused}
-            reason={
-              refused
-                ? "Git would overwrite your changes — stash and switch instead"
-                : null
-            }
+            reason={refused ? t("dialogs.switch.overwriteReason") : null}
             variant={refused ? "outline" : "default"}
             onClick={onBringChanges}
           >
-            Bring changes
+            {t("dialogs.switch.bringChanges")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

@@ -1,13 +1,18 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use tauri::menu::MenuBuilder;
+use tauri::menu::{Menu, MenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, State, Window, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, Window, WindowEvent, Wry};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::error::{AppError, AppResult};
 use crate::state::{monotonic_ms, AppState, QuitDecision};
+use crate::app_menu::NativeLanguage;
+
+struct TrayMenuState {
+    icon: tauri::tray::TrayIcon<Wry>,
+}
 
 /// What the window-state plugin persists/restores: geometry only. Visibility is
 /// deliberately excluded — the tray owns whether the window is shown, and a saved
@@ -31,13 +36,9 @@ pub fn app_display_name() -> &'static str {
 /// Builds the system-tray icon + menu. Left-click restores the window; the
 /// menu (right-click on Windows) offers Open and a real Quit.
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let language = crate::app_store::read_ui_language();
     let name = app_display_name();
-    let menu = MenuBuilder::new(app)
-        .text("open", format!("Open {name}"))
-        .separator()
-        .text("quit", "Quit")
-        .build()?;
-
+    let menu = build_tray_menu(app, language)?;
     let mut builder = TrayIconBuilder::new()
         .tooltip(name)
         .menu(&menu)
@@ -62,7 +63,40 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
-    builder.build(app)?;
+    let icon = builder.build(app)?;
+    app.manage(TrayMenuState { icon });
+    Ok(())
+}
+
+fn build_tray_menu(app: &AppHandle, language: NativeLanguage) -> tauri::Result<Menu<Wry>> {
+    let name = app_display_name();
+    MenuBuilder::new(app)
+        .text("open", language.tray_open(name))
+        .separator()
+        .text("quit", language.tray_quit())
+        .build()
+}
+
+/// Refreshes the native tray labels when the user changes the UI language.
+fn set_tray_language(app: &AppHandle, language: NativeLanguage) -> AppResult<()> {
+    let menu = build_tray_menu(app, language).map_err(|error| AppError::Command(error.to_string()))?;
+    app.state::<TrayMenuState>()
+        .icon
+        .set_menu(Some(menu))
+        .map_err(|error| AppError::Command(error.to_string()))?;
+    Ok(())
+}
+
+/// Synchronizes app menus with the persisted frontend language. Native-menu
+/// updates are best-effort in the frontend, so a setup-time or platform error
+/// does not interrupt the web UI's language change.
+#[tauri::command]
+pub fn set_native_language(app: AppHandle, language: String) -> AppResult<()> {
+    let language = NativeLanguage::parse(&language)
+        .ok_or_else(|| AppError::InvalidArgument("unsupported app language".into()))?;
+    set_tray_language(&app, language)?;
+    #[cfg(target_os = "macos")]
+    crate::app_menu::set_native_language(&app, language)?;
     Ok(())
 }
 

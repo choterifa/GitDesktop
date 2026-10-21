@@ -1,6 +1,7 @@
 // Checkout copy shared across features: branch-row naming for every branch
-// picker, and the refusal the app's HEAD-moving surfaces show. Import-free and
-// component-free, so pulls/tags/history/compare read it without a cycle.
+// picker, and the refusal the app's HEAD-moving surfaces show. Component-free,
+// so pulls/tags/history/compare read it without a cycle.
+import { i18n } from "@/lib/i18n";
 
 /** Last path segment (folder name). Git reports worktree paths forward-slashed
  *  on every platform (`UserWorktree.path`), and a backslash is a legal
@@ -17,38 +18,33 @@ export const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
  *  `noun` is bare, for badges and parenthetical reasons; `blockedTitle` is the
  *  sentence-capitalized chip-tooltip form of `blocked`, for rows that name the
  *  holding checkout without offering to open it. */
-export const ROW_CHECKOUT_COPY = {
-  linked: {
-    noun: "worktree",
-    open: "Open worktree",
-    title: (path: string) =>
-      `Checked out in worktree ${baseName(path)} (${path}) — this row opens it`,
-    opened: (path: string) => `Opened worktree ${baseName(path)}`,
-    blocked: "checked out in another worktree",
-    blockedTitle: (path: string) => `Checked out in another worktree (${path})`,
-    held: "in a worktree",
-  },
-  main: {
-    noun: "main workspace",
-    open: "Open main workspace",
-    title: (path: string) =>
-      `Checked out in the main workspace (${path}) — this row opens it`,
-    opened: (_path: string) => "Opened the main workspace",
-    blocked: "checked out in the main workspace",
-    blockedTitle: (path: string) =>
-      `Checked out in the main workspace (${path})`,
-    held: "in the main workspace",
-  },
-} as const;
-
-/** Which {@link ROW_CHECKOUT_COPY} arm a listed worktree speaks in. */
-export const rowCheckoutCopy = (isMain: boolean | undefined) =>
-  ROW_CHECKOUT_COPY[isMain ? "main" : "linked"];
+/** Copy for a branch row that points to the checkout holding its branch. */
+export const rowCheckoutCopy = (isMain: boolean | undefined) => {
+  const arm = isMain ? "main" : "linked";
+  const key = `checkoutCopy.${arm}`;
+  const t = (suffix: string, options?: Record<string, string>) =>
+    i18n.t(`${key}.${suffix}`, {
+      ns: "repositoryOperations",
+      ...options,
+    });
+  return {
+    noun: t("noun"),
+    open: t("open"),
+    title: (path: string) => t("title", { name: baseName(path), path }),
+    opened: (path: string) => t("opened", { name: baseName(path) }),
+    blocked: t("blocked"),
+    blockedTitle: (path: string) => t("blockedTitle", { path }),
+    held: t("held"),
+  };
+};
 
 /** The refusal every in-app HEAD- or branch-moving surface, and every branch
  *  delete, shows while `promotionBlocksCheckout` holds: in the main workspace the
  *  op would race the promote's own stash and checkout (or delete the branch it is
  *  about to check out), and in the promote's source worktree the folder is being
  *  removed. */
-export const PROMOTION_BLOCKS_CHECKOUT =
-  "A worktree is being promoted to your main workspace. Try again once it finishes.";
+/** The shared, current-locale refusal for HEAD-moving operations during promotion. */
+export const promotionBlocksCheckoutCopy = (): string =>
+  i18n.t("checkoutCopy.promotionBlocksCheckout", {
+    ns: "repositoryOperations",
+  });

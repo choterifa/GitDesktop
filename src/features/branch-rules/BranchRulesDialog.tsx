@@ -1,5 +1,6 @@
 import { GithubLogoIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DIALOG_SCROLL } from "@/components/dialog-scroll";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -28,7 +29,6 @@ import {
   ALL_MERGE_METHODS,
   type BranchRulesConfig,
   EMPTY_BRANCH_RULES,
-  MERGE_METHOD_LABEL,
   type MergeMethod,
 } from "@/lib/branch-rules/types";
 import { ghBranchProtections } from "@/lib/git/api";
@@ -46,6 +46,7 @@ export function BranchRulesDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("branchRules");
   // Which set of rules we're editing: the user's personal (app-data) rules or
   // the repo's shared, committed `.gitdesktop/branch-rules.json`. Both are
   // always enforced (merged) — this only chooses what this dialog edits.
@@ -201,9 +202,7 @@ export function BranchRulesDialog({
         await ghBranchProtections(repoPath),
       );
       if (mapped.length === 0) {
-        toast.info(
-          "No branch protection rules found on GitHub (reading them needs repo-admin access).",
-        );
+        toast.info(t("import.none"));
         return;
       }
       setDraft((d) => {
@@ -211,9 +210,7 @@ export function BranchRulesDialog({
         for (const m of mapped) byPattern.set(m.pattern, m);
         return { ...d, protections: [...byPattern.values()] };
       });
-      toast.success(
-        `Imported ${mapped.length} rule${mapped.length === 1 ? "" : "s"} from GitHub — review and save`,
-      );
+      toast.success(t("import.success", { count: mapped.length }));
     } catch (e) {
       toastError(e);
     } finally {
@@ -235,9 +232,7 @@ export function BranchRulesDialog({
       return;
     }
     toast.success(
-      savedShared
-        ? "Saved to .gitdesktop/branch-rules.json — commit it to share with your team"
-        : "Branch rules saved",
+      t(savedShared ? "saved.shared" : "saved.personal"),
     );
     if (
       useUiStore.getState().repoPath === savedFor &&
@@ -255,14 +250,9 @@ export function BranchRulesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Branch rules</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            Local guardrails GitDesktop enforces in this repository. They help
-            prevent accidents on any repo; GitHub's own protection still applies
-            on push. Patterns are globs — <span className="font-mono">*</span>{" "}
-            within a segment, <span className="font-mono">**</span> across{" "}
-            <span className="font-mono">/</span>,{" "}
-            <span className="font-mono">{"{a,b}"}</span> alternation.
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -276,28 +266,27 @@ export function BranchRulesDialog({
                 size="xs"
                 onClick={() => setScope("personal")}
               >
-                Personal
+                {t("scope.personal")}
               </Button>
               <Button
                 variant={scope === "shared" ? "secondary" : "ghost"}
                 size="xs"
                 onClick={() => setScope("shared")}
               >
-                Shared with repository
+                {t("scope.shared")}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {scope === "shared" ? (
                 <>
-                  Saved to{" "}
+                  {t("scope.sharedSavedLead")}{" "}
                   <span className="font-mono">
                     .gitdesktop/branch-rules.json
                   </span>{" "}
-                  and committed — everyone with the repo gets them. Combines
-                  with each person's personal rules.
+                  {t("scope.sharedSavedTail")}
                 </>
               ) : (
-                "Stored on this machine only. Your personal rules combine with the repo's shared rules."
+                t("scope.personalSaved")
               )}
             </p>
           </div>
@@ -307,19 +296,19 @@ export function BranchRulesDialog({
           ) : (
             <div className="space-y-6">
               <section className="space-y-2">
-                <h3 className="text-xs font-medium">New branch names</h3>
+                <h3 className="text-xs font-medium">{t("naming.title")}</h3>
                 <label className="flex cursor-pointer items-center gap-2 text-xs">
                   <Checkbox
                     checked={draft.naming.enabled}
                     onCheckedChange={(c) => setNaming({ enabled: c === true })}
                   />
-                  Require new branches to match a pattern
+                  {t("naming.requirePattern")}
                 </label>
                 {draft.naming.enabled && (
                   <div className="space-y-2 pl-6">
                     <div className="space-y-1">
                       <Label htmlFor={patternInputId} className="text-xs">
-                        Pattern
+                        {t("naming.pattern")}
                       </Label>
                       <Input
                         id={patternInputId}
@@ -331,7 +320,7 @@ export function BranchRulesDialog({
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={hintInputId} className="text-xs">
-                        Hint (shown when rejected)
+                        {t("naming.hint")}
                       </Label>
                       <Input
                         id={hintInputId}
@@ -342,7 +331,7 @@ export function BranchRulesDialog({
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={testNameInputId} className="text-xs">
-                        Try a name
+                        {t("naming.tryName")}
                       </Label>
                       <div className="flex items-center gap-2">
                         <Input
@@ -360,7 +349,9 @@ export function BranchRulesDialog({
                                 : "shrink-0 text-xs text-destructive"
                             }
                           >
-                            {testMatches ? "matches" : "rejected"}
+                            {testMatches
+                              ? t("naming.matches")
+                              : t("naming.rejected")}
                           </span>
                         )}
                       </div>
@@ -371,7 +362,7 @@ export function BranchRulesDialog({
 
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-medium">Protected branches</h3>
+                  <h3 className="text-xs font-medium">{t("protection.title")}</h3>
                   <div className="flex gap-1">
                     {ghReady && (
                       <Button
@@ -379,24 +370,21 @@ export function BranchRulesDialog({
                         size="xs"
                         disabled={importing}
                         onClick={importFromGitHub}
-                        title="Import GitHub's branch protection rules"
+                        title={t("protection.importTitle")}
                       >
                         <GithubLogoIcon data-icon="inline-start" />
-                        Import from GitHub
+                        {t("protection.import")}
                       </Button>
                     )}
                     <Button variant="outline" size="xs" onClick={addProtection}>
                       <PlusIcon data-icon="inline-start" />
-                      Add
+                      {t("add")}
                     </Button>
                   </div>
                 </div>
                 {draft.protections.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    No protected branches. Add one to guard branches that match
-                    a pattern (e.g. <span className="font-mono">main</span> or{" "}
-                    <span className="font-mono">release/*</span>) against
-                    deletion, force-pushes, and unwanted merge types.
+                    {t("protection.empty")}
                   </p>
                 ) : (
                   <div className="space-y-3">
@@ -419,7 +407,7 @@ export function BranchRulesDialog({
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            aria-label="Remove"
+                            aria-label={t("remove")}
                             onClick={() => removeProtection(p.id)}
                           >
                             <TrashIcon />
@@ -435,7 +423,7 @@ export function BranchRulesDialog({
                                 })
                               }
                             />
-                            Block deletion
+                            {t("protection.blockDeletion")}
                           </label>
                           <label className="flex cursor-pointer items-center gap-1.5 text-xs">
                             <Checkbox
@@ -446,7 +434,7 @@ export function BranchRulesDialog({
                                 })
                               }
                             />
-                            Block force-push
+                            {t("protection.blockForcePush")}
                           </label>
                           <label className="flex cursor-pointer items-center gap-1.5 text-xs">
                             <Checkbox
@@ -457,13 +445,15 @@ export function BranchRulesDialog({
                                 })
                               }
                             />
-                            Require pull request
+                            {t("protection.requirePullRequest")}
                           </label>
                         </div>
                         <div>
                           <span className="text-[11px] text-muted-foreground">
-                            Allowed merges into this branch
-                            {p.requirePr ? " (via pull request)" : ""}
+                            {t("protection.allowedMerges")}
+                            {p.requirePr
+                              ? ` (${t("protection.viaPullRequest")})`
+                              : ""}
                           </span>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
                             {ALL_MERGE_METHODS.map((m) => (
@@ -477,7 +467,7 @@ export function BranchRulesDialog({
                                     toggleMergeMethod(p.id, m, c === true)
                                   }
                                 />
-                                {MERGE_METHOD_LABEL[m]}
+                                {t(`mergeMethod.${m}`)}
                               </label>
                             ))}
                           </div>
@@ -490,7 +480,7 @@ export function BranchRulesDialog({
 
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-medium">Promotion branches</h3>
+                  <h3 className="text-xs font-medium">{t("promotion.title")}</h3>
                   <Button
                     ref={addPromotionRef}
                     variant="outline"
@@ -498,16 +488,12 @@ export function BranchRulesDialog({
                     onClick={addPromotionBranch}
                   >
                     <PlusIcon data-icon="inline-start" />
-                    Add
+                    {t("add")}
                   </Button>
                 </div>
                 {promotionBranches.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    No promotion branches. Add a pattern (e.g.{" "}
-                    <span className="font-mono">staging</span> or{" "}
-                    <span className="font-mono">release/*</span>) to mark pull
-                    requests from that branch as promotions — GitDesktop won't
-                    offer to update them from their base.
+                    {t("promotion.empty")}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -527,12 +513,16 @@ export function BranchRulesDialog({
                           }
                           placeholder="staging"
                           className="font-mono"
-                          aria-label={`Promotion branch pattern ${i + 1}`}
+                          aria-label={t("promotion.patternLabel", {
+                            number: i + 1,
+                          })}
                         />
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={`Remove promotion branch ${pattern || i + 1}`}
+                          aria-label={t("promotion.removeLabel", {
+                            pattern: pattern || i + 1,
+                          })}
                           onClick={() => removePromotionBranch(i)}
                         >
                           <TrashIcon />
@@ -548,7 +538,7 @@ export function BranchRulesDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("cancel")}
           </Button>
           <DisabledReasonButton
             // Below `sm` the footer stacks and stretches the wrapper span; the
@@ -559,17 +549,17 @@ export function BranchRulesDialog({
             reason={(() => {
               switch (true) {
                 case !active.data && active.isError:
-                  return "Couldn't load branch rules";
+                  return t("save.loadError");
                 case !active.data:
-                  return "Loading branch rules…";
+                  return t("save.loading");
                 case !dirty:
-                  return "No changes to save";
+                  return t("save.noChanges");
                 default:
-                  return "Saving…";
+                  return t("save.saving");
               }
             })()}
           >
-            {scope === "shared" ? "Save to repository" : "Save changes"}
+            {scope === "shared" ? t("save.shared") : t("save.personal")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

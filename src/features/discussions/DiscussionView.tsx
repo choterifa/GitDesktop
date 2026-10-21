@@ -89,6 +89,7 @@ import {
   COMMENT_DELETE_PENDING_REASON,
   COMMENT_POST_PENDING_REASON,
   OFFLINE_ITEM_REASON,
+  OFFLINE_WRITE_REASON,
   pendingItemReason,
   pendingWriteReason,
   RIDING_COMMENT_CLOSE_HELD,
@@ -107,6 +108,7 @@ import {
 import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
 import { useLatestRef } from "@/lib/use-latest-ref";
 import { cn } from "@/lib/utils";
+import { useDiscussionsText } from "./use-discussions-text";
 
 /** A discussion comment/reply shares the conversation shape minus review state. */
 function toThread(c: {
@@ -174,7 +176,8 @@ function UpvoteButton({
    *  Absent leaves a native disable, which explains nothing. */
   reason?: string | null;
 }) {
-  const title = active ? "Remove upvote" : "Upvote";
+  const tx = useDiscussionsText();
+  const title = active ? tx("Remove upvote") : tx("Upvote");
   const { blockedReason, reasonId, wrapperTitle, describedBy, nativeProps } =
     useDisabledReason({ disabled, reason, title, onClick });
 
@@ -186,7 +189,7 @@ function UpvoteButton({
       <button
         {...nativeProps}
         type="button"
-        aria-label={`Upvote, ${count}`}
+        aria-label={tx("Upvote, {{count}}", { count })}
         aria-pressed={active}
         aria-describedby={describedBy}
         title={title}
@@ -223,6 +226,7 @@ export function DiscussionView({
   repoPath: string;
   number: number;
 }) {
+  const tx = useDiscussionsText();
   const details = useDiscussionDetails(repoPath, number);
   // Discussions are a GitHub-only surface, and one that never carries the
   // origin/upstream lens — the parent's discussions aren't reachable from here.
@@ -324,7 +328,7 @@ export function DiscussionView({
     );
   }
   if (details.isError || !d) {
-    return <DiffPlaceholder message="Could not load this discussion" />;
+    return <DiffPlaceholder message={tx("Could not load this discussion")} />;
   }
 
   // Placeholder details are the previous discussion's, and every write on this
@@ -332,7 +336,7 @@ export function DiscussionView({
   // is the selected one, or they land on the discussion the viewer just left.
   const detailsStale = details.isPlaceholderData;
   // Matches the wording the PR and issue views use for the same wait.
-  const staleReason = detailsStale ? "Loading this discussion…" : undefined;
+  const staleReason = detailsStale ? tx("Loading this discussion…") : undefined;
   // A disabled menu item drops pointer events, so its reason rides the label.
   const staleSuffix = staleReason ? ` — ${staleReason}` : "";
   // The rendered discussion's own writes: another discussion's never hold this one.
@@ -375,9 +379,11 @@ export function DiscussionView({
   // outranks a write the viewer started, being the hold they can't have caused.
   // A write pressed offline is parked, not running, until the connection returns.
   // The delete's arm is also the Delete comment dialog's own reason.
-  const deleteCommentReason = pendingWriteReason(
-    deletingComment?.paused ?? false,
-    COMMENT_DELETE_PENDING_REASON,
+  const deleteCommentReason = tx(
+    pendingWriteReason(
+      deletingComment?.paused ?? false,
+      COMMENT_DELETE_PENDING_REASON,
+    ),
   );
   const busyReason = (() => {
     switch (true) {
@@ -386,10 +392,10 @@ export function DiscussionView({
       case commenting !== undefined:
         return pendingWriteReason(
           commenting.paused,
-          COMMENT_POST_PENDING_REASON,
+          tx(COMMENT_POST_PENDING_REASON),
         );
       case answering !== undefined:
-        return pendingWriteReason(answering.paused, "Updating the answer…");
+        return tx(pendingWriteReason(answering.paused, "Updating the answer…"));
       case deletingComment !== undefined:
         return deleteCommentReason;
       default:
@@ -406,7 +412,7 @@ export function DiscussionView({
       case upvotePending.pending:
         return pendingWriteReason(
           upvotePending.paused,
-          "Recording your upvote…",
+          tx("Recording your upvote…"),
         );
       default:
         return undefined;
@@ -418,19 +424,22 @@ export function DiscussionView({
   // room for a title, so the draft promise rides the label like the reasons
   // above — but a hold outranks it: a held item posts nothing.
   const draftSuffix =
-    staleSuffix || (draftRidesStateChange ? " — posts your draft" : "");
+    staleSuffix ||
+    (draftRidesStateChange ? ` — ${tx("posts your draft")}` : "");
   // A state change still in flight names itself next, below the switch window.
   const reopenSuffix =
     staleSuffix ||
     (reopening
-      ? ` — ${pendingItemReason(reopening.paused, "reopening…")}`
+      ? ` — ${tx(pendingItemReason(reopening.paused, "reopening…"))}`
       : "") ||
     draftSuffix;
   // Close also holds offline, which outranks the draft promise the same way.
   const closeSuffix =
     staleSuffix ||
-    (closing ? ` — ${pendingItemReason(closing.paused, "closing…")}` : "") ||
-    (offlineHold ? ` — ${OFFLINE_ITEM_REASON}` : "") ||
+    (closing
+      ? ` — ${tx(pendingItemReason(closing.paused, "closing…"))}`
+      : "") ||
+    (offlineHold ? ` — ${tx(OFFLINE_ITEM_REASON)}` : "") ||
     draftSuffix;
   // Lock and unlock hold rather than park, like close: a parked one would change
   // the discussion whenever the connection returns. Only this discussion's own
@@ -449,11 +458,11 @@ export function DiscussionView({
   const lockHeld = (() => {
     switch (true) {
       case locking !== undefined:
-        return pendingItemReason(locking.paused, "locking…");
+        return tx(pendingItemReason(locking.paused, "locking…"));
       case unlocking !== undefined:
-        return pendingItemReason(unlocking.paused, "unlocking…");
+        return tx(pendingItemReason(unlocking.paused, "unlocking…"));
       case !!offlineHold:
-        return OFFLINE_ITEM_REASON;
+        return tx(OFFLINE_ITEM_REASON);
       default:
         return undefined;
     }
@@ -517,7 +526,7 @@ export function DiscussionView({
       onError(e);
       return;
     }
-    toast.success("Comment updated");
+    toast.success(tx("Comment updated"));
   }
 
   async function hideComment(commentId: string, classifier: MinimizeReason) {
@@ -528,7 +537,7 @@ export function DiscussionView({
       onError(e);
       return;
     }
-    toast.success("Comment hidden");
+    toast.success(tx("Comment hidden"));
   }
 
   async function unhideComment(commentId: string) {
@@ -539,7 +548,7 @@ export function DiscussionView({
       onError(e);
       return;
     }
-    toast.success("Comment shown");
+    toast.success(tx("Comment shown"));
   }
 
   async function toggleAnswer(commentId: string, isAnswer: boolean) {
@@ -554,7 +563,7 @@ export function DiscussionView({
       onError(e);
       return;
     }
-    toast.success(isAnswer ? "Answer unmarked" : "Marked as answer");
+    toast.success(tx(isAnswer ? "Answer unmarked" : "Marked as answer"));
   }
 
   // Both subjects come off the rendered discussion while the optimistic patch
@@ -596,25 +605,37 @@ export function DiscussionView({
   // Each of these addresses the rendered discussion's id while the menu belongs to
   // the selected one; the items disable too, and these arms back them up.
   async function doLock(reason: DiscussionLockReason | null) {
-    if (!d || detailsStale || lockPending || refuseWhileOffline()) return;
+    if (
+      !d ||
+      detailsStale ||
+      lockPending ||
+      refuseWhileOffline(tx(OFFLINE_WRITE_REASON))
+    )
+      return;
     try {
       await lockDiscussion.mutateAsync({ discussionId: d.id, reason });
     } catch (e) {
       onError(e);
       return;
     }
-    toast.success("Conversation locked");
+    toast.success(tx("Conversation locked"));
   }
 
   async function doUnlock() {
-    if (!d || detailsStale || lockPending || refuseWhileOffline()) return;
+    if (
+      !d ||
+      detailsStale ||
+      lockPending ||
+      refuseWhileOffline(tx(OFFLINE_WRITE_REASON))
+    )
+      return;
     try {
       await unlockDiscussion.mutateAsync(d.id);
     } catch (e) {
       onError(e);
       return;
     }
-    toast.success("Conversation unlocked");
+    toast.success(tx("Conversation unlocked"));
   }
 
   /** Posts the riding draft ahead of a state change. False means the comment
@@ -651,15 +672,20 @@ export function DiscussionView({
     // Ahead of the riding draft: a cancelled confirm must leave the comment
     // unposted.
     const ok = await useConfirm.getState().ask({
-      title: `Close discussion #${d.number}?`,
-      body: `Everyone watching is notified and the discussion leaves the open list. Reopening puts it back, but the notification can't be unsent.${
-        withComment ? " Your draft posts as a comment first." : ""
-      }`,
-      confirmLabel: withComment ? "Close with comment" : "Close discussion",
+      title: tx("Close discussion #{{number}}?", { number: d.number }),
+      body: tx(
+        "Everyone watching is notified and the discussion leaves the open list. Reopening puts it back, but the notification can't be unsent.{{draft}}",
+        {
+          draft: withComment
+            ? ` ${tx("Your draft posts as a comment first.")}`
+            : "",
+        },
+      ),
+      confirmLabel: tx(withComment ? "Close with comment" : "Close discussion"),
       holdOffline: true,
     });
     // Ahead of the riding draft too: a close refused offline posts nothing.
-    if (!ok || refuseWhileOffline()) return;
+    if (!ok || refuseWhileOffline(tx(OFFLINE_WRITE_REASON))) return;
     if (
       refuseIfSwitched(
         closeIn,
@@ -670,7 +696,11 @@ export function DiscussionView({
     // Again below the riding post: the connection can drop while it runs, and a
     // comment that went out is named in the refusal.
     if (!(await postRidingDraft(d.id))) return;
-    if (refuseWhileOffline(withComment ? RIDING_COMMENT_CLOSE_HELD : undefined))
+    if (
+      refuseWhileOffline(
+        withComment ? tx(RIDING_COMMENT_CLOSE_HELD) : tx(OFFLINE_WRITE_REASON),
+      )
+    )
       return;
     if (
       withComment &&
@@ -687,12 +717,12 @@ export function DiscussionView({
       if (withComment)
         toastErrorWithNote(
           e,
-          "Your comment was posted, but closing failed — try Close again.",
+          tx("Your comment was posted, but closing failed — try Close again."),
         );
       else onError(e);
       return;
     }
-    toast.success("Discussion closed");
+    toast.success(tx("Discussion closed"));
   }
 
   async function doReopen() {
@@ -717,16 +747,19 @@ export function DiscussionView({
       if (withComment)
         toastErrorWithNote(
           e,
-          "Your comment was posted, but reopening failed — try Reopen again.",
+          tx(
+            "Your comment was posted, but reopening failed — try Reopen again.",
+          ),
         );
       else onError(e);
       return;
     }
-    toast.success("Discussion reopened");
+    toast.success(tx("Discussion reopened"));
   }
 
   async function doDelete() {
-    if (!d || detailsStale || refuseWhileOffline()) return;
+    if (!d || detailsStale || refuseWhileOffline(tx(OFFLINE_WRITE_REASON)))
+      return;
     const startedFor = discussionIdentity;
     const closeIfStillHere = () => {
       if (startedFor === discussionIdentityRef.current)
@@ -739,7 +772,7 @@ export function DiscussionView({
       closeIfStillHere();
       return;
     }
-    toast.success("Discussion deleted");
+    toast.success(tx("Discussion deleted"));
     closeIfStillHere();
     // `selectDiscussion` is a global store write that outlives this view, so a
     // delete settling after the viewer moved on (another discussion, another
@@ -765,7 +798,7 @@ export function DiscussionView({
       closeIfStillOpen();
       return;
     }
-    toast.success("Comment deleted");
+    toast.success(tx("Comment deleted"));
     closeIfStillOpen();
   }
 
@@ -784,7 +817,7 @@ export function DiscussionView({
             variant="outline"
             size="xs"
             onClick={() => openUrl(d.url)}
-            title="Open this discussion on GitHub"
+            title={tx("Open this discussion on GitHub")}
             className="cursor-pointer"
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
@@ -793,29 +826,35 @@ export function DiscussionView({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="outline" size="xs" aria-label="More actions" />
+                <Button
+                  variant="outline"
+                  size="xs"
+                  aria-label={tx("More actions")}
+                />
               }
             >
               <DotsThreeIcon className="size-4" weight="bold" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-52">
-              <DropdownMenuItem onClick={() => copyText(d.url, "Link copied")}>
-                Copy link
+              <DropdownMenuItem
+                onClick={() => copyText(d.url, tx("Link copied"))}
+              >
+                {tx("Copy link")}
               </DropdownMenuItem>
               {!detailsStale && (
                 <DropdownMenuItem onClick={referenceInNewIssue}>
-                  Create issue from discussion
+                  {tx("Create issue from discussion")}
                 </DropdownMenuItem>
               )}
               {/* Pin and transfer aren't in GitHub's public API (GraphQL or
                   CLI) — open the discussion on GitHub where the web UI has them. */}
               <DropdownMenuItem onClick={() => openUrl(d.url)}>
                 <ArrowSquareOutIcon data-icon="inline-start" />
-                Pin on GitHub…
+                {tx("Pin on GitHub…")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => openUrl(d.url)}>
                 <ArrowSquareOutIcon data-icon="inline-start" />
-                Transfer on GitHub…
+                {tx("Transfer on GitHub…")}
               </DropdownMenuItem>
               {d.closed ? (
                 <DropdownMenuItem
@@ -823,7 +862,8 @@ export function DiscussionView({
                   disabled={reopening !== undefined || detailsStale}
                   onClick={() => void doReopen()}
                 >
-                  Reopen discussion{reopenSuffix}
+                  {tx("Reopen discussion")}
+                  {reopenSuffix}
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuSub>
@@ -838,7 +878,8 @@ export function DiscussionView({
                       "data-disabled:opacity-50",
                     )}
                   >
-                    Close discussion…{closeSuffix}
+                    {tx("Close discussion…")}
+                    {closeSuffix}
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     {CLOSE_REASONS.map(([label, reason]) => (
@@ -850,7 +891,7 @@ export function DiscussionView({
                         }
                         onClick={() => void doClose(reason)}
                       >
-                        {label}
+                        {tx(label)}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuSubContent>
@@ -862,7 +903,8 @@ export function DiscussionView({
                   disabled={lockBlocked}
                   onClick={() => void doUnlock()}
                 >
-                  Unlock conversation{lockSuffix}
+                  {tx("Unlock conversation")}
+                  {lockSuffix}
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuSub>
@@ -870,7 +912,8 @@ export function DiscussionView({
                     disabled={lockBlocked}
                     className="data-disabled:opacity-50"
                   >
-                    Lock conversation…{lockSuffix}
+                    {tx("Lock conversation…")}
+                    {lockSuffix}
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     {LOCK_REASONS.map(([label, reason]) => (
@@ -880,7 +923,7 @@ export function DiscussionView({
                         disabled={lockBlocked}
                         onClick={() => void doLock(reason)}
                       >
-                        {label}
+                        {tx(label)}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuSubContent>
@@ -891,7 +934,8 @@ export function DiscussionView({
                 disabled={detailsStale}
                 onClick={() => setDeletingDiscussion(true)}
               >
-                Delete discussion{staleSuffix}
+                {tx("Delete discussion")}
+                {staleSuffix}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -901,27 +945,28 @@ export function DiscussionView({
             {d.categoryEmoji ? `${d.categoryEmoji} ` : ""}
             {d.categoryName}
           </Badge>
-          {d.isAnswered && <Badge variant="default">answered</Badge>}
+          {d.isAnswered && <Badge variant="default">{tx("answered")}</Badge>}
           {d.locked && (
             <Badge variant="secondary">
-              locked
+              {tx("locked")}
               {d.activeLockReason
-                ? ` · ${d.activeLockReason.toLowerCase().replace(/_/g, "-")}`
+                ? ` · ${tx(d.activeLockReason.toLowerCase().replace(/_/g, "-"))}`
                 : ""}
             </Badge>
           )}
           {d.closed && (
             <Badge variant="secondary">
-              closed{d.stateReason ? ` · ${d.stateReason.toLowerCase()}` : ""}
+              {tx("closed")}
+              {d.stateReason ? ` · ${tx(d.stateReason.toLowerCase())}` : ""}
             </Badge>
           )}
           <AuthorAvatar login={d.author} />
-          <span>{d.author || "unknown"}</span>
+          <span>{d.author || tx("unknown")}</span>
           {parseableDate(d.createdAt) && (
             <>
               <span>•</span>
               <span>
-                opened <RelativeTime date={d.createdAt} />
+                {tx("opened")} <RelativeTime date={d.createdAt} />
               </span>
             </>
           )}
@@ -952,10 +997,10 @@ export function DiscussionView({
           <div className="group space-y-1">
             <p className="flex items-center gap-2 text-xs">
               <AuthorAvatar login={d.author} />
-              <span className="font-medium">{d.author || "unknown"}</span>
+              <span className="font-medium">{d.author || tx("unknown")}</span>
               {parseableDate(d.createdAt) && (
                 <span className="text-muted-foreground">
-                  opened <RelativeTime date={d.createdAt} />
+                  {tx("opened")} <RelativeTime date={d.createdAt} />
                 </span>
               )}
               <span className="flex-1" />
@@ -965,7 +1010,7 @@ export function DiscussionView({
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      aria-label="Description actions"
+                      aria-label={tx("Description actions")}
                       className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                     />
                   }
@@ -974,22 +1019,22 @@ export function DiscussionView({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-44">
                   <DropdownMenuItem
-                    onClick={() => copyText(d.url, "Link copied")}
+                    onClick={() => copyText(d.url, tx("Link copied"))}
                   >
-                    Copy link
+                    {tx("Copy link")}
                   </DropdownMenuItem>
                   {/* Absent, not disabled, while the body belongs to the previous
                       discussion — the same shape the comment menus take when their
                       `onQuote` is withheld. */}
                   {hasVisibleBody(d.body) && !detailsStale && (
                     <DropdownMenuItem onClick={() => quoteReply(d.body)}>
-                      Quote reply
+                      {tx("Quote reply")}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
-                    onClick={() => copyText(d.body, "Markdown copied")}
+                    onClick={() => copyText(d.body, tx("Markdown copied"))}
                   >
-                    Copy markdown
+                    {tx("Copy markdown")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -998,7 +1043,7 @@ export function DiscussionView({
               <Markdown refs={mentions.refs}>{d.body}</Markdown>
             ) : (
               <p className="text-xs text-muted-foreground italic">
-                No description provided.
+                {tx("No description provided.")}
               </p>
             )}
             {/* The counts are a read and stay; the toggles hold through a
@@ -1027,7 +1072,7 @@ export function DiscussionView({
                 {c.isAnswer && (
                   <p className="flex items-center gap-1 text-[11px] font-medium text-success">
                     <CheckCircleIcon className="size-3.5" weight="fill" />
-                    Answer
+                    {tx("Answer")}
                   </p>
                 )}
                 <Thread
@@ -1087,7 +1132,7 @@ export function DiscussionView({
                     }))
                   }
                 >
-                  Reply
+                  {tx("Reply")}
                 </DisabledReasonButton>
                 {d.isAnswerable && (
                   <DisabledReasonButton
@@ -1098,7 +1143,7 @@ export function DiscussionView({
                     onClick={() => void toggleAnswer(c.id, c.isAnswer)}
                   >
                     <CheckCircleIcon data-icon="inline-start" />
-                    {c.isAnswer ? "Unmark answer" : "Mark as answer"}
+                    {tx(c.isAnswer ? "Unmark answer" : "Mark as answer")}
                   </DisabledReasonButton>
                 )}
               </div>
@@ -1146,8 +1191,8 @@ export function DiscussionView({
                     <div className="space-y-2">
                       <MarkdownEditor
                         autoFocus
-                        aria-label="Write a reply"
-                        placeholder="Write a reply…"
+                        aria-label={tx("Write a reply")}
+                        placeholder={tx("Write a reply…")}
                         value={reply.value.body}
                         onChange={(v) =>
                           reply.set((prev) => ({ ...prev, body: v }))
@@ -1178,14 +1223,14 @@ export function DiscussionView({
                           onClick={() => void submitReply(c.id)}
                           title={SUBMIT_HINT}
                         >
-                          Reply
+                          {tx("Reply")}
                         </DisabledReasonButton>
                         <Button
                           size="xs"
                           variant="ghost"
                           onClick={() => reply.set(EMPTY_REPLY)}
                         >
-                          Cancel
+                          {tx("Cancel")}
                         </Button>
                       </div>
                     </div>
@@ -1195,7 +1240,9 @@ export function DiscussionView({
             </div>
           ))}
           {d.comments.length === 0 && (
-            <p className="text-xs text-muted-foreground">No comments yet.</p>
+            <p className="text-xs text-muted-foreground">
+              {tx("No comments yet.")}
+            </p>
           )}
         </div>
       </ConversationScrollArea>
@@ -1207,7 +1254,7 @@ export function DiscussionView({
             repository-discussion writes — warn only when neither is present. */}
         <ScopeRefreshHint
           scope="write:discussion"
-          action="Writing in discussions"
+          action={tx("Writing in discussions")}
           coveredBy={["repo"]}
         />
       </div>
@@ -1217,9 +1264,9 @@ export function DiscussionView({
         onChange={compose.set}
         onSubmit={() => void submitComment()}
         onClear={() => compose.set("")}
-        submitLabel="Comment"
-        ariaLabel="Add to the discussion"
-        placeholder="Add to the discussion…"
+        submitLabel={tx("Comment")}
+        ariaLabel={tx("Add to the discussion")}
+        placeholder={tx("Add to the discussion…")}
         mentions={mentions}
         busy={busy}
         reason={busyReason}
@@ -1236,10 +1283,12 @@ export function DiscussionView({
       <Dialog open={deletingDiscussion} onOpenChange={setDeletingDiscussion}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete this discussion?</DialogTitle>
+            <DialogTitle>{tx("Delete this discussion?")}</DialogTitle>
             <DialogDescription>
-              This permanently deletes "{d.title}" and all of its comments on
-              GitHub. This cannot be undone.
+              {tx(
+                'This permanently deletes "{{title}}" and all of its comments on GitHub. This cannot be undone.',
+                { title: d.title },
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1247,7 +1296,7 @@ export function DiscussionView({
               variant="outline"
               onClick={() => setDeletingDiscussion(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <DisabledReasonButton
               variant="destructive"
@@ -1255,17 +1304,17 @@ export function DiscussionView({
               reason={(() => {
                 switch (true) {
                   case deleting !== undefined:
-                    return ACT_PENDING_REASON;
+                    return tx(ACT_PENDING_REASON);
                   case staleReason !== undefined:
                     return staleReason;
                   default:
-                    return offlineHold;
+                    return offlineHold ? tx(offlineHold) : undefined;
                 }
               })()}
               onClick={() => void doDelete()}
             >
               {deleting !== undefined && <Spinner data-icon="inline-start" />}
-              Delete
+              {tx("Delete")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>

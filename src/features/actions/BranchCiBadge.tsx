@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   forgeFeatureReady,
   useForgeStatus,
@@ -16,6 +17,7 @@ import { StatusIcon, statusLabel } from "./status";
  * arrival doesn't squeeze the branch name.
  */
 export function BranchCiBadge({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("actions");
   const gh = useForgeStatus(repoPath);
   // Renders for any provider with CI read implemented — GitHub Actions or GitLab
   // pipelines; useLatestRun routes through the provider-neutral forge_ci_run_list.
@@ -56,7 +58,10 @@ export function BranchCiBadge({ repoPath }: { repoPath: string }) {
       // the name truncating inside it; in a compact one the name is hidden and
       // the automatic minimum is that same floor. The title keeps the meaning.
       className="flex shrink-20 items-center @4xl/repo-header:min-w-6.5 gap-1.5 rounded-none px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-      title={`${run.workflowName}: ${statusLabel(run.status, run.conclusion)} — view in Actions`}
+      title={t("badge.ciTitle", {
+        name: run.workflowName,
+        status: statusLabel(run.status, run.conclusion),
+      })}
       onClick={() => {
         selectRun(run.id);
         setRepoTab("actions");

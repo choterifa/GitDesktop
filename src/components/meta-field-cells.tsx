@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { clipTitleFromText } from "@/lib/clip-title";
 import type { ForgeUserRef } from "@/lib/git/types";
@@ -6,15 +7,6 @@ import type { ForgeUserRef } from "@/lib/git/types";
 /** A blank grid cell reads as a broken render, so an empty field says it has
  *  nothing instead. The dash is decorative; the word beside it is what a screen
  *  reader hears, the cell's own label having already named the field. */
-const EMPTY_CELL = (
-  <>
-    <span aria-hidden className="text-muted-foreground">
-      —
-    </span>
-    <span className="sr-only">None</span>
-  </>
-);
-
 /**
  * The value half of a header meta field (labels, assignees, projects,
  * reviewers), paired in the grid with either its picker's trigger or a
@@ -38,6 +30,7 @@ export function MetaValueCell({
   busy?: boolean;
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("components");
   return (
     <div
       role="group"
@@ -49,10 +42,19 @@ export function MetaValueCell({
           for readers that announce it. */}
       {busy ? (
         <span role="status" className="sr-only">
-          Loading {label.toLowerCase()}…
+          {t("meta.loadingField", { label: label.toLowerCase() })}
         </span>
       ) : null}
-      {empty ? EMPTY_CELL : children}
+      {empty ? (
+        <>
+          <span aria-hidden className="text-muted-foreground">
+            —
+          </span>
+          <span className="sr-only">{t("meta.none")}</span>
+        </>
+      ) : (
+        children
+      )}
     </div>
   );
 }

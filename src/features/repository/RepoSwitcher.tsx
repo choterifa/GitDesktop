@@ -7,6 +7,7 @@ import {
   TreeStructureIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { clipTitle } from "@/lib/clip-title";
 import { normPath } from "@/lib/git/path";
@@ -43,6 +44,7 @@ function ActionRow({
 }
 
 export function RepoSwitcher() {
+  const { t } = useTranslation("repositoryOperations");
   const repoName = useUiStore((s) => s.repoName);
   const repoPath = useUiStore((s) => s.repoPath);
   // In a linked worktree `repoPath` names the worktree FOLDER, so the slot would
@@ -85,7 +87,7 @@ export function RepoSwitcher() {
     alias ??
     (inLinkedWorktree && mainWt
       ? repoNameFromPath(mainWt.path)
-      : (repoName ?? "Repository"));
+      : (repoName ?? t("repoSwitcher.repository")));
   // Both sides must resolve — line 1 names the repo from `mainWt` — so a still
   // loading or failed worktree query renders the plain single line.
   const worktreeName =
@@ -101,6 +103,8 @@ export function RepoSwitcher() {
             <Button
               variant="ghost"
               size="sm"
+              aria-label={t("repoSwitcher.switchCurrent", { repo: repoLabel })}
+              title={t("repoSwitcher.switch")}
               // A wide header never shrinks the repo name (the vendored
               // Button's shrink-0). A compact one caps it at 12 characters and
               // lets it shrink at weight 1 down to its chrome; shrink is
@@ -130,7 +134,9 @@ export function RepoSwitcher() {
                       weight="bold"
                       aria-hidden
                     />
-                    <span className="sr-only">worktree </span>
+                    <span className="sr-only">
+                      {t("repoSwitcher.worktree")}{" "}
+                    </span>
                     <span
                       className="min-w-0 truncate"
                       onMouseEnter={clipTitle(worktreeName)}
@@ -171,7 +177,7 @@ export function RepoSwitcher() {
                     dispatchAction("add-local-repository");
                   }}
                 >
-                  Open repository…
+                  {t("repoSwitcher.open")}
                 </ActionRow>
                 <ActionRow
                   icon={DownloadSimpleIcon}
@@ -180,7 +186,7 @@ export function RepoSwitcher() {
                     dispatchAction("clone-repository");
                   }}
                 >
-                  Clone repository…
+                  {t("repoSwitcher.clone")}
                 </ActionRow>
                 <ActionRow
                   icon={FolderPlusIcon}
@@ -189,7 +195,7 @@ export function RepoSwitcher() {
                     dispatchAction("new-repository");
                   }}
                 >
-                  Create repository…
+                  {t("repoSwitcher.create")}
                 </ActionRow>
               </div>
             </Popover.Popup>

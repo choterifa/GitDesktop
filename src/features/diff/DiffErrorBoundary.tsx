@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 interface Props {
   /** When this changes, a caught error is cleared (e.g. a new file/commit). */
   resetKey: string;
+  message: string;
+  retryLabel: string;
   children: ReactNode;
 }
 
@@ -39,13 +41,13 @@ export class DiffErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
-          <p className="text-xs">This file's diff couldn't be displayed.</p>
+          <p className="text-xs">{this.props.message}</p>
           <Button
             size="xs"
             variant="outline"
             onClick={() => this.setState({ error: null })}
           >
-            Try again
+            {this.props.retryLabel}
           </Button>
         </div>
       );

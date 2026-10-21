@@ -14,6 +14,7 @@ import {
   PipelinesDisabledBanner,
 } from "./BitbucketVariablesSection";
 import { RemoteListSection } from "./parts";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 /** Bitbucket deployment environments (read-only). Environments are created and
  *  managed on Bitbucket — there's no create/edit here — so this section just
@@ -27,6 +28,7 @@ export function BitbucketEnvironmentsSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const config = useBbPipelinesConfig(repoPath, open);
   const setEnabled = useBbSetPipelinesEnabled(repoPath);
   const enabled = config.data?.enabled ?? false;
@@ -40,7 +42,7 @@ export function BitbucketEnvironmentsSection({
   async function handleEnablePipelines() {
     try {
       await setEnabled.mutateAsync(true);
-      toast.success("Pipelines enabled");
+      toast.success(tx("Pipelines enabled"));
     } catch (e) {
       toastError(e);
     }
@@ -62,7 +64,7 @@ export function BitbucketEnvironmentsSection({
       <div className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            Deployment environments for Pipelines. Managed on Bitbucket.
+            {tx("Deployment environments for Pipelines. Managed on Bitbucket.")}
           </p>
           {webUrl && (
             <button
@@ -74,7 +76,7 @@ export function BitbucketEnvironmentsSection({
                 )
               }
             >
-              Manage on Bitbucket…
+              {tx("Manage on Bitbucket…")}
               <ArrowSquareOutIcon className="size-3 shrink-0" />
             </button>
           )}
@@ -84,12 +86,12 @@ export function BitbucketEnvironmentsSection({
           query={environments}
           rowCount={environments.data?.length ?? 0}
           noun="environments"
-          loadFailed="Couldn't load environments."
+          loadFailed={tx("Couldn't load environments.")}
           extraPaused={config.isPaused}
-          emptyLabel="No deployment environments."
+          emptyLabel={tx("No deployment environments.")}
           skeletonClassName="h-11 w-full"
-          errorTitle="Couldn't load environments"
-          errorHint="If this is a permissions error, viewing deployment environments needs admin on this repository."
+          errorTitle={tx("Couldn't load environments")}
+          errorHint={tx("If this is a permissions error, viewing deployment environments needs admin on this repository.")}
         >
           {environments.data?.map((env) => (
             <EnvironmentRow key={env.uuid} environment={env} />
@@ -101,6 +103,7 @@ export function BitbucketEnvironmentsSection({
 }
 
 function EnvironmentRow({ environment }: { environment: BbEnvironment }) {
+  const tx = useRepoSettingsText();
   const showType =
     environment.environmentType.length > 0 &&
     environment.environmentType !== environment.name;
@@ -117,11 +120,11 @@ function EnvironmentRow({ environment }: { environment: BbEnvironment }) {
         )}
       </div>
       {environment.hidden && (
-        <span className="shrink-0 text-muted-foreground">Not yet used</span>
+        <span className="shrink-0 text-muted-foreground">{tx("Not yet used")}</span>
       )}
       {environment.adminOnly && (
         <span className="shrink-0 text-muted-foreground">
-          Admin-only deploys
+          {tx("Admin-only deploys")}
         </span>
       )}
     </div>

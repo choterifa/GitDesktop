@@ -8,6 +8,7 @@ import { IssuePicker, StateIcon } from "@/features/issues/IssueRelations";
 import type { RemoteLens } from "@/lib/git/types";
 import type { JiraLink } from "@/lib/jira/store";
 import { JiraIssuePicker, JiraStatusIcon } from "./JiraIssuePicker";
+import { usePullsText } from "./use-pulls-text";
 
 /** One linked-issue chip: a real repo issue the PR will reference on create. The
  *  keyword becomes a `Closes #N` / `Relates to #N` line appended to the body. */
@@ -37,11 +38,6 @@ export interface JiraMentionChip {
 /** The state clause in a chip's accessible name. An unrecognized state (a
  *  just-picked issue seeds "" until the probe resolves) says nothing — no "Open
  *  issue." lie and no dangling sentence. */
-const STATE_SENTENCE: Partial<Record<string, string>> = {
-  OPEN: "Open issue. ",
-  CLOSED: "Closed issue. ",
-};
-
 /**
  * Moves focus to whatever survives removing the chip at `index`, BEFORE it goes;
  * both bands call it ahead of every removal, Delete and ✕ alike. Inside a modal
@@ -126,6 +122,7 @@ function NativeLinkedIssuesField({
   onPick,
   disabled,
 }: NativeFieldProps) {
+  const tx = usePullsText();
   const [pickerOpen, setPickerOpen] = useState(false);
   // Roving tabindex: the band is a single tab stop; ArrowLeft/Right move the
   // roved index, which sets which chip is focusable + focused.
@@ -182,7 +179,7 @@ function NativeLinkedIssuesField({
 
   return (
     <LabeledGroup
-      label="Linked issues"
+      label={tx("Linked issues")}
       className="space-y-1.5"
       actions={
         <Popover.Root open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -195,12 +192,12 @@ function NativeLinkedIssuesField({
                 variant="outline"
                 size="xs"
                 disabled={disabled}
-                aria-label="Link an issue"
+                aria-label={tx("Link an issue")}
               />
             }
           >
             <LinkIcon data-icon="inline-start" />
-            Link issue
+            {tx("Link issue")}
           </Popover.Trigger>
           <Popover.Portal container={portalContainer}>
             <Popover.Positioner
@@ -215,7 +212,7 @@ function NativeLinkedIssuesField({
                   render={<p />}
                   className="px-1 pb-1.5 text-xs font-medium"
                 >
-                  Link issue
+                  {tx("Link issue")}
                 </Popover.Title>
                 <IssuePicker
                   repoPath={repoPath}
@@ -238,14 +235,22 @@ function NativeLinkedIssuesField({
           <div className="flex flex-wrap items-center gap-1.5">
             {ordered.map((chip, index) => {
               const keywordLabel =
-                chip.keyword === "closes" ? "Closes" : "Relates to";
+                chip.keyword === "closes" ? tx("Closes") : tx("Relates to");
               const keywordHint =
                 chip.aiSuggestedClose && chip.keyword === "relates"
-                  ? `AI suggests this pull request closes #${chip.number} — click to switch to Closes.`
+                  ? tx(
+                      "AI suggests this pull request closes #{{number}} — click to switch to Closes.",
+                      { number: chip.number },
+                    )
                   : undefined;
-              const stateSentence = STATE_SENTENCE[chip.state] ?? "";
+              const stateSentence =
+                chip.state === "OPEN"
+                  ? tx("Open issue. ")
+                  : chip.state === "CLOSED"
+                    ? tx("Closed issue. ")
+                    : "";
               const switchTo =
-                chip.keyword === "closes" ? "Relates to" : "Closes";
+                chip.keyword === "closes" ? tx("Relates to") : tx("Closes");
               return (
                 <span
                   key={chip.number}
@@ -259,7 +264,16 @@ function NativeLinkedIssuesField({
                     }}
                     tabIndex={index === effectiveFocusIndex ? 0 : -1}
                     title={keywordHint}
-                    aria-label={`${keywordLabel} issue ${chip.number}: ${chip.title}. ${stateSentence}Press Enter to switch to ${switchTo}, Delete to remove.`}
+                    aria-label={tx(
+                      "{{keyword}} issue {{number}}: {{title}}. {{state}}Press Enter to switch to {{switchTo}}, Delete to remove.",
+                      {
+                        keyword: keywordLabel,
+                        number: chip.number,
+                        title: chip.title,
+                        state: stateSentence,
+                        switchTo,
+                      },
+                    )}
                     onClick={() => onToggleKeyword(chip.number)}
                     onFocus={() => setFocusIndex(index)}
                     onKeyDown={(e) => onChipKeyDown(e, index)}
@@ -288,7 +302,9 @@ function NativeLinkedIssuesField({
                     variant="ghost"
                     size="icon-xs"
                     tabIndex={-1}
-                    aria-label={`Remove #${chip.number}`}
+                    aria-label={tx("Remove #{{number}}", {
+                      number: chip.number,
+                    })}
                     className="text-muted-foreground"
                     onClick={(e) => removeAt(index, e.currentTarget)}
                   >
@@ -299,7 +315,7 @@ function NativeLinkedIssuesField({
             })}
           </div>
           <p className="text-xs text-muted-foreground">
-            Added to the description on create.
+            {tx("Added to the description on create.")}
           </p>
         </>
       )}
@@ -319,6 +335,7 @@ function JiraMentionsField({
   onPick,
   disabled,
 }: JiraFieldProps) {
+  const tx = usePullsText();
   const [pickerOpen, setPickerOpen] = useState(false);
   // Roving tabindex: the band is a single tab stop; ArrowLeft/Right move the
   // roved index, which sets which chip is focusable + focused.
@@ -372,7 +389,7 @@ function JiraMentionsField({
 
   return (
     <LabeledGroup
-      label="Linked issues"
+      label={tx("Linked issues")}
       className="space-y-1.5"
       actions={
         <Popover.Root open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -384,12 +401,12 @@ function JiraMentionsField({
                 variant="outline"
                 size="xs"
                 disabled={disabled}
-                aria-label="Link an issue"
+                aria-label={tx("Link an issue")}
               />
             }
           >
             <LinkIcon data-icon="inline-start" />
-            Link issue
+            {tx("Link issue")}
           </Popover.Trigger>
           <Popover.Portal container={portalContainer}>
             <Popover.Positioner
@@ -403,7 +420,7 @@ function JiraMentionsField({
                   render={<p />}
                   className="px-1 pb-1.5 text-xs font-medium"
                 >
-                  Link issue
+                  {tx("Link issue")}
                 </Popover.Title>
                 <JiraIssuePicker
                   repoPath={repoPath}
@@ -430,7 +447,7 @@ function JiraMentionsField({
               // no dangling sentence.
               const cat = chip.statusCategory.toLowerCase();
               const stateSentence =
-                cat === "done" ? "Done. " : cat ? "Open. " : "";
+                cat === "done" ? tx("Done. ") : cat ? tx("Open. ") : "";
               const summary = chip.summary || chip.key;
               return (
                 <span
@@ -444,7 +461,10 @@ function JiraMentionsField({
                       chipRefs.current[index] = el;
                     }}
                     tabIndex={index === effectiveFocusIndex ? 0 : -1}
-                    aria-label={`Relates to ${chip.key}: ${summary}. ${stateSentence}Press Delete to remove.`}
+                    aria-label={tx(
+                      "Relates to {{key}}: {{summary}}. {{state}}Press Delete to remove.",
+                      { key: chip.key, summary, state: stateSentence },
+                    )}
                     onFocus={() => setFocusIndex(index)}
                     onKeyDown={(e) => onChipKeyDown(e, index)}
                     className="inline-flex items-center gap-1 cursor-default rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
@@ -452,7 +472,9 @@ function JiraMentionsField({
                     {chip.source === "ai" && (
                       <SparkleIcon className="size-3 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="text-muted-foreground">Relates to</span>
+                    <span className="text-muted-foreground">
+                      {tx("Relates to")}
+                    </span>
                     <span className="font-mono text-muted-foreground">
                       {chip.key}
                     </span>
@@ -464,7 +486,7 @@ function JiraMentionsField({
                     variant="ghost"
                     size="icon-xs"
                     tabIndex={-1}
-                    aria-label={`Remove ${chip.key}`}
+                    aria-label={tx("Remove {{key}}", { key: chip.key })}
                     className="text-muted-foreground"
                     onClick={(e) => removeAt(index, e.currentTarget)}
                   >
@@ -475,7 +497,7 @@ function JiraMentionsField({
             })}
           </div>
           <p className="text-xs text-muted-foreground">
-            Added to the description on create.
+            {tx("Added to the description on create.")}
           </p>
         </>
       )}

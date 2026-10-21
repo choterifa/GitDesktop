@@ -32,6 +32,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 function validKey(k: string): boolean {
   return /^[A-Za-z0-9_]{1,255}$/.test(k);
@@ -49,6 +50,7 @@ export function BitbucketVariablesSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const config = useBbPipelinesConfig(repoPath, open);
   const setEnabled = useBbSetPipelinesEnabled(repoPath);
   const enabled = config.data?.enabled ?? false;
@@ -69,7 +71,7 @@ export function BitbucketVariablesSection({
   async function handleEnablePipelines() {
     try {
       await setEnabled.mutateAsync(true);
-      toast.success("Pipelines enabled");
+      toast.success(tx("Pipelines enabled"));
     } catch (e) {
       toastError(e);
     }
@@ -89,10 +91,10 @@ export function BitbucketVariablesSection({
   const keyTaken = (variables.data ?? []).some((v) => v.key === key.trim());
   const keyWarning = key.trim()
     ? keyTaken
-      ? "A variable with this key already exists — edit it below."
+      ? tx("A variable with this key already exists — edit it below.")
       : validKey(key.trim())
         ? null
-        : "Keys use only letters, digits, and underscores."
+        : tx("Keys use only letters, digits, and underscores.")
     : null;
   // Every hold carries a reason, so Add never goes natively disabled and keeps
   // focus through a save, including the field reset after one succeeds.
@@ -103,11 +105,11 @@ export function BitbucketVariablesSection({
       case create.isPending:
         return ACT_PENDING_REASON;
       case !key.trim():
-        return "Enter a variable key";
+        return tx("Enter a variable key");
       case keyWarning !== null:
         return keyWarning;
       case value.length === 0:
-        return "Enter a variable value";
+        return tx("Enter a variable value");
       default:
         return undefined;
     }
@@ -152,7 +154,7 @@ export function BitbucketVariablesSection({
       await create.mutateAsync({ key: key.trim(), value, secured });
       patchRow(created);
       reconcileAfterWrite();
-      toast.success(`Added ${key.trim()}`);
+      toast.success(tx("Added {{key}}", { key: key.trim() }));
       setKey("");
       setValue("");
       setSecured(false);
@@ -164,7 +166,7 @@ export function BitbucketVariablesSection({
   async function handleRemove(uuid: string, variableKey: string) {
     try {
       await remove.mutateAsync(uuid);
-      toast.success(`Deleted ${variableKey}`);
+      toast.success(tx("Deleted {{key}}", { key: variableKey }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -188,7 +190,7 @@ export function BitbucketVariablesSection({
             <Input
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder="value"
+              placeholder={tx("value")}
               autoComplete="off"
               spellCheck={false}
               className="font-mono"
@@ -204,7 +206,7 @@ export function BitbucketVariablesSection({
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}
-              Add
+              {tx("Add")}
             </DisabledReasonButton>
           </div>
           <Label className="flex items-center gap-1.5 text-xs">
@@ -212,10 +214,10 @@ export function BitbucketVariablesSection({
               checked={secured}
               onCheckedChange={(v) => setSecured(v === true)}
             />
-            Secured
+            {tx("Secured")}
           </Label>
           <p className="text-[11px] text-muted-foreground">
-            A secured variable's value can't be read back.
+            {tx("A secured variable's value can't be read back.")}
           </p>
           {keyWarning && (
             <p className="text-[11px] text-warning">{keyWarning}</p>
@@ -226,12 +228,12 @@ export function BitbucketVariablesSection({
           query={variables}
           rowCount={variables.data?.length ?? 0}
           noun="variables"
-          loadFailed="Couldn't load variables."
+          loadFailed={tx("Couldn't load variables.")}
           extraPaused={config.isPaused}
-          emptyLabel="No pipeline variables yet."
+          emptyLabel={tx("No pipeline variables yet.")}
           skeletonClassName="h-11 w-full"
-          errorTitle="Couldn't load variables."
-          errorHint="If this is a permissions error, managing pipeline variables needs admin on this repository."
+          errorTitle={tx("Couldn't load variables.")}
+          errorHint={tx("If this is a permissions error, managing pipeline variables needs admin on this repository.")}
         >
           {variables.data?.map((v) => (
             <VariableRow
@@ -274,6 +276,7 @@ function VariableRow({
   onCancel: () => void;
   onRemove: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const update = useBbUpdateVariable(repoPath);
   const [draft, setDraft] = useState(
     variable.secured ? "" : (variable.value ?? ""),
@@ -294,7 +297,7 @@ function VariableRow({
   const saveHeldReason = (() => {
     switch (true) {
       case syncing:
-        return "Syncing with Bitbucket…";
+        return tx("Syncing with Bitbucket…");
       case !online:
         return OFFLINE_WRITE_REASON;
       // Each row owns its update mutation (GitLab's rows share one, so theirs
@@ -322,7 +325,7 @@ function VariableRow({
         secured: secure,
       });
       onReconcile();
-      toast.success(`Updated ${variable.key}`);
+      toast.success(tx("Updated {{key}}", { key: variable.key }));
       // Only a secured value is never echoed back; a plain row keeps the saved
       // text so `dirty` settles false.
       if (secure) setDraft("");
@@ -340,11 +343,13 @@ function VariableRow({
         >
           {variable.key}
         </p>
-        {variable.secured && <Badge variant="secondary">secured</Badge>}
+        {variable.secured && (
+          <Badge variant="secondary">{tx("secured")}</Badge>
+        )}
         {confirming ? (
           <InlineConfirm
-            prompt="Delete?"
-            actLabel="Delete"
+            prompt={tx("Delete?")}
+            actLabel={tx("Delete")}
             pending={pending}
             heldReason={online ? undefined : OFFLINE_WRITE_REASON}
             swapFocusRef={swapFocus()}
@@ -358,8 +363,8 @@ function VariableRow({
             variant="ghost"
             className="text-muted-foreground"
             disabled
-            aria-label={`Delete ${variable.key}`}
-            reason="Syncing with Bitbucket…"
+            aria-label={tx("Delete {{key}}", { key: variable.key })}
+            reason={tx("Syncing with Bitbucket…")}
           >
             <XIcon />
           </DisabledReasonButton>
@@ -370,8 +375,8 @@ function VariableRow({
             variant="ghost"
             className="text-muted-foreground hover:text-destructive"
             onClick={onConfirm}
-            aria-label={`Delete ${variable.key}`}
-            title="Delete"
+            aria-label={tx("Delete {{key}}", { key: variable.key })}
+            title={tx("Delete")}
           >
             <XIcon />
           </Button>
@@ -382,7 +387,7 @@ function VariableRow({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           className="h-7 flex-1 font-mono"
-          placeholder={variable.secured ? "Secured — value hidden" : undefined}
+          placeholder={variable.secured ? tx("Secured — value hidden") : undefined}
           autoComplete="off"
           spellCheck={false}
         />
@@ -394,7 +399,7 @@ function VariableRow({
           onClick={save}
         >
           {update.isPending && <Spinner data-icon="inline-start" />}
-          Save
+          {tx("Save")}
         </DisabledReasonButton>
       </div>
       <Label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -403,8 +408,8 @@ function VariableRow({
           disabled={variable.secured}
           onCheckedChange={(v) => setSecure(v === true)}
         />
-        Secured
-        {variable.secured ? " (secured variables can't be un-secured)" : ""}
+        {tx("Secured")}
+        {variable.secured ? ` (${tx("secured variables can't be un-secured")})` : ""}
       </Label>
     </div>
   );
@@ -430,6 +435,7 @@ export function PipelinesConfigGate({
   };
   children: ReactNode;
 }) {
+  const tx = useRepoSettingsText();
   const failed = config.isError && config.data === undefined;
   const retryable = failed && !isPermanentListError(config.error);
   const { hostRef, retryRef } = useRetryFocusRescue(retryable);
@@ -437,10 +443,10 @@ export function PipelinesConfigGate({
     <div ref={hostRef} tabIndex={-1} className="min-w-0 outline-none">
       {failed ? (
         <AsyncErrorCard
-          title="Couldn't check whether Pipelines are enabled."
+          title={tx("Couldn't check whether Pipelines are enabled.")}
           error={config.error}
           onRetry={retryable ? () => void config.refetch() : undefined}
-          retryLabel="Retry checking whether Pipelines are enabled"
+          retryLabel={tx("Retry checking whether Pipelines are enabled")}
           retryRef={retryRef}
         />
       ) : (
@@ -459,17 +465,17 @@ export function PipelinesDisabledBanner({
   pending: boolean;
   onEnable: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const online = useOnline();
   const offlineReason = online ? undefined : OFFLINE_WRITE_REASON;
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-dashed p-4 text-xs">
       <div className="min-w-0">
         <p className="font-medium">
-          Pipelines are disabled for this repository
+          {tx("Pipelines are disabled for this repository")}
         </p>
         <p className="mt-0.5 text-muted-foreground">
-          Enable Bitbucket Pipelines to manage variables, schedules, and
-          deployments.
+          {tx("Enable Bitbucket Pipelines to manage variables, schedules, and deployments.")}
         </p>
       </div>
       <DisabledReasonButton
@@ -479,7 +485,7 @@ export function PipelinesDisabledBanner({
         onClick={onEnable}
       >
         {pending && <Spinner data-icon="inline-start" />}
-        Enable
+        {tx("Enable")}
       </DisabledReasonButton>
     </div>
   );

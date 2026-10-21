@@ -1,8 +1,10 @@
 import { ArrowCounterClockwiseIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useDismissOplog, useOplogCheck } from "@/lib/git/queries";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { useLocalPrs } from "@/lib/pulls/queries";
 import { toastError } from "@/lib/toast";
 import { OperationHistoryDialog } from "./OperationHistoryDialog";
@@ -17,6 +19,8 @@ import { StashesDialog } from "./StashesDialog";
  * full-width bar at the top of the repo view, or nothing when no op was interrupted.
  */
 export function OpRecoveryBanner({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("repository");
+  const tx = useCommonText();
   const check = useOplogCheck(repoPath);
   const dismiss = useDismissOplog(repoPath);
   const localPrs = useLocalPrs(repoPath);
@@ -39,7 +43,12 @@ export function OpRecoveryBanner({ repoPath }: { repoPath: string }) {
   const refLabel =
     op.originalRef && op.originalRef !== "HEAD"
       ? op.originalRef
-      : "detached HEAD";
+      : t("operationRecovery.detachedHead");
+  const title = t("operationRecovery.title", {
+    operation: op.label,
+    ref: refLabel,
+    hashSuffix: sha7 ? ` @ ${sha7}` : "",
+  });
 
   return (
     // Full-width single line: the interrupted op + where the repo was, then the
@@ -48,28 +57,28 @@ export function OpRecoveryBanner({ repoPath }: { repoPath: string }) {
     <div className="flex items-center justify-between gap-x-3 border-b px-3 py-1.5 text-xs">
       <span className="flex min-w-0 items-center gap-1.5">
         <ArrowCounterClockwiseIcon className="size-3.5 shrink-0 text-warning" />
-        <span
-          className="min-w-0 truncate"
-          title={`Interrupted: ${op.label} · was on ${refLabel}${sha7 ? ` @ ${sha7}` : ""}`}
-        >
-          <span className="text-warning">Interrupted: {op.label}</span>
+        <span className="min-w-0 truncate" title={title}>
+          <span className="text-warning">
+            {t("operationRecovery.interrupted", { operation: op.label })}
+          </span>
           <span className="text-muted-foreground">
-            {" · "}was on {refLabel}
+            {" · "}
+            {t("operationRecovery.wasOn", { ref: refLabel })}
             {sha7 ? ` @ ${sha7}` : ""}
           </span>
         </span>
       </span>
       <div className="flex shrink-0 items-center gap-0.5">
         <Button variant="ghost" size="xs" onClick={() => setHistoryOpen(true)}>
-          History
+          {tx("History")}
         </Button>
         <Button variant="ghost" size="xs" onClick={() => setRecoverOpen(true)}>
-          Recover…
+          {t("operationRecovery.recover")}
         </Button>
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label="Dismiss"
+          aria-label={tx("Dismiss")}
           disabled={dismiss.isPending}
           onClick={() => void dismiss.mutateAsync(op.id).catch(toastError)}
         >

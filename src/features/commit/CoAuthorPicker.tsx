@@ -1,6 +1,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { UsersIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { usePanelPortalContainer } from "@/components/panel-portal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ export function CoAuthorPicker({
   onChange: (coAuthors: CommitAuthor[]) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("commit");
   const authors = useCommitAuthors(repoPath);
   const identity = useUserIdentity(repoPath);
   const [query, setQuery] = useState("");
@@ -102,12 +104,12 @@ export function CoAuthorPicker({
               variant="ghost"
               size="sm"
               disabled={disabled}
-              title="Credit co-authors on this commit"
+              title={t("coAuthors.creditTitle")}
             />
           }
         >
           <UsersIcon data-icon="inline-start" />
-          Co-authors
+          {t("coAuthors.label")}
         </Popover.Trigger>
         <Popover.Portal container={portalContainer}>
           <Popover.Positioner
@@ -116,7 +118,7 @@ export function CoAuthorPicker({
             className="isolate z-50"
           >
             <Popover.Popup className="w-96 rounded-none bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-              <p className="pb-2 text-sm font-medium">Add a co-author</p>
+              <p className="pb-2 text-sm font-medium">{t("coAuthors.addTitle")}</p>
               <Input
                 value={query}
                 onChange={(e) => {
@@ -124,7 +126,7 @@ export function CoAuthorPicker({
                   setActiveIndex(0);
                 }}
                 onKeyDown={onInputKeyDown}
-                placeholder="Search, or Name <email>"
+                placeholder={t("coAuthors.searchPlaceholder")}
                 autoComplete="off"
                 role="combobox"
                 aria-expanded={optionCount > 0}
@@ -136,7 +138,7 @@ export function CoAuthorPicker({
               <div
                 id="coauthor-options"
                 role="listbox"
-                aria-label="Co-author suggestions"
+                aria-label={t("coAuthors.suggestions")}
                 className="mt-2 space-y-px"
               >
                 {canAddTyped && parsed && (
@@ -154,7 +156,7 @@ export function CoAuthorPicker({
                     onMouseEnter={() => setActiveIndex(0)}
                     onClick={() => add(parsed)}
                   >
-                    <span className="font-medium">Add "{parsed.name}"</span>
+                    <span className="font-medium">{t("coAuthors.addNamed", { name: parsed.name })}</span>
                     <span className="truncate text-muted-foreground">
                       {parsed.email}
                     </span>
@@ -187,16 +189,16 @@ export function CoAuthorPicker({
                 })}
                 {typedSelf && (
                   <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                    That's you — the commit author is already credited.
+                    {t("coAuthors.selfAlreadyCredited")}
                   </p>
                 )}
                 {suggestions.length === 0 && !canAddTyped && !typedSelf && (
                   <p className="px-2 py-1.5 text-xs text-muted-foreground">
                     {q
-                      ? "No matches — type Name <email@example.com>"
+                      ? t("coAuthors.noMatches")
                       : otherAuthors.length > 0
-                        ? "Everyone from this repo's history is already added."
-                        : "No other authors found in this repo's history."}
+                        ? t("coAuthors.allAdded")
+                        : t("coAuthors.noAuthors")}
                   </p>
                 )}
               </div>
@@ -213,7 +215,7 @@ export function CoAuthorPicker({
           {a.name}
           <button
             type="button"
-            aria-label={`Remove co-author ${a.name}`}
+            aria-label={t("coAuthors.remove", { name: a.name })}
             className="text-muted-foreground hover:text-foreground"
             onClick={() => remove(a.email)}
             disabled={disabled}

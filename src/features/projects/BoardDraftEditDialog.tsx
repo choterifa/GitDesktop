@@ -18,6 +18,7 @@ import {
 } from "@/lib/use-disabled-reason";
 import { useSeedOnOpen } from "@/lib/use-seed-on-open";
 import { cn } from "@/lib/utils";
+import { useProjectsText } from "./use-projects-text";
 import {
   ITEM_WRITE_REASON,
   type ItemNoun,
@@ -85,6 +86,7 @@ export function BoardDraftEditDialog({
     assigneeLogins: string[] | undefined,
   ) => Promise<void>;
 }) {
+  const tx = useProjectsText();
   // Beside the form rather than in it: the picker deals in whole user records and
   // the form's fields are the two text ones. The write sends the IDS, which on
   // GitHub are the logins.
@@ -117,7 +119,7 @@ export function BoardDraftEditDialog({
   const { blockedReason, reasonId, wrapperTitle, describedBy } =
     useDisabledReason({
       disabled: pending,
-      reason: ITEM_WRITE_REASON[noun],
+      reason: tx(ITEM_WRITE_REASON[noun]),
       title: SUBMIT_HINT,
     });
 
@@ -167,10 +169,9 @@ export function BoardDraftEditDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Edit draft</DialogTitle>
+            <DialogTitle>{tx("Edit draft")}</DialogTitle>
             <DialogDescription>
-              Changes the note on the project. Drafts live on the project alone,
-              so nothing outside it changes.
+              {tx("Changes the note on the project. Drafts live on the project alone, so nothing outside it changes.")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
@@ -179,14 +180,17 @@ export function BoardDraftEditDialog({
               validators={{ onChange: ({ value }) => required(value) }}
             >
               {(field) => (
-                <field.TextField label="Title" placeholder="Name the note" />
+                <field.TextField
+                  label={tx("Title")}
+                  placeholder={tx("Name the note")}
+                />
               )}
             </form.AppField>
             <form.AppField name="body">
               {(field) => (
                 <field.MarkdownField
-                  label="Notes"
-                  placeholder={NOTES_PLACEHOLDER[noun]}
+                  label={tx("Notes")}
+                  placeholder={tx(NOTES_PLACEHOLDER[noun])}
                   rows={8}
                   textareaClassName="max-h-72 min-h-24 resize-y font-mono"
                 />
@@ -218,7 +222,7 @@ export function BoardDraftEditDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {tx("Cancel")}
             </Button>
             <form.AppForm>
               {/* The reasoned hold keeps the button FOCUSABLE — a natively-disabled
@@ -241,7 +245,7 @@ export function BoardDraftEditDialog({
                   aria-describedby={describedBy}
                   className={ARIA_DISABLED_CLASS}
                 >
-                  Save draft
+                  {tx("Save draft")}
                 </form.SubmitButton>
               </span>
             </form.AppForm>

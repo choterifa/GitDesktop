@@ -17,6 +17,7 @@ import {
 } from "@/features/conversations/ConversationListPanel";
 import {
   isPermanentListError,
+  OFFLINE_ROWS_NOTICE,
   offlinePendingMessage,
   parkedUnlessPermanent,
   resolveRemoteSection,
@@ -41,6 +42,59 @@ import {
   useDisabledReason,
 } from "@/lib/use-disabled-reason";
 import { cn } from "@/lib/utils";
+import {
+  repoSettingsText as tr,
+  repoSettingsText as tx,
+} from "./use-repo-settings-text";
+
+function translateRetryLabel(label: string | undefined): string | undefined {
+  if (!label) return label;
+  const more = label.match(/^Retry loading more (.+)$/);
+  if (more) return tx("Retry loading more {{noun}}", { noun: tx(more[1]) });
+  const loading = label.match(/^Retry loading (.+)$/);
+  if (loading) return tx("Retry loading {{noun}}", { noun: tx(loading[1]) });
+  return tx(label);
+}
+
+function translateReadNotice(message: string | undefined): string | undefined {
+  if (!message) return message;
+  if (message === OFFLINE_ROWS_NOTICE) return tx(OFFLINE_ROWS_NOTICE);
+  const offline = message.match(
+    /^You're offline — (.+) will load once you're back online\.$/,
+  );
+  if (offline)
+    return tx(
+      "You're offline — {{subject}} will load once you're back online.",
+      {
+        subject: tx(offline[1].replace(/^the /, "")),
+      },
+    );
+  const refreshingRows = message.match(
+    /^Couldn't refresh (.+) — showing the last loaded results\.$/,
+  );
+  if (refreshingRows)
+    return tx("Couldn't refresh {{noun}} — showing the last loaded results.", {
+      noun: tx(refreshingRows[1]),
+    });
+  const refreshing = message.match(/^Couldn't refresh (.+)\.$/);
+  if (refreshing)
+    return tx("Couldn't refresh {{noun}}.", { noun: tx(refreshing[1]) });
+  const loadingMore = message.match(
+    /^Couldn't load more (.+) — showing the ones already loaded\.$/,
+  );
+  if (loadingMore)
+    return tx(
+      "Couldn't load more {{noun}} — showing the ones already loaded.",
+      {
+        noun: tx(loadingMore[1]),
+      },
+    );
+  return tx(message);
+}
+
+function translatedNode(node: ReactNode): ReactNode {
+  return typeof node === "string" ? tx(node) : node;
+}
 
 /**
  * The destructive error card the repo-settings surfaces share: a title, the
@@ -74,17 +128,19 @@ export function AsyncErrorCard({
   retryLabel?: string;
   retryRef?: Ref<HTMLButtonElement>;
 }) {
+  const localizedTitle = translatedNode(title);
+  const localizedHint = translatedNode(hint);
   return (
     <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
-      <p className="font-medium text-destructive">{title}</p>
+      <p className="font-medium text-destructive">{localizedTitle}</p>
       {error != null && (
         <p className="mt-1 text-muted-foreground">
           {presentError(error).summary}
         </p>
       )}
       {children}
-      {hint && !isTransportError(error) && (
-        <div className="mt-2 text-muted-foreground">{hint}</div>
+      {localizedHint && !isTransportError(error) && (
+        <div className="mt-2 text-muted-foreground">{localizedHint}</div>
       )}
       {onRetry && (
         <Button
@@ -92,10 +148,10 @@ export function AsyncErrorCard({
           variant="outline"
           size="xs"
           className="mt-2"
-          aria-label={retryLabel}
+          aria-label={translateRetryLabel(retryLabel)}
           onClick={onRetry}
         >
-          Retry
+          {tx("Retry")}
         </Button>
       )}
     </div>
@@ -113,8 +169,10 @@ export { ACT_PENDING_REASON, AI_DRAFT_PENDING_REASON, OFFLINE_WRITE_REASON };
 /** What a {@link RemoteFormSection} with loaded fields says over them. */
 function formNoticeMessage(noun: string, failed: boolean): string {
   return failed
-    ? `Couldn't refresh ${noun} — showing the last loaded version.`
-    : "You're offline — showing the last loaded version.";
+    ? tx("Couldn't refresh {{noun}} — showing the last loaded version.", {
+        noun: tx(noun),
+      })
+    : tx("You're offline — showing the last loaded version.");
 }
 
 /**
@@ -154,10 +212,12 @@ export function RemoteFormSection<T>({
     failed && data === undefined && !isPermanentListError(query.error);
   const { hostRef, retryRef } = useRetryFocusRescue(coldRetry);
   const retry = () => void query.refetch();
-  const retryLabel = `Retry loading ${noun}`;
+  const retryLabel = tx("Retry loading {{noun}}", { noun: tx(noun) });
   const noticeMessage = (() => {
     if (data === undefined)
-      return parked ? offlinePendingMessage(noun) : undefined;
+      return parked
+        ? translateReadNotice(offlinePendingMessage(noun))
+        : undefined;
     return failed || parked ? formNoticeMessage(noun, failed) : undefined;
   })();
   const body = (() => {
@@ -187,10 +247,10 @@ export function RemoteFormSection<T>({
       className="min-w-0 space-y-3 outline-none"
     >
       <DegradedListNotice
-        noun={noun}
+        noun={tx(noun)}
         degraded={noticeMessage !== undefined}
-        message={noticeMessage}
-        retryLabel={retryLabel}
+        message={translateReadNotice(noticeMessage)}
+        retryLabel={translateRetryLabel(retryLabel)}
         onRetry={data !== undefined && failed ? retry : undefined}
         className="px-0 pb-0"
       />
@@ -344,6 +404,8 @@ export function RemoteListSection({
         return undefined;
     }
   })();
+  const localizedNoticeMessage = translateReadNotice(noticeMessage);
+  const localizedRetryLabel = translateRetryLabel(notice?.retryLabel);
   // The error card's Retry resets a never-loaded read to pending, swapping the
   // card for skeletons; the always-mounted wrapper takes focus as it goes.
   const coldRetry =
@@ -359,10 +421,10 @@ export function RemoteListSection({
       className="space-y-2 outline-none"
     >
       <DegradedListNotice
-        noun={noun}
-        degraded={noticeMessage !== undefined}
-        message={noticeMessage}
-        retryLabel={notice?.retryLabel}
+        noun={tx(noun)}
+        degraded={localizedNoticeMessage !== undefined}
+        message={localizedNoticeMessage}
+        retryLabel={localizedRetryLabel}
         onRetry={
           listState === "rows-degraded" ? () => void query.refetch() : undefined
         }
@@ -373,13 +435,13 @@ export function RemoteListSection({
           loading={listState === "list-skeleton"}
           error={listState === "error" ? query.error : null}
           empty={listState === "empty"}
-          emptyLabel={emptyLabel}
+          emptyLabel={tx(emptyLabel)}
           skeletonClassName={skeletonClassName}
-          errorTitle={errorTitle}
+          errorTitle={errorTitle ? tx(errorTitle) : undefined}
           errorScope={errorScope}
           errorHint={errorHint}
           onRetry={coldRetry ? () => void query.refetch() : undefined}
-          retryLabel={notice?.retryLabel}
+          retryLabel={localizedRetryLabel}
           retryRef={retryRef}
         >
           {children}
@@ -415,6 +477,12 @@ export function HeldRoleSelect({
   label?: string;
 }) {
   const held = heldReason !== undefined;
+  const localizedLabel = tx(label);
+  const localizedItems = items
+    ? Object.fromEntries(
+        Object.entries(items).map(([key, itemLabel]) => [key, tx(itemLabel)]),
+      )
+    : undefined;
   const reason = useDisabledReason({ disabled: held, reason: heldReason });
   // Held by readOnly + a gated open state, never Base UI's `disabled`: that sets
   // the trigger's tabIndex to -1, taking the picker and its reason out of reach.
@@ -429,7 +497,7 @@ export function HeldRoleSelect({
       title={reason.wrapperTitle}
     >
       <Select
-        items={items}
+        items={localizedItems}
         value={value}
         onValueChange={(v) => v && onRole(v)}
         readOnly={held}
@@ -441,7 +509,7 @@ export function HeldRoleSelect({
         <SelectTrigger
           size="sm"
           className={cn("w-28", ARIA_DISABLED_CLASS)}
-          aria-label={label}
+          aria-label={localizedLabel}
           aria-disabled={held || undefined}
           aria-describedby={reason.describedBy}
         >
@@ -450,7 +518,7 @@ export function HeldRoleSelect({
         <SelectContent>
           {options.map((r) => (
             <SelectItem key={r.value} value={r.value}>
-              {r.label}
+              {tx(r.label)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -490,8 +558,10 @@ function ScopeErrorHint({ scope }: { scope: string }) {
   return (
     <div className="mt-2 text-muted-foreground">
       <p>
-        If this is a permissions error, your GitHub sign-in may be missing the{" "}
-        <span className="font-mono">{scope}</span> scope.
+        {tx(
+          "If this is a permissions error, your GitHub sign-in may be missing the {{scope}} scope.",
+          { scope },
+        )}
       </p>
       {canRefresh && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -507,7 +577,7 @@ function ScopeErrorHint({ scope }: { scope: string }) {
               })
             }
           >
-            Reconnect GitHub…
+            {tx("Reconnect GitHub…")}
           </Button>
         </div>
       )}
@@ -515,11 +585,12 @@ function ScopeErrorHint({ scope }: { scope: string }) {
           invalidates this list itself, so its card refetches in place. */}
       {hostSafe && (
         <p className="mt-2">
-          {canRefresh ? "Or run" : "Run"}{" "}
+          {tx(canRefresh ? "Or run" : "Run")}{" "}
           <span className="font-mono">
-            gh auth refresh --hostname {reconnectHostArg(host)} -s {scope}
+            {tr("gh auth refresh --hostname")} {reconnectHostArg(host)}{" "}
+            {tr("-s")} {scope}
           </span>{" "}
-          in a terminal, then reopen this dialog.
+          {tx("in a terminal, then reopen this dialog.")}
         </p>
       )}
     </div>
@@ -735,11 +806,14 @@ export function InlineConfirm({
   onCancel: () => void;
   onAct: () => void;
 }) {
+  const localizedPrompt = translatedNode(prompt);
+  const localizedCancel = translatedNode(cancelLabel);
+  const localizedAct = translatedNode(actLabel);
   return (
     <>
       {prompt != null && (
         <span className={cn("text-muted-foreground", promptClassName)}>
-          {prompt}
+          {localizedPrompt}
         </span>
       )}
       {/* Both buttons report a leave; Cancel attaches first in tree order, so
@@ -750,7 +824,7 @@ export function InlineConfirm({
         variant={cancelVariant}
         onClick={onCancel}
       >
-        {cancelLabel}
+        {localizedCancel}
       </Button>
       {/* One node whether or not a reason holds it, so a focused act button
           survives the reason coming and going. Pending holds by reason too,
@@ -764,7 +838,7 @@ export function InlineConfirm({
         onClick={onAct}
       >
         {pending && <Spinner data-icon="inline-start" />}
-        {actLabel}
+        {localizedAct}
       </DisabledReasonButton>
     </>
   );
@@ -780,6 +854,7 @@ export function DeliveryPayload({
   label: string;
   body: string;
 }) {
+  const localizedLabel = tx(label);
   const trimmed = body.trim();
   const lines = useMemo(
     () =>
@@ -794,12 +869,16 @@ export function DeliveryPayload({
   return (
     <div>
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+        <p className="text-[11px] font-medium text-muted-foreground">
+          {localizedLabel}
+        </p>
         {trimmed.length > 0 && (
           <CopyIconButton
             text={body}
-            label={`Copy ${label.toLowerCase()}`}
-            toast={`${label} copied`}
+            label={tx("Copy {{label}}", {
+              label: localizedLabel.toLocaleLowerCase(),
+            })}
+            toast={tx("{{label}} copied", { label: localizedLabel })}
           />
         )}
       </div>
@@ -822,7 +901,9 @@ export function DeliveryPayload({
             : body}
         </pre>
       ) : (
-        <p className="mt-1 text-[11px] text-muted-foreground">(empty)</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {tx("(empty)")}
+        </p>
       )}
     </div>
   );

@@ -5,13 +5,8 @@ import {
   WarningIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import {
-  type ReactNode,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PathText } from "@/components/path-text";
 import { Button } from "@/components/ui/button";
@@ -63,24 +58,6 @@ function blockedReason(sides: ConflictSides | null): BlockedReason {
   return "ignored";
 }
 
-/** The non-UTF-8 arms name the byte-safe actions as the conflict editor words
- *  them, in place of the generic by-hand sentence the other two end with. */
-const BLOCKED_COPY: Record<BlockedReason, (fileName: string) => ReactNode> = {
-  undecodable: () =>
-    "This file isn't UTF-8 text, so it isn't sent to a model: a text resolution couldn't keep its bytes exact. Use Accept all current or Accept all incoming in the conflict editor, or resolve it in your own editor.",
-  blobUndecodable: () =>
-    "Part of this conflict isn't UTF-8 text, so it isn't sent to a model: a text resolution couldn't keep its bytes exact. Use Accept all current or Accept all incoming in the conflict editor, or resolve it in your own editor.",
-  unreadableName: () =>
-    "This file's name can't be read as text, so it isn't sent to a model. Resolve it by hand in your editor, then stage it.",
-  ignored: (fileName) => (
-    <>
-      <span className="font-mono">{fileName}</span> matches your AI ignore
-      patterns, so it isn't sent to a model. Resolve it by hand in your editor,
-      then stage it.
-    </>
-  ),
-};
-
 /**
  * Inline resolution surface for one conflicted file: asks the configured review
  * model to merge the file's sides, streams the proposal, shows it as a reviewable
@@ -96,6 +73,7 @@ export function ConflictResolveView({
   repoPath: string;
   path: string;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const settings = useSettings();
   const reviewAi = settings.data?.reviewAi;
   const reviewConfigured = useReviewConfigured();
@@ -287,9 +265,7 @@ export function ConflictResolveView({
       try {
         fresh = await conflictSides(acceptIn, path, []);
       } catch {
-        toast.info(
-          `${baseName(path)} couldn't be re-read — nothing was written.`,
-        );
+        toast.info(t("conflicts.ai.rereadFailed", { name: baseName(path) }));
         return;
       }
       // A belt: `accepting` holds every control that could retire this accept
@@ -306,7 +282,7 @@ export function ConflictResolveView({
         return;
       if (fresh.undecodable) {
         toast.info(
-          `${baseName(path)} changed to text that isn't UTF-8, so the proposal wasn't applied. Use Accept all current or Accept all incoming in the conflict editor to keep its bytes exact.`,
+          t("conflicts.ai.becameUndecodable", { name: baseName(path) }),
         );
         return;
       }
@@ -320,12 +296,12 @@ export function ConflictResolveView({
       if (clean) {
         toast.success(
           owns && walk.queue.length > 0
-            ? `Resolved ${baseName(path)} — next conflict`
-            : `Resolved ${baseName(path)}`,
+            ? t("conflicts.ai.resolvedNext", { name: baseName(path) })
+            : t("conflicts.ai.resolved", { name: baseName(path) }),
         );
       } else {
         toast.warning(
-          `Applied the proposal to ${baseName(path)} but left it unstaged — conflict markers remain. Fix the rest by hand, then mark it resolved.`,
+          t("conflicts.ai.appliedUnstaged", { name: baseName(path) }),
         );
       }
       // An empty queue ends the session, so a single-file resolve exits too.
@@ -347,19 +323,27 @@ export function ConflictResolveView({
 
   const providerLabel = reviewAi
     ? PROVIDER_LABELS[reviewAi.provider]
-    : "the review model";
-  const model = reviewAi?.model || "review model";
+    : t("conflicts.ai.reviewModel");
+  const model = reviewAi?.model || t("conflicts.ai.reviewModel");
 
   // `git diff --no-index` prints nothing for identical files. That empty diff gets
   // no tab (it would render blank) and a caption instead. The switcher only
   // mounts once the diff is settled, so the tab never vanishes under focus.
   const matchesOurs = previewDiff === "";
   const sideViews: { key: ViewKey; label: string; body: string | null }[] = [
-    { key: "diff", label: "Diff", body: matchesOurs ? null : previewDiff },
-    { key: "proposed", label: "Proposed", body: proposed },
-    { key: "ours", label: "Ours", body: sides?.ours ?? null },
-    { key: "theirs", label: "Theirs", body: sides?.theirs ?? null },
-    { key: "base", label: "Base", body: sides?.base ?? null },
+    {
+      key: "diff",
+      label: t("conflicts.ai.diff"),
+      body: matchesOurs ? null : previewDiff,
+    },
+    { key: "proposed", label: t("conflicts.ai.proposed"), body: proposed },
+    { key: "ours", label: t("conflicts.ai.ours"), body: sides?.ours ?? null },
+    {
+      key: "theirs",
+      label: t("conflicts.ai.theirs"),
+      body: sides?.theirs ?? null,
+    },
+    { key: "base", label: t("conflicts.ai.base"), body: sides?.base ?? null },
   ];
 
   return (
@@ -387,24 +371,21 @@ export function ConflictResolveView({
 
       {queue.length > 0 && (
         <div className="border-b bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
-          Resolving conflicts with AI — {queue.length} more after this.
+          {t("conflicts.ai.queueStatus", { count: queue.length })}
         </div>
       )}
 
       {markersLeft && (
         <div className="flex items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
           <WarningIcon className="size-3.5 shrink-0" />
-          <span>
-            The proposal still has conflict markers — regenerate, or accept and
-            fix the rest by hand.
-          </span>
+          <span>{t("conflicts.ai.markersRemain")}</span>
         </div>
       )}
 
       {/* View switcher (ready only) */}
       {phase === "ready" && (
         <div className="flex items-center gap-2 border-b px-3 py-1.5">
-          <ButtonGroup aria-label="Resolution view">
+          <ButtonGroup aria-label={t("conflicts.ai.resolutionView")}>
             {sideViews
               .filter((v) => v.body != null)
               .map((v) => (
@@ -422,11 +403,11 @@ export function ConflictResolveView({
             {(() => {
               switch (true) {
                 case view === "diff":
-                  return "Proposed changes vs. your side";
+                  return t("conflicts.ai.proposedVsOurs");
                 case matchesOurs && view === "proposed":
-                  return "Matches your side exactly, so accepting keeps your version";
+                  return t("conflicts.ai.matchesOurs");
                 default:
-                  return "Full file (read-only)";
+                  return t("conflicts.ai.fullFile");
               }
             })()}
           </span>
@@ -437,18 +418,32 @@ export function ConflictResolveView({
       <div ref={paneRef} className="min-h-0 flex-1 overflow-auto">
         {phase === "blocked" ? (
           <p className="p-4 text-xs text-muted-foreground">
-            {BLOCKED_COPY[blockedReason(sides)](baseName(path))}
+            {(() => {
+              switch (blockedReason(sides)) {
+                case "undecodable":
+                  return t("conflicts.ai.blockedUndecodable");
+                case "blobUndecodable":
+                  return t("conflicts.ai.blockedBlobUndecodable");
+                case "unreadableName":
+                  return t("conflicts.ai.blockedUnreadableName");
+                case "ignored":
+                  return t("conflicts.ai.blockedIgnored", {
+                    name: baseName(path),
+                  });
+              }
+            })()}
           </p>
         ) : phase === "loading" ? (
           <p className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
             <Spinner className="size-3" />
-            Reading the conflict…
+            {t("conflicts.ai.reading")}
           </p>
         ) : phase === "streaming" || generating ? (
           <div className="p-3">
             <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Spinner className="size-3" />
-              {status || `${providerLabel} is proposing a resolution…`}
+              {status ||
+                t("conflicts.ai.proposing", { provider: providerLabel })}
             </p>
             <pre className="font-mono text-xs whitespace-pre-wrap wrap-break-word text-muted-foreground">
               {extractResolvedContent(text) || " "}
@@ -473,8 +468,8 @@ export function ConflictResolveView({
         ) : (
           <p className="p-4 text-xs text-muted-foreground">
             {reviewConfigured
-              ? "Couldn't get a resolution. Try again."
-              : "Configure a review model in Settings → AI to resolve conflicts with AI."}
+              ? t("conflicts.ai.failedTryAgain")
+              : t("conflicts.ai.configureReviewModel")}
           </p>
         )}
       </div>
@@ -484,7 +479,7 @@ export function ConflictResolveView({
         {generating ? (
           <Button variant="outline" size="sm" onClick={handleCancel}>
             <XIcon data-icon="inline-start" />
-            Cancel
+            {t("conflicts.ai.cancel")}
           </Button>
         ) : phase === "ready" ? (
           <>
@@ -494,7 +489,9 @@ export function ConflictResolveView({
               disabled={resolve.isPending || accepting}
               onClick={reject}
             >
-              {queue.length > 0 ? "Skip" : "Discard"}
+              {queue.length > 0
+                ? t("conflicts.ai.skip")
+                : t("conflicts.ai.discard")}
             </Button>
             <Button
               variant="outline"
@@ -503,7 +500,7 @@ export function ConflictResolveView({
               onClick={start}
             >
               <ArrowClockwiseIcon data-icon="inline-start" />
-              Regenerate
+              {t("conflicts.ai.regenerate")}
             </Button>
             <Button
               size="sm"
@@ -516,7 +513,9 @@ export function ConflictResolveView({
               ) : (
                 <CheckIcon data-icon="inline-start" />
               )}
-              {markersLeft ? "Accept" : "Accept & stage"}
+              {markersLeft
+                ? t("conflicts.ai.accept")
+                : t("conflicts.ai.acceptAndStage")}
             </Button>
           </>
         ) : (
@@ -532,14 +531,14 @@ export function ConflictResolveView({
                 onClick={start}
               >
                 <SparkleIcon data-icon="inline-start" />
-                Try again
+                {t("conflicts.ai.tryAgain")}
               </Button>
             )}
             {/* Mid-run, let the user move past a skipped/blocked file without
                 ending the whole resolve-all walk. */}
             {queue.length > 0 && (
               <Button variant="ghost" size="sm" onClick={advance}>
-                Skip to next
+                {t("conflicts.ai.skipNext")}
               </Button>
             )}
             <Button
@@ -548,7 +547,9 @@ export function ConflictResolveView({
               className="ml-auto"
               onClick={stopSession}
             >
-              {queue.length > 0 ? "Stop" : "Close"}
+              {queue.length > 0
+                ? t("conflicts.ai.stop")
+                : t("conflicts.ai.close")}
             </Button>
           </>
         )}

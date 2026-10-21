@@ -183,6 +183,34 @@ pub struct CommitSummary {
     pub is_merge: bool,
 }
 
+/// A commit and its decorated refs for the repository-wide history graph.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGraphCommit {
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub subject: String,
+    pub date: String,
+    pub refs: Vec<HistoryGraphRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGraphRef {
+    pub name: String,
+    pub kind: HistoryGraphRefKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryGraphRefKind {
+    Head,
+    Local,
+    Remote,
+    Tag,
+    Other,
+}
+
 /// One git tag, for the Tags list.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

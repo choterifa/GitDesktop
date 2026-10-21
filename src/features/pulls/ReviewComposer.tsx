@@ -9,6 +9,7 @@ import { SUBMIT_HINT } from "@/lib/hotkeys/binding";
 import { useAddReviewDraft } from "@/lib/pulls/review-drafts";
 import { toastError } from "@/lib/toast";
 import { buildSuggestionFence, extractNewSideLines } from "./suggestion-utils";
+import { usePullsText } from "./use-pulls-text";
 
 export interface ReviewComposerProps {
   repoPath: string;
@@ -52,6 +53,7 @@ export function ReviewComposer({
   lens,
   onClose,
 }: ReviewComposerProps) {
+  const tx = usePullsText();
   const [body, setBody] = useState("");
   const [pending, setPending] = useState(false);
   const createThread = useCreateReviewThread(repoPath, lens);
@@ -71,8 +73,8 @@ export function ReviewComposer({
       : undefined;
 
   const anchorLabel = isRange
-    ? `Lines ${rangeFrom}–${line} · ${path}`
-    : `Line ${line} · ${path}`;
+    ? `${tx("Lines {{start}}–{{end}}", { start: rangeFrom, end: line })} · ${path}`
+    : `${tx("Line {{line}}", { line })} · ${path}`;
 
   // Suggestions replace NEW-side code, so an old-side anchor can't be suggested
   // on. Bitbucket suggestions are single-line only. Otherwise we need the current
@@ -82,11 +84,11 @@ export function ReviewComposer({
   const bitbucketMultiline = provider === "bitbucket" && isRange;
   const suggestionDisabledReason =
     side === "old"
-      ? "Suggestions replace new-side code — pick a line on the right."
+      ? tx("Suggestions replace new-side code — pick a line on the right.")
       : bitbucketMultiline
-        ? "Bitbucket suggestions replace a single line."
+        ? tx("Bitbucket suggestions replace a single line.")
         : currentLines === null
-          ? "Can't read the current code for these lines here."
+          ? tx("Can't read the current code for these lines here.")
           : null;
   const canSuggest = suggestionDisabledReason === null;
 
@@ -154,7 +156,7 @@ export function ReviewComposer({
   }
 
   const addToReviewLabel =
-    draftCount === 0 ? "Start a review" : "Add to review";
+    draftCount === 0 ? tx("Start a review") : tx("Add to review");
 
   return (
     <div className="space-y-2">
@@ -170,17 +172,17 @@ export function ReviewComposer({
           reason={suggestionDisabledReason}
           onClick={insertSuggestion}
         >
-          Add suggestion
+          {tx("Add suggestion")}
         </DisabledReasonButton>
       </div>
       {provider === "bitbucket" && isRange && (
         <p className="text-[11px] text-muted-foreground">
-          Bitbucket anchors multi-line comments at the last line.
+          {tx("Bitbucket anchors multi-line comments at the last line.")}
         </p>
       )}
       <MarkdownEditor
-        aria-label={`Comment on ${anchorLabel}`}
-        placeholder="Leave a comment…"
+        aria-label={tx("Comment on {{anchor}}", { anchor: anchorLabel })}
+        placeholder={tx("Leave a comment…")}
         value={body}
         onChange={setBody}
         onKeyDown={onKeyDown}
@@ -194,7 +196,7 @@ export function ReviewComposer({
           <span
             title={
               !body.trim()
-                ? "Write a comment first"
+                ? tx("Write a comment first")
                 : draftCount > 0
                   ? undefined
                   : SUBMIT_HINT
@@ -206,14 +208,14 @@ export function ReviewComposer({
               disabled={!body.trim() || pending}
               onClick={addSingleComment}
             >
-              Add single comment
+              {tx("Add single comment")}
             </Button>
           </span>
         )}
         <span
           title={
             !body.trim()
-              ? "Write a comment first"
+              ? tx("Write a comment first")
               : draftCount > 0
                 ? SUBMIT_HINT
                 : undefined
@@ -229,7 +231,7 @@ export function ReviewComposer({
           </Button>
         </span>
         <Button variant="ghost" size="sm" disabled={pending} onClick={onClose}>
-          Cancel
+          {tx("Cancel")}
         </Button>
       </div>
     </div>

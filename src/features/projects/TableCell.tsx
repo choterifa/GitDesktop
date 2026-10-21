@@ -34,6 +34,7 @@ import {
   singleSelectDraft,
   type WritableFieldDef,
 } from "./ProjectFieldControls";
+import { useProjectsText } from "./use-projects-text";
 
 /** Every row's height, header and group rows included. Fixed rather than
  *  measured: a cell is one truncated line, so a measurement pass would only
@@ -120,6 +121,7 @@ function RowMarks({
  *  the glyph carries kind and state visually, the sr-only words carry both for a
  *  reader. */
 function ItemGlyph({ item }: { item: BoardItem }): ReactNode {
+  const tx = useProjectsText();
   const content = item.content;
   switch (content.kind) {
     case "issue":
@@ -136,7 +138,7 @@ function ItemGlyph({ item }: { item: BoardItem }): ReactNode {
       return (
         <>
           <pill.Icon className={cn("size-3.5 shrink-0", pill.tone)} />
-          <span className="sr-only">{pill.word}</span>
+          <span className="sr-only">{tx(pill.word)}</span>
         </>
       );
     }
@@ -144,7 +146,7 @@ function ItemGlyph({ item }: { item: BoardItem }): ReactNode {
       return (
         <>
           <NoteIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="sr-only">Draft item</span>
+          <span className="sr-only">{tx("Draft item")}</span>
         </>
       );
     default:
@@ -168,6 +170,7 @@ function TitlePeek({
   anchor: RefObject<HTMLDivElement | null>;
   onPeekChange: (itemId: string | null) => void;
 }) {
+  const tx = useProjectsText();
   const portalContainer = usePanelPortalContainer();
   const content = item.content;
   if (content.kind === "redacted") return null;
@@ -195,13 +198,13 @@ function TitlePeek({
               className="px-1 pb-1.5 text-xs font-medium"
             >
               {content.kind === "draft"
-                ? content.title || "Draft item"
+                ? content.title || tx("Draft item")
                 : content.title}
             </Popover.Title>
             {content.kind === "draft" ? (
               body === "" ? (
                 <p className="px-1 text-xs text-muted-foreground">
-                  This draft has no notes yet.
+                  {tx("This draft has no notes yet.")}
                 </p>
               ) : (
                 <Markdown className="px-1 text-xs">{body}</Markdown>
@@ -209,7 +212,7 @@ function TitlePeek({
             ) : (
               <p className="px-1 text-xs text-muted-foreground">
                 {content.kind === "pullRequest"
-                  ? prPill(content.state, content.isDraft).word
+                  ? tx(prPill(content.state, content.isDraft).word)
                   : issueStateWord(content.state, content.stateReason)}
               </p>
             )}
@@ -236,6 +239,7 @@ export function TitleCell({
   peek: boolean;
   onPeekChange: (itemId: string | null) => void;
 }) {
+  const tx = useProjectsText();
   const cellRef = useRef<HTMLDivElement>(null);
   const content = item.content;
   return (
@@ -248,7 +252,7 @@ export function TitleCell({
       <ItemGlyph item={item} />
       {content.kind === "redacted" ? (
         <span className="min-w-0 truncate text-muted-foreground">
-          Redacted item
+          {tx("Redacted item")}
         </span>
       ) : (
         <span
@@ -291,6 +295,7 @@ export function ValueCell({
   onCommit: (itemId: string, fieldId: string, entry: FieldDraft) => void;
   onCancel: (session: number) => void;
 }) {
+  const tx = useProjectsText();
   const cellRef = useRef<HTMLDivElement>(null);
   const value = columnValue(item, column.def);
   const writable = isWritable(column.def) ? column.def : null;
@@ -300,7 +305,7 @@ export function ValueCell({
   // the walk, and the reason is its description and its hover text, never a dim.
   const reason = useDisabledReason({
     disabled: held !== undefined,
-    reason: held,
+    reason: held === undefined ? undefined : tx(held),
   });
   const editable = writable !== null && held === undefined;
   return (
@@ -431,6 +436,7 @@ function CellEditor({
   onCommit: (entry: FieldDraft) => void;
   onCancel: () => void;
 }) {
+  const tx = useProjectsText();
   const portalContainer = usePanelPortalContainer();
   const inputId = useId();
   const current = columnValue(item, def) ?? null;
@@ -615,7 +621,7 @@ function CellEditor({
             </Popover.Title>
             <div className="max-h-72 overflow-y-auto px-1 py-1">{control}</div>
             <div className="mt-1 flex items-center justify-between gap-2 border-t px-1 pt-1.5 text-[11px] text-muted-foreground">
-              <span>{EDITOR_HINT[def.kind]}</span>
+              <span>{tx(EDITOR_HINT[def.kind])}</span>
               {/* A set value offers the item editor's rows' own Clear: the picks
                   have no empty state to clear with, and a scalar's emptied input
                   is a keyboard route a pointer user shouldn't need. A
@@ -625,7 +631,7 @@ function CellEditor({
                   type="button"
                   variant="ghost"
                   size="xs"
-                  aria-label={`Clear ${def.name}`}
+                  aria-label={tx("Clear {{name}}", { name: def.name })}
                   onClick={() => finish(null)}
                   // Enter on this button means THIS button, not the popup's
                   // commit-the-draft Enter, which would also cancel its click.
@@ -633,7 +639,7 @@ function CellEditor({
                     if (e.key === "Enter") e.stopPropagation();
                   }}
                 >
-                  Clear
+                  {tx("Clear")}
                 </Button>
               )}
             </div>

@@ -45,6 +45,7 @@ import {
 } from "./roadmap-model";
 import { CELL_CLASS, TABLE_ROW_HEIGHT, TitleCell } from "./TableCell";
 import { TableGroupRow } from "./TableRow";
+import { useProjectsText } from "./use-projects-text";
 
 /** The pinned rail's width: the title column, which stays put while the lane
  *  scrolls sideways under it. */
@@ -288,13 +289,14 @@ const RoadmapItemRow = memo(function RoadmapItemRow({
   onCellFocus: (rowKey: string, colIndex: number | null) => void;
   onPeekChange: (itemId: string | null) => void;
 }) {
+  const tx = useProjectsText();
   const span = itemSpan(item, sources, calendars);
   // An undated row whose only dates are org issue fields it can't take says why,
   // in the issue-field hold's own words, rather than asking for a date.
   const unplacedHint =
     (datesOnIssues && item.content.kind !== "redacted"
       ? issueFieldHostReason(issueFieldHostOf(item.content))
-      : undefined) ?? "Set this item's date fields to place it on the roadmap";
+      : undefined) ?? tx("Set this item's date fields to place it on the roadmap");
   const words = `${spanText(span, timeline.todayISO)}${cutWords(span, timeline.range)}`;
   return (
     <div
@@ -364,6 +366,7 @@ function AxisHeader({
   laneScroll: number;
   onToday: () => void;
 }) {
+  const tx = useProjectsText();
   const { axis, pxPerDay, bands, markers, range, todayISO } = timeline;
   const year = Number(todayISO.slice(0, 4));
   const current = bands.find((band) => band.current);
@@ -388,7 +391,7 @@ function AxisHeader({
           {
             key: "today",
             x: dayCenter(todayISO, timeline) - 1,
-            width: labelWidth("Today"),
+            width: labelWidth(tx("Today")),
             pinned: true,
           },
         ]
@@ -415,11 +418,11 @@ function AxisHeader({
           aria-colindex={1}
           // Named apart from its contents: the Today button inside would
           // otherwise join the header's name.
-          aria-label="Title"
+          aria-label={tx("Title")}
           className="sticky left-0 z-10 flex shrink-0 items-end justify-between gap-2 border-r bg-background px-2 pb-1 text-xs font-medium"
           style={{ width: RAIL_WIDTH }}
         >
-          <span>Title</span>
+          <span>{tx("Title")}</span>
           <Button
             variant="outline"
             size="xs"
@@ -695,6 +698,7 @@ export function ProjectsRoadmapView({
   onFocusLost: () => void;
   onKeyDown: (e: KeyboardEvent<HTMLDivElement>, pageSize: number) => void;
 }) {
+  const tx = useProjectsText();
   // State-backed, never a ref: the virtualizer captures its scroll element in a
   // mount effect and never re-reads a RefObject.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -1087,7 +1091,7 @@ export function ProjectsRoadmapView({
         )}
       </div>
       {rows.length === 0 && (
-        <p className="px-2 py-3 text-[11px] text-muted-foreground">No items</p>
+        <p className="px-2 py-3 text-[11px] text-muted-foreground">{tx("No items")}</p>
       )}
     </>
   );

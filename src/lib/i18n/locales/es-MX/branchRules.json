@@ -1,0 +1,62 @@
+{
+  "title": "Reglas de ramas",
+  "description": "Reglas locales que GitDesktop aplica en este repositorio para prevenir errores. La protección de GitHub también se aplica al hacer push. Los patrones usan globs: * dentro de un segmento, ** entre segmentos y {a,b} para indicar alternativas.",
+  "scope": {
+    "personal": "Personales",
+    "shared": "Compartidas con el repositorio",
+    "sharedSavedLead": "Guardadas en",
+    "sharedSavedTail": "y confirmadas en un commit: todas las personas con acceso al repositorio las reciben. Se combinan con las reglas personales de cada quien.",
+    "personalSaved": "Solo se guardan en este equipo. Tus reglas personales se combinan con las reglas compartidas del repositorio."
+  },
+  "naming": {
+    "title": "Nombres de ramas nuevas",
+    "requirePattern": "Exigir que las ramas nuevas coincidan con un patrón",
+    "pattern": "Patrón",
+    "hint": "Sugerencia (se muestra si se rechaza el nombre)",
+    "tryName": "Probar un nombre",
+    "matches": "coincide",
+    "rejected": "rechazado"
+  },
+  "protection": {
+    "title": "Ramas protegidas",
+    "importTitle": "Importar reglas de protección de ramas de GitHub",
+    "import": "Importar de GitHub",
+    "empty": "No hay ramas protegidas. Agrega un patrón para impedir que las ramas que coincidan se eliminen, reciban un force-push o se integren con métodos no permitidos.",
+    "blockDeletion": "Impedir la eliminación",
+    "blockForcePush": "Impedir force-push",
+    "requirePullRequest": "Exigir pull request",
+    "allowedMerges": "Integraciones permitidas en esta rama",
+    "viaPullRequest": "mediante pull request"
+  },
+  "promotion": {
+    "title": "Ramas de promoción",
+    "empty": "No hay ramas de promoción. Agrega un patrón, como staging o release/*, para marcar como promociones los pull requests creados desde esas ramas. GitDesktop no ofrecerá actualizarlas desde su rama base.",
+    "patternLabel": "Patrón de rama de promoción {{number}}",
+    "removeLabel": "Quitar la rama de promoción {{pattern}}"
+  },
+  "mergeMethod": {
+    "merge": "Commit de merge",
+    "squash": "Squash",
+    "rebase": "Rebase"
+  },
+  "add": "Agregar",
+  "remove": "Quitar",
+  "cancel": "Cancelar",
+  "import": {
+    "none": "No se encontraron reglas de protección en GitHub (se necesita acceso de administrador del repositorio para consultarlas).",
+    "success_one": "Se importó {{count}} regla de GitHub; revísala y guarda los cambios",
+    "success_other": "Se importaron {{count}} reglas de GitHub; revísalas y guarda los cambios"
+  },
+  "saved": {
+    "shared": "Reglas guardadas en .gitdesktop/branch-rules.json; crea un commit para compartirlas con tu equipo",
+    "personal": "Se guardaron las reglas de ramas"
+  },
+  "save": {
+    "loadError": "No se pudieron cargar las reglas de ramas",
+    "loading": "Cargando reglas de ramas…",
+    "noChanges": "No hay cambios para guardar",
+    "saving": "Guardando…",
+    "shared": "Guardar en el repositorio",
+    "personal": "Guardar cambios"
+  }
+}

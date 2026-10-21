@@ -24,6 +24,7 @@ import {
   TABLE_ROW_HEIGHT,
 } from "./TableCell";
 import { TableGroupRow, TableItemRow } from "./TableRow";
+import { useProjectsText } from "./use-projects-text";
 
 /** What a press inside the grid may move focus to: a cell (every cell and group
  *  header carries a tabindex) or a real control. */
@@ -160,6 +161,7 @@ export function ProjectsTableView({
    *  and Page Down can jump by it. */
   onKeyDown: (e: KeyboardEvent<HTMLDivElement>, pageSize: number) => void;
 }) {
+  const tx = useProjectsText();
   // State-backed, never a ref: the virtualizer captures its scroll element in a
   // mount effect and never re-reads a RefObject.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -526,7 +528,7 @@ export function ProjectsTableView({
         )}
       </div>
       {rows.length === 0 && (
-        <p className="px-2 py-3 text-[11px] text-muted-foreground">No items</p>
+        <p className="px-2 py-3 text-[11px] text-muted-foreground">{tx("No items")}</p>
       )}
     </>
   );

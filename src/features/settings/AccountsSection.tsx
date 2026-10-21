@@ -39,10 +39,13 @@ import {
   rateLimitResetTime,
   type SessionHealth,
 } from "@/lib/git/types";
+import { i18n } from "@/lib/i18n";
+import { formatDate as formatLocaleDate } from "@/lib/i18n/format";
 import { setBitbucketTokenExpiresAt } from "@/lib/settings/api";
 import { useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
+import { useSettingsText } from "./use-settings-text";
 
 /** The GitLab CLI install docs — where the "install glab" affordance points. */
 const GLAB_INSTALL_URL = "https://gitlab.com/gitlab-org/cli#installation";
@@ -86,7 +89,7 @@ const BB_SCOPES = [
 function formatDate(date: string): string {
   const t = Date.parse(`${date}T00:00:00`);
   if (Number.isNaN(t)) return date;
-  return new Date(t).toLocaleDateString(undefined, {
+  return formatLocaleDate(new Date(t), {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -102,7 +105,13 @@ function rateLimitDetail(
   const resumesAt = rateLimitResetTime(health.resetAt, now);
   const lines = [
     health.detail,
-    resumesAt ? `Access resumes at ${resumesAt}` : null,
+    resumesAt
+      ? i18n.t("Access resumes at {{time}}", {
+          ns: "settings",
+          keySeparator: false,
+          time: resumesAt,
+        })
+      : null,
   ].filter((line): line is string => Boolean(line));
   return lines.length > 0 ? lines.join("\n") : undefined;
 }
@@ -135,6 +144,7 @@ export function AccountsSection() {
  * every GitHub feature acts as — immediately, like API keys.
  */
 function GitHubAccounts() {
+  const tx = useSettingsText();
   const accounts = useGhAccounts();
   const switchAccount = useSwitchAccount();
   const health = useAccountsHealth();
@@ -148,7 +158,7 @@ function GitHubAccounts() {
       toastError(e);
       return;
     }
-    toast.success(`Switched to ${login}`);
+    toast.success(tx("Switched to {{login}}", { login }));
   }
 
   const version = accounts.data?.version ?? "";
@@ -190,10 +200,9 @@ function GitHubAccounts() {
       <div>
         <h2 className="text-sm font-medium">GitHub</h2>
         <p className="text-xs text-muted-foreground">
-          GitDesktop acts as whichever account is active in the GitHub CLI —
-          pull requests, issues, and pushes all use it. Works with github.com
-          and GitHub Enterprise hosts alike. (GitLab signs in the same way, via{" "}
-          <span className="font-mono">glab auth login</span>.)
+          {tx(
+            "GitDesktop acts as whichever account is active in the GitHub CLI — pull requests, issues, and pushes all use it. Works with github.com and GitHub Enterprise hosts alike. (GitLab signs in the same way, via glab auth login.)",
+          )}
         </p>
       </div>
 
@@ -204,14 +213,15 @@ function GitHubAccounts() {
         <Skeleton className="h-9.5 w-full max-w-xl" />
       ) : version === "" ? (
         <p className="text-xs text-muted-foreground">
-          The GitHub CLI (gh) isn't installed, so there are no accounts to
-          manage.
+          {tx(
+            "The GitHub CLI (gh) isn't installed, so there are no accounts to manage.",
+          )}
         </p>
       ) : (
         <>
           {list.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No account is signed in yet.
+              {tx("No account is signed in yet.")}
             </p>
           ) : (
             <div className="max-w-xl space-y-4">
@@ -238,17 +248,19 @@ function GitHubAccounts() {
                             {account.login}
                           </span>
                           {account.active && (
-                            <Badge variant="secondary">active</Badge>
+                            <Badge variant="secondary">{tx("active")}</Badge>
                           )}
                           {broken && (
                             <StatusDetailChip
                               variant="destructive"
-                              label="session expired"
+                              label={tx("session expired")}
                               detail={
                                 brokenDetail ??
                                 (account.active
                                   ? undefined
-                                  : "Switch to this account, then reconnect.")
+                                  : tx(
+                                      "Switch to this account, then reconnect.",
+                                    ))
                               }
                             />
                           )}
@@ -256,7 +268,7 @@ function GitHubAccounts() {
                             <StatusDetailChip
                               variant="outline"
                               className="text-warning"
-                              label="rate limited"
+                              label={tx("rate limited")}
                               detail={rateLimitDetail(rowHealth, now)}
                             />
                           )}
@@ -273,7 +285,7 @@ function GitHubAccounts() {
                                 })
                               }
                             >
-                              Reconnect
+                              {tx("Reconnect")}
                             </Button>
                           )}
                           {!account.active && (
@@ -286,9 +298,14 @@ function GitHubAccounts() {
                               reason={
                                 canSwitch
                                   ? undefined
-                                  : "Switching needs GitHub CLI 2.40 or newer"
+                                  : tx(
+                                      "Switching needs GitHub CLI 2.40 or newer",
+                                    )
                               }
-                              title={`Make ${account.login} the active account on ${account.host}`}
+                              title={tx(
+                                "Make {{login}} the active account on {{host}}",
+                                { login: account.login, host: account.host },
+                              )}
                               onClick={() =>
                                 void switchTo(account.host, account.login)
                               }
@@ -296,7 +313,7 @@ function GitHubAccounts() {
                               {switchAccount.isPending && (
                                 <Spinner data-icon="inline-start" />
                               )}
-                              Switch
+                              {tx("Switch")}
                             </DisabledReasonButton>
                           )}
                         </div>
@@ -310,19 +327,21 @@ function GitHubAccounts() {
 
           {!canSwitch && (
             <p className="text-xs text-warning">
-              Multiple accounts need GitHub CLI 2.40+ (you have {version}).
-              Update with{" "}
+              {tx(
+                "Multiple accounts need GitHub CLI 2.40+ (you have {{version}}). Update with",
+                { version },
+              )}{" "}
               <button
                 type="button"
                 className="font-mono underline underline-offset-2"
                 onClick={() =>
-                  copyText("winget upgrade GitHub.cli", "Command copied")
+                  copyText("winget upgrade GitHub.cli", tx("Command copied"))
                 }
-                title="Copy command"
+                title={tx("Copy command")}
               >
                 winget upgrade GitHub.cli
               </button>
-              , then restart GitDesktop.
+              {tx(", then restart GitDesktop.")}
             </p>
           )}
         </>
@@ -330,7 +349,7 @@ function GitHubAccounts() {
 
       {(accounts.isPending || version !== "") && (
         <div className="space-y-2">
-          <p className="text-xs font-medium">Add an account</p>
+          <p className="text-xs font-medium">{tx("Add an account")}</p>
           {/* Held while gh is read: the block keeps its place, but a sign-in
               must not start before the CLI is known to be installed. */}
           <DisabledReasonButton
@@ -338,7 +357,9 @@ function GitHubAccounts() {
             className="cursor-pointer"
             disabled={accounts.isPending}
             reason={
-              accounts.isPending ? "Checking for the GitHub CLI…" : undefined
+              accounts.isPending
+                ? tx("Checking for the GitHub CLI…")
+                : undefined
             }
             onClick={() =>
               openReconnect({
@@ -348,21 +369,21 @@ function GitHubAccounts() {
               })
             }
           >
-            Sign in to GitHub…
+            {tx("Sign in to GitHub…")}
           </DisabledReasonButton>
           <p className="text-xs text-muted-foreground">
-            For a GitHub Enterprise host, run{" "}
+            {tx("For a GitHub Enterprise host, run")}{" "}
             <button
               type="button"
               className="font-mono underline underline-offset-2"
               onClick={() =>
-                copyText("gh auth login -h <host>", "Command copied")
+                copyText("gh auth login -h <host>", tx("Command copied"))
               }
-              title="Copy command"
+              title={tx("Copy command")}
             >
               gh auth login -h &lt;host&gt;
             </button>{" "}
-            in a terminal, then come back here.
+            {tx("in a terminal, then come back here.")}
           </p>
         </div>
       )}
@@ -379,6 +400,7 @@ function GitHubAccounts() {
  * probe. cliMissing → an install affordance; no signed-in host → a sign-in button.
  */
 function GitLabSignInBlock() {
+  const tx = useSettingsText();
   const health = useAccountsHealth();
   const openReconnect = useUiStore((s) => s.openReconnect);
   const now = useRelativeNow();
@@ -400,8 +422,7 @@ function GitLabSignInBlock() {
       ) : cliMissing ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            The GitLab CLI (<span className="font-mono">glab</span>) isn't
-            installed.
+            {tx("The GitLab CLI (glab) isn't installed.")}
           </p>
           <Button
             variant="outline"
@@ -409,13 +430,13 @@ function GitLabSignInBlock() {
             className="cursor-pointer"
             onClick={() => openUrl(GLAB_INSTALL_URL)}
           >
-            Install the GitLab CLI
+            {tx("Install the GitLab CLI")}
           </Button>
         </div>
       ) : hosts.length === 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            No GitLab host is signed in yet.
+            {tx("No GitLab host is signed in yet.")}
           </p>
           <Button
             size="sm"
@@ -428,7 +449,7 @@ function GitLabSignInBlock() {
               })
             }
           >
-            Sign in to gitlab.com…
+            {tx("Sign in to gitlab.com…")}
           </Button>
         </div>
       ) : (
@@ -457,7 +478,7 @@ function GitLabSignInBlock() {
                   <StatusDetailChip
                     variant="destructive"
                     className="ml-auto shrink-0"
-                    label="session expired"
+                    label={tx("session expired")}
                     detail={h.detail}
                   />
                 )}
@@ -465,7 +486,7 @@ function GitLabSignInBlock() {
                   <StatusDetailChip
                     variant="outline"
                     className="ml-auto shrink-0 text-warning"
-                    label="rate limited"
+                    label={tx("rate limited")}
                     detail={rateLimitDetail(h, now)}
                   />
                 )}
@@ -475,10 +496,13 @@ function GitLabSignInBlock() {
                     className="ml-auto shrink-0 text-warning"
                     label={
                       (h.daysLeft ?? 0) < 0
-                        ? "token expired"
+                        ? tx("token expired")
                         : h.daysLeft === 0
-                          ? "token expires today"
-                          : `token expires in ${h.daysLeft} day${h.daysLeft === 1 ? "" : "s"}`
+                          ? tx("token expires today")
+                          : tx("token expires in {{count}} {{unit}}", {
+                              count: h.daysLeft,
+                              unit: h.daysLeft === 1 ? tx("day") : tx("days"),
+                            })
                     }
                     detail={h.detail}
                   />
@@ -496,7 +520,7 @@ function GitLabSignInBlock() {
                       })
                     }
                   >
-                    Reconnect
+                    {tx("Reconnect")}
                   </Button>
                 )}
               </div>
@@ -505,7 +529,7 @@ function GitLabSignInBlock() {
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground">{GLAB_OAUTH_NUDGE}</p>
+      <p className="text-xs text-muted-foreground">{tx(GLAB_OAUTH_NUDGE)}</p>
     </div>
   );
 }
@@ -520,6 +544,7 @@ function GitLabSignInBlock() {
  * input clears on success.
  */
 function GitLabAccount() {
+  const tx = useSettingsText();
   const status = useGitlabReviewBotStatus();
   const setToken = useSetGitlabReviewToken();
   const clearToken = useClearGitlabReviewToken();
@@ -535,7 +560,7 @@ function GitLabAccount() {
       try {
         const login = await setToken.mutateAsync(value.token.trim());
         form.reset({ token: "" });
-        toast.success(`AI reviews now post as @${login}`);
+        toast.success(tx("AI reviews now post as @{{login}}", { login }));
       } catch (e) {
         setError(presentError(e).summary);
       }
@@ -550,7 +575,7 @@ function GitLabAccount() {
       await clearToken.mutateAsync();
       setConfirmClear(false);
       form.reset({ token: "" });
-      toast.success("GitLab review bot disconnected");
+      toast.success(tx("GitLab review bot disconnected"));
     } catch (e) {
       toastError(e);
     }
@@ -561,23 +586,22 @@ function GitLabAccount() {
       <div>
         <h2 className="text-sm font-medium">GitLab</h2>
         <p className="text-xs text-muted-foreground">
-          GitDesktop acts as whichever account is signed in to the GitLab CLI
-          (glab) — merge requests, issues, and pushes all use it. Works with
-          gitlab.com and self-managed GitLab hosts alike; signing in from here
-          covers gitlab.com, so for your own instance run{" "}
-          <span className="font-mono">glab auth login --hostname …</span> in a
-          terminal and it appears below.
+          {tx(
+            "GitDesktop acts as whichever account is signed in to the GitLab CLI (glab) — merge requests, issues, and pushes all use it. Works with gitlab.com and self-managed GitLab hosts alike; signing in from here covers gitlab.com, so for your own instance run",
+          )}{" "}
+          <span className="font-mono">glab auth login --hostname …</span>{" "}
+          {tx("in a terminal and it appears below.")}
         </p>
       </div>
 
       <GitLabSignInBlock />
 
       <div className="space-y-2">
-        <p className="text-xs font-medium">AI review bot</p>
+        <p className="text-xs font-medium">{tx("AI review bot")}</p>
         <p className="text-xs text-muted-foreground">
-          Add a GitLab project or group access token to post AI reviews as that
-          project's bot user instead of your signed-in account. Tokens are
-          stored in the OS keychain, never in app files.
+          {tx(
+            "Add a GitLab project or group access token to post AI reviews as that project's bot user instead of your signed-in account. Tokens are stored in the OS keychain, never in app files.",
+          )}
         </p>
       </div>
 
@@ -590,11 +614,11 @@ function GitLabAccount() {
           <div className="space-y-3 border">
             <div className="flex items-center gap-2 border-b px-3 py-2">
               <p className="min-w-0 truncate text-xs">
-                AI reviews post as{" "}
+                {tx("AI reviews post as")}{" "}
                 <span className="font-medium">@{botLogin}</span>
               </p>
               <Badge variant="secondary" className="ml-auto shrink-0">
-                connected
+                {tx("connected")}
               </Badge>
             </div>
             <div className="flex items-center gap-2 px-3 pb-3">
@@ -603,7 +627,7 @@ function GitLabAccount() {
                 size="xs"
                 onClick={() => setConfirmClear(true)}
               >
-                Disconnect
+                {tx("Disconnect")}
               </Button>
             </div>
           </div>
@@ -619,8 +643,10 @@ function GitLabAccount() {
               {(field) => (
                 <field.TextField
                   type="password"
-                  label="Project or group access token"
-                  placeholder="Paste a GitLab project or group access token"
+                  label={tx("Project or group access token")}
+                  placeholder={tx(
+                    "Paste a GitLab project or group access token",
+                  )}
                 />
               )}
             </form.AppField>
@@ -635,15 +661,15 @@ function GitLabAccount() {
                 title={
                   canSubmit
                     ? undefined
-                    : "Paste a project or group access token"
+                    : tx("Paste a project or group access token")
                 }
               >
                 {setToken.isPending && <Spinner data-icon="inline-start" />}
-                Connect
+                {tx("Connect")}
               </DisabledReasonButton>
               {!canSubmit && (
                 <span className="text-xs text-warning">
-                  Paste a project or group access token
+                  {tx("Paste a project or group access token")}
                 </span>
               )}
             </div>
@@ -654,21 +680,17 @@ function GitLabAccount() {
 
         <div className="space-y-1.5 text-xs text-muted-foreground">
           <p>
-            The token needs the <span className="font-mono">api</span> scope and
-            a role of <span className="font-medium">Maintainer</span> or{" "}
-            <span className="font-medium">Owner</span> to mint. On gitlab.com,
-            project access tokens require a{" "}
-            <span className="font-medium">Premium or Ultimate</span> namespace
-            (they're free on self-managed GitLab). This applies to gitlab.com in
-            this version.
+            {tx(
+              "The token needs the api scope and a role of Maintainer or Owner to mint. On gitlab.com, project access tokens require a Premium or Ultimate namespace (they're free on self-managed GitLab). This applies to gitlab.com in this version.",
+            )}
           </p>
           <button
             type="button"
             className="cursor-pointer underline underline-offset-2"
             onClick={() => openUrl(GITLAB_PROJECT_TOKEN_URL)}
-            title="Open the GitLab project access token docs"
+            title={tx("Open the GitLab project access token docs")}
           >
-            Create one on GitLab
+            {tx("Create one on GitLab")}
           </button>
         </div>
       </div>
@@ -676,19 +698,19 @@ function GitLabAccount() {
       <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Disconnect the GitLab review bot?</DialogTitle>
+            <DialogTitle>{tx("Disconnect the GitLab review bot?")}</DialogTitle>
             <DialogDescription>
-              Removes the saved project access token from the OS keychain. AI
-              reviews will post as your signed-in GitLab account again. This
-              can't be undone.
+              {tx(
+                "Removes the saved project access token from the OS keychain. AI reviews will post as your signed-in GitLab account again. This can't be undone.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmClear(false)}>
-              Cancel
+              {tx("Cancel")}
             </Button>
             <Button variant="destructive" onClick={disconnect}>
-              Disconnect
+              {tx("Disconnect")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -704,6 +726,7 @@ function GitLabAccount() {
  * and flips open Bitbucket repos ready without a restart.
  */
 function BitbucketAccount() {
+  const tx = useSettingsText();
   const account = useBbAccount();
   const settings = useSettings();
   const queryClient = useQueryClient();
@@ -758,7 +781,9 @@ function BitbucketAccount() {
         setReplacing(false);
         invalidateAll();
         toast.success(
-          `Connected to Bitbucket as ${info.username ?? info.email}`,
+          tx("Connected to Bitbucket as {{user}}", {
+            user: info.username ?? info.email,
+          }),
         );
       } catch (e) {
         setError(presentError(e).summary);
@@ -771,9 +796,9 @@ function BitbucketAccount() {
   const canSubmit = email.trim().length > 0 && token.trim().length > 0;
   const disabledReason =
     email.trim().length === 0
-      ? "Enter your Atlassian account email"
+      ? tx("Enter your Atlassian account email")
       : token.trim().length === 0
-        ? "Paste an Atlassian API token"
+        ? tx("Paste an Atlassian API token")
         : null;
 
   async function clearAccount() {
@@ -785,7 +810,7 @@ function BitbucketAccount() {
       setReplacing(false);
       form.reset({ email: "", token: "", expiresAt: "" });
       invalidateAll();
-      toast.success("Disconnected from Bitbucket");
+      toast.success(tx("Disconnected from Bitbucket"));
     } catch (e) {
       toastError(e);
     }
@@ -798,9 +823,9 @@ function BitbucketAccount() {
       <div>
         <h2 className="text-sm font-medium">Bitbucket</h2>
         <p className="text-xs text-muted-foreground">
-          Connect Bitbucket Cloud with an Atlassian API token to browse and
-          clone your repositories and read pull requests and Pipelines. Tokens
-          are stored in the OS keychain, never in app files.
+          {tx(
+            "Connect Bitbucket Cloud with an Atlassian API token to browse and clone your repositories and read pull requests and Pipelines. Tokens are stored in the OS keychain, never in app files.",
+          )}
         </p>
       </div>
 
@@ -832,7 +857,7 @@ function BitbucketAccount() {
                     </p>
                   </div>
                   <Badge variant="secondary" className="ml-auto shrink-0">
-                    connected
+                    {tx("connected")}
                   </Badge>
                 </div>
                 {storedExpiry && (
@@ -846,14 +871,20 @@ function BitbucketAccount() {
                     {expiryDaysLeft != null && expiryDaysLeft <= 14
                       ? `${
                           expiryDaysLeft < 0
-                            ? "token expired"
+                            ? tx("token expired")
                             : expiryDaysLeft === 0
-                              ? "token expires today"
-                              : `token expires in ${expiryDaysLeft} day${
-                                  expiryDaysLeft === 1 ? "" : "s"
-                                }`
-                        } — replace the token soon`
-                      : `token expires ${formatDate(storedExpiry)}`}
+                              ? tx("token expires today")
+                              : tx("token expires in {{count}} {{unit}}", {
+                                  count: expiryDaysLeft,
+                                  unit:
+                                    expiryDaysLeft === 1
+                                      ? tx("day")
+                                      : tx("days"),
+                                })
+                        } — ${tx("replace the token soon")}`
+                      : tx("token expires {{date}}", {
+                          date: formatDate(storedExpiry),
+                        })}
                   </p>
                 )}
                 <div className="flex items-center gap-2 px-3 pb-3">
@@ -870,14 +901,14 @@ function BitbucketAccount() {
                       setReplacing(true);
                     }}
                   >
-                    Replace token…
+                    {tx("Replace token…")}
                   </Button>
                   <Button
                     variant="destructive"
                     size="xs"
                     onClick={() => setConfirmClear(true)}
                   >
-                    Disconnect
+                    {tx("Disconnect")}
                   </Button>
                 </div>
               </div>
@@ -895,7 +926,7 @@ function BitbucketAccount() {
                   {(field) => (
                     <field.TextField
                       type="email"
-                      label="Atlassian account email"
+                      label={tx("Atlassian account email")}
                       placeholder="you@example.com"
                     />
                   )}
@@ -904,8 +935,8 @@ function BitbucketAccount() {
                   {(field) => (
                     <field.TextField
                       type="password"
-                      label="API token"
-                      placeholder="Paste your Atlassian API token"
+                      label={tx("API token")}
+                      placeholder={tx("Paste your Atlassian API token")}
                     />
                   )}
                 </form.AppField>
@@ -914,12 +945,16 @@ function BitbucketAccount() {
                 <div className="space-y-1.5">
                   <form.AppField name="expiresAt">
                     {(field) => (
-                      <field.TextField type="date" label="Token expires on" />
+                      <field.TextField
+                        type="date"
+                        label={tx("Token expires on")}
+                      />
                     )}
                   </form.AppField>
                   <p className="text-[11px] text-muted-foreground">
-                    Shown when Atlassian created the token (max 1 year). Lets
-                    GitDesktop warn you before it expires.
+                    {tx(
+                      "Shown when Atlassian created the token (max 1 year). Lets GitDesktop warn you before it expires.",
+                    )}
                   </p>
                 </div>
 
@@ -932,7 +967,7 @@ function BitbucketAccount() {
                     // beside the button, so announcing it would double up.
                     title={disabledReason ?? undefined}
                   >
-                    {connected ? "Save token" : "Connect"}
+                    {connected ? tx("Save token") : tx("Connect")}
                   </DisabledReasonButton>
                   {replacing && (
                     <Button
@@ -944,7 +979,7 @@ function BitbucketAccount() {
                         setError(null);
                       }}
                     >
-                      Cancel
+                      {tx("Cancel")}
                     </Button>
                   )}
                   {disabledReason && (
@@ -962,20 +997,16 @@ function BitbucketAccount() {
 
         <div className="space-y-1.5 text-xs text-muted-foreground">
           <p>
-            Create a token at{" "}
+            {tx("Create a token at")}{" "}
             <button
               type="button"
               className="cursor-pointer underline underline-offset-2"
               onClick={() => openUrl(ATLASSIAN_TOKEN_URL)}
-              title="Open the Atlassian API tokens page"
+              title={tx("Open the Atlassian API tokens page")}
             >
               id.atlassian.com
             </button>{" "}
-            and sign in with your Atlassian{" "}
-            <span className="font-medium">account email</span> (not your
-            Bitbucket username). The token needs these scopes (the{" "}
-            <span className="font-mono">write:…</span> scopes let you act on PRs
-            and Pipelines):
+            {` ${tx("and sign in with your Atlassian account email (not your Bitbucket username). The token needs these scopes; write scopes let you act on pull requests and Pipelines.")}`}
           </p>
           <ul className="flex flex-wrap gap-1">
             {BB_SCOPES.map((scope) => (
@@ -993,19 +1024,19 @@ function BitbucketAccount() {
       <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Disconnect Bitbucket?</DialogTitle>
+            <DialogTitle>{tx("Disconnect Bitbucket?")}</DialogTitle>
             <DialogDescription>
-              Removes the saved Atlassian API token from the OS keychain.
-              Bitbucket repositories will stop loading their pull requests and
-              Pipelines until you connect again. This can't be undone.
+              {tx(
+                "Removes the saved Atlassian API token from the OS keychain. Bitbucket repositories will stop loading their pull requests and Pipelines until you connect again. This can't be undone.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmClear(false)}>
-              Cancel
+              {tx("Cancel")}
             </Button>
             <Button variant="destructive" onClick={clearAccount}>
-              Disconnect
+              {tx("Disconnect")}
             </Button>
           </DialogFooter>
         </DialogContent>

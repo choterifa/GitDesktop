@@ -10,6 +10,7 @@ import { gitDiffFile, gitStatus } from "@/lib/git/api";
 import type { ChangeKind, FileEntry } from "@/lib/git/types";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import { cn } from "@/lib/utils";
+import { useSessionText } from "./use-session-text";
 
 /** The working-tree change a session turn is mid-way through making. */
 function entryKind(e: FileEntry): ChangeKind {
@@ -36,6 +37,7 @@ const KIND_LABEL: Record<ChangeKind, string> = {
  * rather than a branch comparison.
  */
 export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
+  const tx = useSessionText();
   const status = useQuery({
     queryKey: ["session-worktree-status", repoPath] as const,
     queryFn: () => gitStatus(repoPath),
@@ -86,7 +88,7 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
   }
   if (entries.length === 0) {
     return (
-      <DiffPlaceholder message="The agent is working — no file changes yet this turn." />
+      <DiffPlaceholder message={tx("The agent is working — no file changes yet this turn.")} />
     );
   }
 
@@ -101,16 +103,18 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-2 border-b px-4 py-3 text-xs">
-        <span className="font-medium">Working changes</span>
-        <span className="text-muted-foreground">· uncommitted this turn</span>
+        <span className="font-medium">{tx("Working changes")}</span>
+        <span className="text-muted-foreground">· {tx("uncommitted this turn")}</span>
         <span className="flex-1" />
         <span className="text-muted-foreground">
-          {entries.length} file{entries.length === 1 ? "" : "s"}
+          {entries.length === 1
+            ? tx("1 file")
+            : tx("{{count}} files", { count: entries.length })}
         </span>
       </header>
 
       <DetailRailRow>
-        <DetailRail ariaLabel="Changed files">
+        <DetailRail ariaLabel={tx("Changed files")}>
           {/* overflow-hidden contains the list's natural height (vendored Root is
               `relative`-only) so a long file list can't leak a window scrollbar. */}
           <ScrollArea className="min-h-0 flex-1 overflow-hidden">
@@ -130,7 +134,7 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
                 >
                   <PathText path={file.path} className="flex-1 font-mono" />
                   <span className="shrink-0 text-muted-foreground">
-                    {KIND_LABEL[entryKind(file)]}
+                    {tx(KIND_LABEL[entryKind(file)])}
                   </span>
                 </button>
               ))}
@@ -149,7 +153,7 @@ export function WorktreeChangesView({ repoPath }: { repoPath: string }) {
               }
             />
           ) : (
-            <DiffPlaceholder message="Select a file to see its changes" />
+            <DiffPlaceholder message={tx("Select a file to see its changes")} />
           )}
         </main>
       </DetailRailRow>

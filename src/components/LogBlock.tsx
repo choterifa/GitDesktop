@@ -1,4 +1,5 @@
 import { CopyIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
  */
 export function LogBlock({
   text,
-  emptyLabel = "No logs available.",
+  emptyLabel,
   maxHeightClass = "max-h-80",
   className,
 }: {
@@ -24,19 +25,21 @@ export function LogBlock({
   /** Applied to the outer wrapper — e.g. margin from the toggle above it. */
   className?: string;
 }) {
+  const { t } = useTranslation("components");
   const trimmed = text.trim();
+  const emptyText = emptyLabel ?? t("logBlock.empty");
   return (
     <div className={cn("overflow-hidden border", className)}>
       {trimmed && (
         <div className="flex items-center justify-end border-b bg-muted/60 px-1.5 py-1">
           <button
             type="button"
-            onClick={() => copyText(trimmed, "Logs copied")}
-            title="Copy logs"
+            onClick={() => copyText(trimmed, t("logBlock.copied"))}
+            title={t("logBlock.copyTitle")}
             className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
           >
             <CopyIcon className="size-3" />
-            Copy
+            {t("logBlock.copy")}
           </button>
         </div>
       )}
@@ -46,7 +49,7 @@ export function LogBlock({
           maxHeightClass,
         )}
       >
-        {trimmed || emptyLabel}
+        {trimmed || emptyText}
       </pre>
     </div>
   );

@@ -6,6 +6,7 @@ import type {
   CommitSummary,
   DiffStatEntry,
   FileDiff,
+  HistoryGraphCommit,
   StagedDiff,
   TodoScan,
 } from "../types";
@@ -40,6 +41,13 @@ export const gitLog = (
     skip,
     search: search ?? null,
   });
+
+export const gitHistoryGraph = (
+  repoPath: string,
+  limit: number,
+  skip: number,
+) =>
+  invoke<HistoryGraphCommit[]>("git_history_graph", { repoPath, limit, skip });
 
 export const gitCommitDetails = (repoPath: string, hash: string) =>
   invoke<CommitDetails>("git_commit_details", { repoPath, hash });

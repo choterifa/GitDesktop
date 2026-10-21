@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { copyText } from "@/lib/clipboard";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { CommentEditor } from "./CommentEditor";
 import type { MentionSource } from "./useMentionCandidates";
 
@@ -47,6 +48,7 @@ export function LocalComment({
    *  and linkifies the same references in the rendered body. */
   mentions?: MentionSource;
 }) {
+  const tx = useCommonText();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -67,7 +69,7 @@ export function LocalComment({
           </>
         )}
         <RelativeTime date={comment.createdAt} />
-        {hidden && <span className="italic">hidden</span>}
+        {hidden && <span className="italic">{tx("hidden")}</span>}
         {!editing && (
           <>
             <span className="flex-1" />
@@ -77,7 +79,7 @@ export function LocalComment({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Comment actions"
+                    aria-label={tx("Comment actions")}
                     className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                   />
                 }
@@ -87,13 +89,13 @@ export function LocalComment({
               <DropdownMenuContent align="end" className="min-w-44">
                 {onQuote && (
                   <DropdownMenuItem onClick={onQuote}>
-                    Quote reply
+                    {tx("Quote reply")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  onClick={() => copyText(comment.body, "Markdown copied")}
+                  onClick={() => copyText(comment.body, tx("Markdown copied"))}
                 >
-                  Copy markdown
+                  {tx("Copy markdown")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
@@ -101,15 +103,19 @@ export function LocalComment({
                     setEditing(true);
                   }}
                 >
-                  Edit
+                  {tx("Edit")}
                 </DropdownMenuItem>
                 {hidden ? (
-                  <DropdownMenuItem onClick={onUnhide}>Unhide</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onUnhide}>
+                    {tx("Unhide")}
+                  </DropdownMenuItem>
                 ) : (
-                  <DropdownMenuItem onClick={onHide}>Hide</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onHide}>
+                    {tx("Hide")}
+                  </DropdownMenuItem>
                 )}
                 <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                  Delete
+                  {tx("Delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -118,7 +124,7 @@ export function LocalComment({
       </p>
       {editing ? (
         <CommentEditor
-          ariaLabel="Edit comment"
+          ariaLabel={tx("Edit comment")}
           value={draft}
           onChange={setDraft}
           canSubmit={!!draft.trim() && draft.trim() !== comment.body.trim()}
@@ -136,7 +142,7 @@ export function LocalComment({
           onClick={() => setExpanded(true)}
           className="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
-          Show hidden comment
+          {tx("Show hidden comment")}
         </button>
       ) : (
         <>
@@ -146,7 +152,7 @@ export function LocalComment({
               onClick={() => setExpanded(false)}
               className="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
-              Hide comment
+              {tx("Hide comment")}
             </button>
           )}
           <Markdown refs={mentions?.refs}>{comment.body}</Markdown>

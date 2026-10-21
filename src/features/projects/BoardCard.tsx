@@ -24,6 +24,7 @@ import { prPill } from "@/lib/pulls/pr-state";
 import { parseableDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { valueBelongsTo } from "./board-model";
+import { projectsText, useProjectsText } from "./use-projects-text";
 
 /** How many assignee faces a card shows before the rest collapse into "+N" —
  *  three is what fits beside the number on the narrowest column. */
@@ -44,9 +45,11 @@ export function issueStateWord(
   state: string,
   stateReason: string | null,
 ): string {
-  if (state !== "CLOSED") return "Open issue";
+  if (state !== "CLOSED") return projectsText("Open issue");
   const reason = stateReason === null ? undefined : CLOSED_REASON[stateReason];
-  return reason === undefined ? "Closed issue" : `Issue ${reason}`;
+  return reason === undefined
+    ? projectsText("Closed issue")
+    : projectsText("Issue {{reason}}", { reason: projectsText(reason) });
 }
 
 /** The card's first line: glyph, the state in words for a reader, and the title
@@ -96,6 +99,7 @@ function Assignees({
   assignees: AssigneeRef[];
   ghHost: string | null;
 }) {
+  const tx = useProjectsText();
   if (assignees.length === 0) return null;
   const shown = assignees.slice(0, AVATARS_SHOWN);
   const overflow = assignees.length - shown.length;
@@ -113,7 +117,7 @@ function Assignees({
       {overflow > 0 && (
         <span className="tabular-nums">
           +{overflow}
-          <span className="sr-only"> more assignees</span>
+          <span className="sr-only">{tx(" more assignees")}</span>
         </span>
       )}
     </span>
@@ -335,15 +339,15 @@ function cardDates(item: BoardItem): CardDate[] {
       return [];
     case "draft":
       return dated([
-        ["Created", usableDate(content.createdAt)],
-        ["Updated", usableDate(content.updatedAt)],
+        [projectsText("Created"), usableDate(content.createdAt)],
+        [projectsText("Updated"), usableDate(content.updatedAt)],
       ]);
     case "issue":
     case "pullRequest":
       return dated([
-        ["Opened", usableDate(content.createdAt)],
-        ["Added to board", usableDate(item.addedAt)],
-        ["Updated", usableDate(content.updatedAt)],
+        [projectsText("Opened"), usableDate(content.createdAt)],
+        [projectsText("Added to board"), usableDate(item.addedAt)],
+        [projectsText("Updated"), usableDate(content.updatedAt)],
       ]);
   }
 }
@@ -377,9 +381,10 @@ const CARD_CLASS =
  *  it is. The BADGE is what carries that — the quieter text around it is a hint for
  *  a sighted reader scanning a column, never the statement itself. */
 export function ArchivedBadge() {
+  const tx = useProjectsText();
   return (
     <span className="flex items-center">
-      <Badge variant="outline">Archived</Badge>
+      <Badge variant="outline">{tx("Archived")}</Badge>
     </span>
   );
 }
@@ -451,6 +456,7 @@ export const BoardCard = memo(function BoardCard({
   onPeekChange: (itemId: string | null) => void;
   onOpen: (item: BoardItem) => void;
 }) {
+  const tx = useProjectsText();
   const portalContainer = usePanelPortalContainer();
   // The peek's anchor AND its focus return. Explicit on both counts because this
   // card is deliberately NOT the popover's trigger — Base UI would toggle on click,
@@ -506,14 +512,13 @@ export const BoardCard = memo(function BoardCard({
         {item.isArchived && <ArchivedBadge />}
         <span className="flex items-start gap-1.5">
           <LockSimpleIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 font-medium">Redacted item</span>
+          <span className="min-w-0 flex-1 font-medium">{tx("Redacted item")}</span>
         </span>
         {/* States the effect, never a cause: this arm covers an item the viewer
             has no access to AND any content shape this build doesn't recognise,
             so naming a reason would be a guess in at least one of them. */}
         <span className="text-[11px]">
-          The board can't show this item here. Open the project on GitHub to see
-          what it is.
+          {tx("The board can't show this item here. Open the project on GitHub to see what it is.")}
         </span>
       </div>
     );
@@ -543,12 +548,12 @@ export const BoardCard = memo(function BoardCard({
             glyph={
               <NoteIcon className="size-3.5 shrink-0 text-muted-foreground" />
             }
-            stateWord="Draft item"
+            stateWord={tx("Draft item")}
             title={content.title}
             checked={checked}
           />
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Badge variant="secondary">Draft</Badge>
+            <Badge variant="secondary">{tx("Draft")}</Badge>
             <Assignees assignees={content.assignees} ghHost={ghHost} />
           </span>
           <CardChips item={item} fields={chipFields} />
@@ -568,11 +573,11 @@ export const BoardCard = memo(function BoardCard({
                 render={<p />}
                 className="px-1 pb-1.5 text-xs font-medium"
               >
-                {content.title || "Draft item"}
+                {content.title || tx("Draft item")}
               </Popover.Title>
               {body === "" ? (
                 <p className="px-1 text-xs text-muted-foreground">
-                  This draft has no notes yet.
+                  {tx("This draft has no notes yet.")}
                 </p>
               ) : (
                 <Markdown className="px-1 text-xs">{body}</Markdown>

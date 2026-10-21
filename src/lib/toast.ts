@@ -5,6 +5,7 @@ import {
   type ErrorPresentation,
   presentError,
 } from "@/lib/error-summary";
+import { i18n } from "@/lib/i18n";
 import { useErrorDialog } from "@/lib/stores/error-dialog";
 
 /**
@@ -16,7 +17,7 @@ import { useErrorDialog } from "@/lib/stores/error-dialog";
 export function errorToastAction(presentation: ErrorPresentation) {
   return presentation.long
     ? {
-        label: "Details",
+        label: i18n.t("action.details", { ns: "errors" }),
         onClick: (event: { currentTarget: HTMLElement }) => {
           // sonner's toaster refocuses the pre-toast element when focus leaves it,
           // which would pull focus back out of the dialog. Blurring first runs that
@@ -26,7 +27,7 @@ export function errorToastAction(presentation: ErrorPresentation) {
         },
       }
     : {
-        label: "Copy",
+        label: i18n.t("action.copy", { ns: "errors" }),
         onClick: () => {
           navigator.clipboard.writeText(presentation.fullText).catch(() => {
             // clipboard denied — nothing useful to do
@@ -76,7 +77,11 @@ export function toastComposedError(opts: {
   duration?: number;
 }): void {
   const { title, errors, headings, description, view, duration } = opts;
-  const link = view && { url: view.url, label: view.label ?? "View" };
+  const link =
+    view && {
+      url: view.url,
+      label: view.label ?? i18n.t("action.view", { ns: "errors" }),
+    };
   const details = errorToastAction(
     composedErrorPresentation(title, errors, headings, link),
   );
@@ -102,14 +107,23 @@ export function ignoreToast(
   total: number,
   file: string,
 ): string {
-  const entries = (n: number) => `entr${n === 1 ? "y" : "ies"}`;
   if (added === 0)
-    return total === 1
-      ? `Entry already in ${file}`
-      : `All ${total} ${entries(total)} already in ${file}`;
+    return i18n.t(
+      total === 1 ? "ignore.alreadyOne" : "ignore.alreadyMany",
+      { ns: "errors", count: total, file },
+    );
   if (added < total)
-    return `Added ${added} of ${total} ${entries(total)} to ${file}`;
-  return `Added ${added} ${entries(added)} to ${file}`;
+    return i18n.t("ignore.addedSome", {
+      ns: "errors",
+      added,
+      total,
+      file,
+    });
+  return i18n.t(added === 1 ? "ignore.addedAllOne" : "ignore.addedAll", {
+    ns: "errors",
+    count: added,
+    file,
+  });
 }
 
 function showErrorToast(e: unknown, note: string | undefined) {

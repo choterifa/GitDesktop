@@ -26,6 +26,7 @@ import {
   RemoteListSection,
   useConfirmSwapFocus,
 } from "./parts";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 /** Bitbucket default reviewers: the accounts auto-added to every new pull
  *  request. List the current reviewers (arrow-key navigable), add from the
@@ -37,6 +38,7 @@ export function BitbucketDefaultReviewersSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const reviewers = useBbDefaultReviewers(repoPath, open);
   const add = useBbAddDefaultReviewer(repoPath);
   const remove = useBbRemoveDefaultReviewer(repoPath);
@@ -53,7 +55,7 @@ export function BitbucketDefaultReviewersSection({
   async function handleAdd(user: ForgeUserRef) {
     try {
       await add.mutateAsync(user.id);
-      toast.success(`Added ${user.label}`);
+      toast.success(tx("Added {{name}}", { name: user.label }));
     } catch (e) {
       toastError(e);
     }
@@ -62,7 +64,7 @@ export function BitbucketDefaultReviewersSection({
   async function handleRemove(reviewer: ForgeUserRef) {
     try {
       await remove.mutateAsync(reviewer.id);
-      toast.success(`Removed ${reviewer.label}`);
+      toast.success(tx("Removed {{name}}", { name: reviewer.label }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -73,7 +75,7 @@ export function BitbucketDefaultReviewersSection({
     <div data-confirm-section className="min-w-0 space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          Reviewers automatically added to every new pull request.
+          {tx("Reviewers automatically added to every new pull request.")}
         </p>
         <AddReviewerPopover
           repoPath={repoPath}
@@ -88,15 +90,15 @@ export function BitbucketDefaultReviewersSection({
         query={reviewers}
         rowCount={rows.length}
         noun="default reviewers"
-        loadFailed="Couldn't load default reviewers."
-        emptyLabel="No default reviewers — new pull requests start with no reviewers."
+        loadFailed={tx("Couldn't load default reviewers.")}
+        emptyLabel={tx("No default reviewers — new pull requests start with no reviewers.")}
         skeletonClassName="h-11 w-full"
-        errorTitle="Couldn't load default reviewers."
-        errorHint="If this is a permissions error, managing default reviewers needs admin on this repository."
+        errorTitle={tx("Couldn't load default reviewers.")}
+        errorHint={tx("If this is a permissions error, managing default reviewers needs admin on this repository.")}
       >
         <div
           role="listbox"
-          aria-label="Default reviewers"
+          aria-label={tx("Default reviewers")}
           tabIndex={0}
           className="space-y-2 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-ring"
           onKeyDown={listKeyboardNav({
@@ -152,6 +154,7 @@ function ReviewerRow({
   onCancel: () => void;
   onRemove: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const hint = userRefHint(reviewer, all);
   const rowName = hint ? `${reviewer.label} (${hint})` : reviewer.label;
   const swapFocus = useConfirmSwapFocus();
@@ -176,8 +179,8 @@ function ReviewerRow({
       </div>
       {confirming ? (
         <InlineConfirm
-          prompt="Remove?"
-          actLabel="Remove"
+          prompt={tx("Remove?")}
+          actLabel={tx("Remove")}
           pending={pending}
           heldReason={confirmHeld}
           swapFocusRef={swapFocus()}
@@ -191,8 +194,8 @@ function ReviewerRow({
           variant="ghost"
           className="text-muted-foreground hover:text-destructive"
           onClick={onConfirm}
-          title="Remove"
-          aria-label={`Remove ${rowName}`}
+          title={tx("Remove")}
+          aria-label={tx("Remove {{name}}", { name: rowName })}
         >
           <XIcon />
         </Button>
@@ -214,6 +217,7 @@ function AddReviewerPopover({
   pending: boolean;
   onAdd: (user: ForgeUserRef) => void;
 }) {
+  const tx = useRepoSettingsText();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const online = useOnline();
   const heldReason = !online
@@ -272,7 +276,7 @@ function AddReviewerPopover({
             reason={heldReason}
           />
         }
-        aria-label="Add default reviewer"
+        aria-label={tx("Add default reviewer")}
         data-confirm-fallback
       >
         {pending ? (
@@ -280,12 +284,12 @@ function AddReviewerPopover({
         ) : (
           <UserPlusIcon data-icon="inline-start" />
         )}
-        Add reviewer
+        {tx("Add reviewer")}
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={4} className="isolate z-50">
           <Popover.Popup className="w-80 rounded-none bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-            <p className="pb-2 text-sm font-medium">Add a default reviewer</p>
+            <p className="pb-2 text-sm font-medium">{tx("Add a default reviewer")}</p>
             <Input
               value={query}
               onChange={(e) => {
@@ -293,7 +297,7 @@ function AddReviewerPopover({
                 setActiveIndex(0);
               }}
               onKeyDown={onInputKeyDown}
-              placeholder="Search workspace members"
+              placeholder={tx("Search workspace members")}
               autoComplete="off"
               role="combobox"
               aria-expanded={optionCount > 0}
@@ -305,12 +309,12 @@ function AddReviewerPopover({
             <div
               id="bb-reviewer-options"
               role="listbox"
-              aria-label="Member suggestions"
+              aria-label={tx("Member suggestions")}
               className="mt-2 space-y-px"
             >
               {candidates.isPending && (
                 <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                  Loading members…
+                  {tx("Loading members…")}
                 </p>
               )}
               {candidates.isError && (
@@ -351,8 +355,8 @@ function AddReviewerPopover({
                 suggestions.length === 0 && (
                   <p className="px-2 py-1.5 text-xs text-muted-foreground">
                     {q
-                      ? "No matching members."
-                      : "Everyone in this workspace is already a default reviewer."}
+                      ? tx("No matching members.")
+                      : tx("Everyone in this workspace is already a default reviewer.")}
                   </p>
                 )}
             </div>

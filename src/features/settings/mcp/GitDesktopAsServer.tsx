@@ -29,6 +29,7 @@ import {
 import { errorMessage } from "@/lib/tauri/invoke";
 import { toastError } from "@/lib/toast";
 import { useRetained } from "@/lib/use-retained";
+import { useSettingsText } from "../use-settings-text";
 
 /** Where a one-click install writes the `gitdesktop` entry: this repo's
  *  `.mcp.json`, or a client's global (all-projects) user config. */
@@ -57,11 +58,14 @@ const ALLOW_FLAG_LABELS: Record<string, string> = {
 
 /** The installed entry's permission tier as a readable label ("local + remote writes"), or
  *  "read-only" when no `--allow-*` flags are present. */
-function tierLabel(installedFlags: string[]): string {
+function tierLabel(
+  installedFlags: string[],
+  tx: (source: string) => string,
+): string {
   const parts = Object.keys(ALLOW_FLAG_LABELS)
     .filter((flag) => installedFlags.includes(flag))
-    .map((flag) => ALLOW_FLAG_LABELS[flag]);
-  return parts.length ? parts.join(" + ") : "read-only";
+    .map((flag) => tx(ALLOW_FLAG_LABELS[flag]));
+  return parts.length ? parts.join(" + ") : tx("read-only");
 }
 
 /** Bottom-of-section disclosure: the inverse of the rest of this panel. Instead of consuming
@@ -69,6 +73,7 @@ function tierLabel(installedFlags: string[]): string {
  *  managed `gitdesktop-mcp` launcher as a stdio server. Read-only by default; four opt-in
  *  `--allow-*` tiers escalate from there. Collapsed by default — one-time setup. */
 export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
+  const tx = useSettingsText();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   // Checkboxes shape the emitted config: Shareable (portable env-var paths a teammate can
@@ -145,7 +150,7 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
   // writing a stale/absent path silently keeps locking the old binary. The global installs
   // always embed it, so they gate on this unconditionally.
   const launcherDisabledReason = launcherPathPending
-    ? "Preparing the MCP launcher…"
+    ? tx("Preparing the MCP launcher…")
     : launcherErrorMessage;
   // In SHAREABLE mode `entry.command` is the constant `${GITDESKTOP_BIN:-gitdesktop-mcp}` —
   // independent of the local launcher, so a pending/failed ensure must not block the one path
@@ -200,16 +205,18 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
   // One-line summary of what the emitted config exposes, reflecting both
   // independent write opt-ins (either, both, or neither).
   const writeTiers = [
-    allowWrite && "local-PR tools (--allow-write)",
-    allowRemoteWrite && "remote forge writes (--allow-remote-write)",
-    allowGitWrite && "git writes (--allow-git-write)",
+    allowWrite && tx("local-PR tools (--allow-write)"),
+    allowRemoteWrite && tx("remote forge writes (--allow-remote-write)"),
+    allowGitWrite && tx("git writes (--allow-git-write)"),
     allowGitWrite &&
       allowDestructive &&
-      "destructive git writes (--allow-destructive)",
+      tx("destructive git writes (--allow-destructive)"),
   ].filter(Boolean);
   const modeNote = writeTiers.length
-    ? `Read-write · stdio · ${writeTiers.join(" + ")}.`
-    : "Read-only · stdio · exposes git & forge tools (status, log, diff, blame, PRs, issues, CI).";
+    ? tx("Read-write · stdio · {{tiers}}.", { tiers: writeTiers.join(" + ") })
+    : tx(
+        "Read-only · stdio · exposes git & forge tools (status, log, diff, blame, PRs, issues, CI).",
+      );
 
   async function copy() {
     await copyText(snippet);
@@ -249,17 +256,25 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
   function installSuccessToast(target: InstallTarget, replaced: boolean) {
     if (target === "project") {
       toast.success(
-        shareable
-          ? ".mcp.json written — commit it to share with your team"
-          : ".mcp.json written — paths are machine-specific, consider gitignoring it",
+        tx(
+          shareable
+            ? ".mcp.json written — commit it to share with your team"
+            : ".mcp.json written — paths are machine-specific, consider gitignoring it",
+        ),
       );
       return;
     }
     const client = target === "claude" ? "Claude Code" : "Copilot";
     toast.success(
       replaced
-        ? `Updated gitdesktop in ${client} — points at this launcher now (restart the client).`
-        : `Added gitdesktop to ${client} — available in all your projects (restart the client).`,
+        ? tx(
+            "Updated gitdesktop in {{client}} — points at this launcher now (restart the client).",
+            { client },
+          )
+        : tx(
+            "Added gitdesktop to {{client}} — available in all your projects (restart the client).",
+            { client },
+          ),
     );
   }
 
@@ -307,7 +322,9 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
     try {
       await mcpGlobalRemove(client);
       toast.success(
-        `Removed gitdesktop from ${client === "claude" ? "Claude Code" : "Copilot"}.`,
+        tx("Removed gitdesktop from {{client}}.", {
+          client: client === "claude" ? "Claude Code" : "Copilot",
+        }),
       );
       queryClient.invalidateQueries({ queryKey: ["mcp-global-status"] });
     } catch (e) {
@@ -332,10 +349,10 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
     // "Reinstall") isn't yet known, so hold every action rather than show a
     // possibly-wrong one next to the "Checking…" line.
     const rowLoadingReason = globalStatusLoading
-      ? "Checking the current install state…"
+      ? tx("Checking the current install state…")
       : null;
     const busyReason = anyBusy
-      ? "Waiting for the current operation to finish."
+      ? tx("Waiting for the current operation to finish.")
       : null;
     // Remove doesn't embed the launcher path, so it's exempt from that gate.
     const removeReason = rowLoadingReason ?? busyReason;
@@ -379,10 +396,10 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
               >
                 {removing ? (
                   <>
-                    <Spinner className="size-3" /> Removing…
+                    <Spinner className="size-3" /> {tx("Removing…")}
                   </>
                 ) : (
-                  "Remove"
+                  tx("Remove")
                 )}
               </DisabledReasonButton>
             )}
@@ -398,45 +415,50 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                 <>
                   <Spinner className="size-3" />{" "}
                   {status?.installed && (!status.current || drift)
-                    ? "Reinstalling…"
-                    : "Adding…"}
+                    ? tx("Reinstalling…")
+                    : tx("Adding…")}
                 </>
               ) : status?.installed && (!status.current || drift) ? (
-                "Reinstall"
+                tx("Reinstall")
               ) : (
-                "Install"
+                tx("Install")
               )}
             </DisabledReasonButton>
           </div>
         </div>
         {globalStatusLoading ? (
-          <p className="text-xs text-muted-foreground">Checking…</p>
+          <p className="text-xs text-muted-foreground">{tx("Checking…")}</p>
         ) : status?.installed ? (
           !status.current ? (
             // Stale-path warning owns the not-current case and takes precedence
             // over any drift readout — never show both.
             <p className="text-xs text-warning">
-              Installed — points at a different executable (an older install or
-              custom entry). Reinstall to use this launcher.
+              {tx(
+                "Installed — points at a different executable (an older install or custom entry). Reinstall to use this launcher.",
+              )}
             </p>
           ) : drift ? (
             <p className="text-xs text-warning">
-              Installed ({tierLabel(installedFlags ?? [])}) — differs from the
-              selected permissions. Reinstall to apply them.
+              {tx(
+                "Installed ({{tier}}) — differs from the selected permissions. Reinstall to apply them.",
+                { tier: tierLabel(installedFlags ?? [], tx) },
+              )}
             </p>
           ) : (
             <p className="flex items-center gap-1.5 text-xs text-success">
               <CheckIcon className="shrink-0" />
               <span>
-                Installed
-                {installedFlags !== null && ` (${tierLabel(installedFlags)})`} —
-                uses this launcher.
+                {installedFlags !== null
+                  ? tx("Installed ({{tier}}) — uses this launcher.", {
+                      tier: tierLabel(installedFlags, tx),
+                    })
+                  : tx("Installed — uses this launcher.")}
               </span>
             </p>
           )
         ) : (
           <p className="text-xs text-muted-foreground">
-            Not in {label}'s user config.
+            {tx("Not in {{label}}'s user config.", { label })}
           </p>
         )}
       </div>
@@ -454,7 +476,7 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
         ...next,
         note: null,
       });
-      if (next.note) toast.success(next.note);
+      if (next.note) toast.success(localizeLauncherNote(next.note, tx));
     } catch (e) {
       toastError(e);
     } finally {
@@ -483,11 +505,12 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
         />
         <span className="min-w-0">
           <span className="block text-sm font-medium">
-            Use GitDesktop as an MCP server
+            {tx("Use GitDesktop as an MCP server")}
           </span>
           <span className="block text-xs text-muted-foreground">
-            Let Claude Desktop, Cursor, or Claude Code use this repo's git &amp;
-            GitHub tools — read-only by default, over stdio.
+            {tx(
+              "Let Claude Desktop, Cursor, or Claude Code use this repo's git & GitHub tools — read-only by default, over stdio.",
+            )}
           </span>
         </span>
       </button>
@@ -496,9 +519,9 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
         <div id="gd-as-mcp-config" className="mt-3 space-y-2 pl-6">
           {!repoPath && (
             <p className="text-xs text-muted-foreground">
-              No repository open — replace{" "}
-              <code className="font-mono">&lt;path to your repo&gt;</code> with
-              the repo you want to expose.
+              {tx("No repository open — replace")}{" "}
+              <code className="font-mono">&lt;path to your repo&gt;</code>{" "}
+              {tx("with the repo you want to expose.")}
             </p>
           )}
 
@@ -508,12 +531,16 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                 checked={shareable}
                 onCheckedChange={(c) => setShareable(c === true)}
               />
-              Shareable entry
+              {tx("Shareable entry")}
             </label>
             <p className="text-xs text-muted-foreground">
               {shareable
-                ? "Portable paths — teammates set GITDESKTOP_BIN to their launcher path, or add gitdesktop-mcp to their PATH (see below)."
-                : "Absolute paths — works on this machine only. Consider gitignoring .mcp.json."}
+                ? tx(
+                    "Portable paths — teammates set GITDESKTOP_BIN to their launcher path, or add gitdesktop-mcp to their PATH (see below).",
+                  )
+                : tx(
+                    "Absolute paths — works on this machine only. Consider gitignoring .mcp.json.",
+                  )}
             </p>
           </div>
 
@@ -526,12 +553,14 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   setTierTouched(true);
                 }}
               />
-              Allow write tools
+              {tx("Allow write tools")}
             </label>
             <p className="text-xs text-muted-foreground">
               {allowWrite
-                ? "Adds --allow-write — agents can create, comment on, and approve this repo's local PRs, and create, comment on, and set the status of its local issues (GitDesktop's own app-data, never git or the remote)."
-                : "The server exposes read-only git & forge tools."}
+                ? tx(
+                    "Adds --allow-write — agents can create, comment on, and approve this repo's local PRs, and create, comment on, and set the status of its local issues (GitDesktop's own app-data, never git or the remote).",
+                  )
+                : tx("The server exposes read-only git & forge tools.")}
             </p>
           </div>
 
@@ -544,12 +573,16 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   setTierTouched(true);
                 }}
               />
-              Allow remote write
+              {tx("Allow remote write")}
             </label>
             <p className="text-xs text-muted-foreground">
               {allowRemoteWrite
-                ? "Adds --allow-remote-write — real forge writes under your CLI identity: create, edit, merge, and comment on PRs, create/extend/dissolve GitHub PR stacks, manage issues, reviewers, labels and assignees, trigger CI, manage releases, and manage GitHub discussions. Separate opt-in from Allow write tools."
-                : "No real forge writes — issues and pull requests on the remote are left untouched."}
+                ? tx(
+                    "Adds --allow-remote-write — real forge writes under your CLI identity: create, edit, merge, and comment on PRs, create/extend/dissolve GitHub PR stacks, manage issues, reviewers, labels and assignees, trigger CI, manage releases, and manage GitHub discussions. Separate opt-in from Allow write tools.",
+                  )
+                : tx(
+                    "No real forge writes — issues and pull requests on the remote are left untouched.",
+                  )}
             </p>
           </div>
 
@@ -566,12 +599,16 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   if (!on) setAllowDestructive(false);
                 }}
               />
-              Allow git writes
+              {tx("Allow git writes")}
             </label>
             <p className="text-xs text-muted-foreground">
               {allowGitWrite
-                ? "Adds --allow-git-write — agents can mutate this repo's git state: stage/commit, create/checkout/rename branches, push/pull/fetch, stash, merge/rebase, and tags. The recoverable set only — destructive operations stay blocked."
-                : "The repository itself stays untouched — no staging, commits, branches, or pushes."}
+                ? tx(
+                    "Adds --allow-git-write — agents can mutate this repo's git state: stage/commit, create/checkout/rename branches, push/pull/fetch, stash, merge/rebase, and tags. The recoverable set only — destructive operations stay blocked.",
+                  )
+                : tx(
+                    "The repository itself stays untouched — no staging, commits, branches, or pushes.",
+                  )}
             </p>
           </div>
 
@@ -579,7 +616,9 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
             {/* Destructive requires git-write. A title on a natively-disabled
                 control never surfaces, so wrap the row when it's disabled. */}
             <span
-              title={allowGitWrite ? undefined : "Requires Allow git writes."}
+              title={
+                allowGitWrite ? undefined : tx("Requires Allow git writes.")
+              }
             >
               <label className="flex cursor-pointer items-center gap-2 text-xs">
                 <Checkbox
@@ -590,19 +629,23 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                     setTierTouched(true);
                   }}
                 />
-                Allow destructive git writes
+                {tx("Allow destructive git writes")}
               </label>
             </span>
             <p className="text-xs text-muted-foreground">
               {allowDestructive
-                ? "Adds --allow-destructive — agents can discard changes, reset, force-push (with lease), force-delete branches and tags, and drop commits on a guarded rebase pull. Can permanently discard uncommitted work."
-                : "Irreversible operations (discard, reset, force-push, force deletions, dropping commits on a rebase pull) stay blocked even with git writes on."}
+                ? tx(
+                    "Adds --allow-destructive — agents can discard changes, reset, force-push (with lease), force-delete branches and tags, and drop commits on a guarded rebase pull. Can permanently discard uncommitted work.",
+                  )
+                : tx(
+                    "Irreversible operations (discard, reset, force-push, force deletions, dropping commits on a rebase pull) stay blocked even with git writes on.",
+                  )}
             </p>
           </div>
 
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
-              Paste into your client's MCP config
+              {tx("Paste into your client's MCP config")}
             </span>
             <div className="flex items-center gap-2">
               <DisabledReasonButton
@@ -615,11 +658,11 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
               >
                 {copied ? (
                   <>
-                    <CheckIcon data-icon="inline-start" /> Copied
+                    <CheckIcon data-icon="inline-start" /> {tx("Copied")}
                   </>
                 ) : (
                   <>
-                    <CopyIcon data-icon="inline-start" /> Copy
+                    <CopyIcon data-icon="inline-start" /> {tx("Copy")}
                   </>
                 )}
               </DisabledReasonButton>
@@ -636,16 +679,16 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   entryDisabledReason ??
                   (repoPath
                     ? undefined
-                    : "Open a repository to write its .mcp.json")
+                    : tx("Open a repository to write its .mcp.json"))
                 }
                 onClick={() => install("project", false)}
               >
                 {busyTarget === "project" ? (
                   <>
-                    <Spinner className="size-3" /> Writing…
+                    <Spinner className="size-3" /> {tx("Writing…")}
                   </>
                 ) : (
-                  "Write to .mcp.json"
+                  tx("Write to .mcp.json")
                 )}
               </DisabledReasonButton>
             </div>
@@ -658,23 +701,25 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
           </pre>
           <p className="text-xs text-muted-foreground">{modeNote}</p>
           <p className="text-xs text-muted-foreground">
-            Older configs that point at the app executable keep working —
-            re-emitting here switches them to the update-safe launcher.
+            {tx(
+              "Older configs that point at the app executable keep working — re-emitting here switches them to the update-safe launcher.",
+            )}
           </p>
 
           {/* Per-client rows into a client's user config (all projects), via its own CLI,
               with a project-aware --repo so one entry follows whatever repo is open. */}
           <div className="mt-1 space-y-2 border-t pt-3">
             <span className="text-xs font-medium">
-              Install globally — all projects
+              {tx("Install globally — all projects")}
             </span>
             {globalRow("claude")}
             {globalRow("copilot")}
             <p className="text-xs text-muted-foreground">
-              Adds gitdesktop to the client's user config via its CLI, so it's
-              in every project — no per-repo{" "}
-              <code className="font-mono">.mcp.json</code>. The write toggles
-              above carry over.
+              {tx(
+                "Adds gitdesktop to the client's user config via its CLI, so it's in every project — no per-repo",
+              )}{" "}
+              <code className="font-mono">.mcp.json</code>{" "}
+              {tx("The write toggles above carry over.")}
             </p>
           </div>
 
@@ -682,10 +727,12 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
               so the bare command above works without a hardcoded path. */}
           <div className="mt-1 space-y-1.5 border-t pt-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium">Command-line launcher</span>
+              <span className="text-xs font-medium">
+                {tx("Command-line launcher")}
+              </span>
               {launcherLoading ? (
                 <span className="text-[11px] text-muted-foreground">
-                  Checking…
+                  {tx("Checking…")}
                 </span>
               ) : launcher?.onPath ? (
                 launcher.managed ? (
@@ -698,10 +745,10 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   >
                     {pathBusy ? (
                       <>
-                        <Spinner className="size-3" /> Removing…
+                        <Spinner className="size-3" /> {tx("Removing…")}
                       </>
                     ) : (
-                      "Remove"
+                      tx("Remove")
                     )}
                   </Button>
                 ) : null
@@ -715,10 +762,10 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                 >
                   {pathBusy ? (
                     <>
-                      <Spinner className="size-3" /> Adding…
+                      <Spinner className="size-3" /> {tx("Adding…")}
                     </>
                   ) : (
-                    "Add to PATH"
+                    tx("Add to PATH")
                   )}
                 </Button>
               )}
@@ -728,15 +775,17 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                 <p className="flex items-center gap-1.5 text-xs text-success">
                   <CheckIcon className="shrink-0" />
                   <span>
-                    gitdesktop-mcp is on your PATH
-                    {!launcher.managed && " — added outside GitDesktop"}
+                    {tx("gitdesktop-mcp is on your PATH")}
+                    {!launcher.managed &&
+                      ` ${tx("— added outside GitDesktop")}`}
                   </span>
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Make <code className="font-mono">gitdesktop-mcp</code>{" "}
-                  runnable from any terminal, so the command above works without
-                  a full path.
+                  {tx("Make")} <code className="font-mono">gitdesktop-mcp</code>{" "}
+                  {tx(
+                    "runnable from any terminal, so the command above works without a full path.",
+                  )}
                 </p>
               ))}
             {launcher?.warning && (
@@ -755,9 +804,9 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
           >
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Replace existing entry?</DialogTitle>
+                <DialogTitle>{tx("Replace existing entry?")}</DialogTitle>
                 <DialogDescription>
-                  {shownTarget && REPLACE_PROMPTS[shownTarget]}
+                  {shownTarget && tx(REPLACE_PROMPTS[shownTarget])}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -768,7 +817,7 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                   disabled={busyTarget !== null}
                   onClick={() => setConfirmTarget(null)}
                 >
-                  Cancel
+                  {tx("Cancel")}
                 </Button>
                 <DisabledReasonButton
                   type="button"
@@ -781,10 +830,10 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
                 >
                   {busyTarget !== null ? (
                     <>
-                      <Spinner className="size-3" /> Replacing…
+                      <Spinner className="size-3" /> {tx("Replacing…")}
                     </>
                   ) : (
-                    "Replace entry"
+                    tx("Replace entry")
                   )}
                 </DisabledReasonButton>
               </DialogFooter>
@@ -794,4 +843,32 @@ export function GitDesktopAsServer({ repoPath }: { repoPath: string | null }) {
       )}
     </div>
   );
+}
+
+function localizeLauncherNote(
+  note: string,
+  tx: (source: string, options?: Record<string, unknown>) => string,
+): string {
+  if (
+    note === "Added to your PATH — open a new terminal to use gitdesktop-mcp."
+  )
+    return tx(note);
+  if (note === "Removed gitdesktop from your PATH.") return tx(note);
+  if (note === "Removed the gitdesktop-mcp launcher.") return tx(note);
+
+  const linked = note.match(/^Linked gitdesktop-mcp into (.+?)\.$/);
+  if (linked)
+    return tx("Linked gitdesktop-mcp into {{directory}}.", {
+      directory: linked[1],
+    });
+
+  const linkedOffPath = note.match(
+    /^Linked gitdesktop-mcp into (.+?) — add that folder to your PATH to use it\.$/,
+  );
+  if (linkedOffPath)
+    return tx(
+      "Linked gitdesktop-mcp into {{directory}} — add that folder to your PATH to use it.",
+      { directory: linkedOffPath[1] },
+    );
+  return note;
 }

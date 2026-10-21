@@ -41,6 +41,7 @@ import {
 } from "@/lib/offline-writes";
 import { toastError } from "@/lib/toast";
 import { useKeyedEntityState } from "@/lib/use-keyed-entity-state";
+import { usePullsText } from "./use-pulls-text";
 
 export type DiffSections = ReturnType<typeof splitUnifiedDiff>;
 
@@ -184,6 +185,7 @@ export function useCommitLineAnchors(
   const refProvider = refs?.provider;
   const refRepoPath = refs?.repoPath;
   const refLens = refs?.lens;
+  const tx = usePullsText();
   return useMemo<DiffLineAnchor[]>(() => {
     if (!path) return [];
     const bodyRefs: MarkdownRefs | undefined =
@@ -209,7 +211,10 @@ export function useCommitLineAnchors(
               <div className="flex items-center gap-1.5">
                 {c.startLine != null && c.startLine !== line && (
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                    Lines {c.startLine}–{line}
+                    {tx("Lines {{start}}–{{end}}", {
+                      start: c.startLine,
+                      end: line,
+                    })}
                   </span>
                 )}
                 <p className="text-[11px] font-medium">{c.author}</p>
@@ -220,7 +225,7 @@ export function useCommitLineAnchors(
         </div>
       ),
     }));
-  }, [comments, sections, path, refProvider, refRepoPath, refLens]);
+  }, [comments, sections, path, refProvider, refRepoPath, refLens, tx]);
 }
 
 /** Map a flat commit comment onto the {@link Thread} prop shape — commit
@@ -301,6 +306,7 @@ export function CommitComments({
    *  the comment for a missing patch. */
   diffReady?: boolean;
 }) {
+  const tx = usePullsText();
   const comments = useCommitComments(
     repoPath,
     enabled && !held ? sha : null,
@@ -461,7 +467,7 @@ export function CommitComments({
     draft.set("");
     try {
       await createComment.mutateAsync({ sha, body: text });
-      toast.success("Comment added");
+      toast.success(tx("Comment added"));
     } catch (e) {
       draft.setFor(submittedFor, (prev) => (prev.trim() ? prev : text));
       toastError(e);
@@ -474,7 +480,7 @@ export function CommitComments({
     if (writesHeld) return;
     try {
       await editComment.mutateAsync({ sha, commentId, body: next });
-      toast.success("Comment updated");
+      toast.success(tx("Comment updated"));
     } catch (e) {
       toastError(e);
     }
@@ -483,7 +489,7 @@ export function CommitComments({
   async function confirmDelete(commentId: string) {
     try {
       await deleteComment.mutateAsync({ sha, commentId });
-      toast.success("Comment deleted");
+      toast.success(tx("Comment deleted"));
     } catch (e) {
       toastError(e);
     } finally {
@@ -589,7 +595,7 @@ export function CommitComments({
                             type="button"
                             onClick={() => onSelectFile(path)}
                             className="block max-w-full cursor-pointer truncate text-left font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                            title={`Open ${label} in the diff`}
+                            title={tx("Open {{label}} in the diff", { label })}
                           >
                             {label}
                           </button>
@@ -628,25 +634,27 @@ export function CommitComments({
 
             {list.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                No comments on this commit yet.
+                {tx("No comments on this commit yet.")}
               </p>
             )}
           </>
         )}
         {/* The empty line's exact element, so its arrival swaps in place. */}
         {comments.data === undefined && notice === null && (
-          <p className="text-xs text-muted-foreground">Loading comments…</p>
+          <p className="text-xs text-muted-foreground">
+            {tx("Loading comments…")}
+          </p>
         )}
       </div>
 
       {canComment && (
         <CommentComposer
           ariaLabel="Comment on this commit"
-          placeholder="Leave a comment…"
+          placeholder={tx("Leave a comment…")}
           value={draft.value}
           onChange={draft.set}
           onSubmit={() => void submit()}
-          submitLabel="Comment"
+          submitLabel={tx("Comment")}
           mentions={mentions}
           busy={busy}
           reason={composerReason}
@@ -658,7 +666,10 @@ export function CommitComments({
         onClose={() => setDeletingId(null)}
         pending={deleting !== undefined}
         reason={deleteCommentReason}
-        description={`This permanently deletes the comment on ${remoteLabel}. This cannot be undone.`}
+        description={tx(
+          "This permanently deletes the comment on {{remote}}. This cannot be undone.",
+          { remote: remoteLabel },
+        )}
         onConfirm={(commentId) => void confirmDelete(commentId)}
       />
     </div>
@@ -713,6 +724,7 @@ export function CommitLineComposer({
   /** Which repo the commit lives on (origin vs upstream lens). */
   lens: RemoteLens;
 }) {
+  const tx = usePullsText();
   const createLineComment = useCreateCommitComment(repoPath, lens);
   const mentions = useMentionCandidates({ repoPath, lens, provider });
   const [body, setBody] = useState("");
@@ -754,14 +766,14 @@ export function CommitLineComposer({
         ...(provider === "gitlab" && isRange ? { startLine: rangeFrom } : {}),
         ...(position !== null ? { position } : {}),
       })
-      .then(() => toast.success("Comment added"))
+      .then(() => toast.success(tx("Comment added")))
       .catch((e) => toastError(e));
     onClose();
   }
 
   const anchorLabel = isRange
-    ? `Lines ${rangeFrom}–${line} · ${path}`
-    : `Line ${line} · ${path}`;
+    ? `${tx("Lines {{start}}–{{end}}", { start: rangeFrom, end: line })} · ${path}`
+    : `${tx("Line {{line}}", { line })} · ${path}`;
 
   return (
     <div className="space-y-2">
@@ -772,8 +784,8 @@ export function CommitLineComposer({
         <p className="text-[11px] text-muted-foreground">{rangeHint}</p>
       )}
       <MarkdownEditor
-        aria-label={`Comment on ${anchorLabel}`}
-        placeholder="Leave a comment…"
+        aria-label={tx("Comment on {{anchor}}", { anchor: anchorLabel })}
+        placeholder={tx("Leave a comment…")}
         value={body}
         onChange={setBody}
         onKeyDown={(e) => {
@@ -801,12 +813,13 @@ export function CommitLineComposer({
           size="sm"
           disabled={!body.trim() || !canPost || createLineComment.isPending}
           reason={
-            disabledReason ?? (!body.trim() ? "Write a comment first" : null)
+            disabledReason ??
+            (!body.trim() ? tx("Write a comment first") : null)
           }
           title={SUBMIT_HINT}
           onClick={submit}
         >
-          Comment
+          {tx("Comment")}
         </DisabledReasonButton>
         <Button
           variant="ghost"
@@ -814,7 +827,7 @@ export function CommitLineComposer({
           disabled={createLineComment.isPending}
           onClick={onClose}
         >
-          Cancel
+          {tx("Cancel")}
         </Button>
       </div>
     </div>

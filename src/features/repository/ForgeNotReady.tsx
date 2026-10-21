@@ -8,6 +8,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type Ref, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import { useRelativeNow } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
@@ -24,20 +25,22 @@ import { useOfflineHold } from "@/lib/offline-writes";
 import { useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
-import {
-  PUBLISH_ACCOUNTS_OFFLINE,
-  PublishRepoControl,
-  publishPendingReason,
-  usePublishProviders,
-} from "./PublishRepoControl";
-import {
-  REMOTES_FAILED_REASON,
-  REMOTES_PENDING_REASON,
-} from "./sync-controls-state";
+import { PublishRepoControl, usePublishProviders } from "./PublishRepoControl";
 
 /** Where a Bitbucket / Atlassian API token is created. */
 const ATLASSIAN_TOKEN_URL =
   "https://id.atlassian.com/manage-profile/security/api-tokens";
+const FORGE_FEATURE_TRANSLATION_KEYS: Record<string, string> = {
+  discussions: "forgeNotReady.features.discussions",
+  issues: "forgeNotReady.features.issues",
+  pulls: "forgeNotReady.features.pullRequests",
+  "pull requests": "forgeNotReady.features.pullRequests",
+  "merge requests": "forgeNotReady.features.mergeRequests",
+  "security findings": "forgeNotReady.features.securityFindings",
+  "project boards": "forgeNotReady.features.projectBoards",
+  "workflow runs": "forgeNotReady.features.workflowRuns",
+  pipelines: "forgeNotReady.features.pipelines",
+};
 
 /**
  * Shared "this hosted feature isn't available" empty state for the Pull
@@ -78,6 +81,7 @@ export function ForgeNotReady({
    *  skeleton then, so only a caller-owned host survives the swap. */
   retryRef?: Ref<HTMLButtonElement>;
 }) {
+  const { t } = useTranslation("repository");
   const forge = useForgeStatus(repoPath);
   const settings = useSettings();
   const openSettings = useUiStore((s) => s.openSettings);
@@ -118,6 +122,8 @@ export function ForgeNotReady({
     health.data?.state === "rateLimited" ? health.data.provider : null;
 
   const provider = forge.data?.provider;
+  const featureKey = FORGE_FEATURE_TRANSLATION_KEYS[feature.toLowerCase()];
+  const featureLabel = featureKey ? t(featureKey) : feature;
   const installed = Boolean(forge.data?.installed);
   const authed = Boolean(forge.data?.authenticated);
   const remotes = useRemotes(repoPath);
@@ -158,7 +164,7 @@ export function ForgeNotReady({
         tabIndex={-1}
         className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground outline-none"
       >
-        <p>This repository's folder no longer exists on disk.</p>
+        <p>{t("forgeNotReady.folderMissing")}</p>
         <PathText path={repoPath} className="font-mono text-foreground" />
         <Button
           variant="outline"
@@ -167,7 +173,7 @@ export function ForgeNotReady({
           onClick={closeRepo}
         >
           <ArrowLeftIcon data-icon="inline-start" />
-          Back to repositories
+          {t("forgeNotReady.backToRepositories")}
         </Button>
       </div>
     );
@@ -187,8 +193,11 @@ export function ForgeNotReady({
           className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground outline-none"
         >
           <p>
-            The GitLab CLI (<span className="font-mono">glab</span>) isn't
-            installed. GitDesktop will use it to work with {feature} on GitLab.
+            {t("forgeNotReady.gitlab.cliNotInstalledLead")} (
+            <span className="font-mono">glab</span>){" "}
+            {t("forgeNotReady.gitlab.cliNotInstalledTail", {
+              feature: featureLabel,
+            })}
           </p>
           <Button
             variant="outline"
@@ -199,7 +208,7 @@ export function ForgeNotReady({
             className="cursor-pointer"
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
-            Install the GitLab CLI
+            {t("forgeNotReady.gitlab.installCli")}
           </Button>
         </div>
       );
@@ -209,7 +218,7 @@ export function ForgeNotReady({
         <RateLimitedNotice
           repoPath={repoPath}
           provider="gitlab"
-          feature={feature}
+          feature={featureLabel}
           resetAt={health.data?.resetAt}
           checkedAt={health.dataUpdatedAt}
           landingRef={landingRef}
@@ -226,10 +235,17 @@ export function ForgeNotReady({
         >
           <p>
             {sessionBroken
-              ? `Your GitLab session${
-                  healthLogin ? ` for @${healthLogin}` : ""
-                } expired or was revoked. Reconnect to keep working with ${feature}.`
-              : `Sign in to GitLab to work with ${feature}.`}
+              ? t("forgeNotReady.sessionExpired", {
+                  provider: "GitLab",
+                  loginSuffix: healthLogin
+                    ? t("forgeNotReady.loginSuffix", { login: healthLogin })
+                    : "",
+                  feature: featureLabel,
+                })
+              : t("forgeNotReady.signInToWork", {
+                  provider: "GitLab",
+                  feature: featureLabel,
+                })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -243,7 +259,9 @@ export function ForgeNotReady({
                 })
               }
             >
-              {sessionBroken ? "Reconnect GitLab…" : "Sign in to GitLab…"}
+              {sessionBroken
+                ? t("forgeNotReady.reconnect", { provider: "GitLab" })
+                : t("forgeNotReady.signIn", { provider: "GitLab" })}
             </Button>
             <Button
               variant="ghost"
@@ -258,12 +276,11 @@ export function ForgeNotReady({
               }
             >
               <TerminalIcon data-icon="inline-start" />
-              Open terminal to sign in
+              {t("forgeNotReady.openTerminalToSignIn")}
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Tip: choose the browser (OAuth) option — OAuth sessions renew
-            themselves, while personal access tokens expire.
+            {t("forgeNotReady.oauthTip")}
           </p>
         </div>
       );
@@ -275,10 +292,12 @@ export function ForgeNotReady({
         className="px-3 py-4 text-xs text-muted-foreground outline-none"
       >
         <p>
-          GitDesktop couldn't connect this repository to GitLab, so {feature}{" "}
-          aren't available here. Run{" "}
-          <span className="font-mono text-foreground">glab auth status</span> in
-          a terminal to check the host's connection.
+          {t("forgeNotReady.couldNotConnect", {
+            provider: "GitLab",
+            feature: featureLabel,
+          })}{" "}
+          <span className="font-mono text-foreground">glab auth status</span>{" "}
+          {t("forgeNotReady.checkConnectionInTerminal")}
         </p>
       </div>
     );
@@ -296,15 +315,12 @@ export function ForgeNotReady({
       >
         {!installed ? (
           <p>
-            Connect your Bitbucket account with an Atlassian API token to see{" "}
-            {feature} here.
+            {t("forgeNotReady.bitbucket.connectAccount", {
+              feature: featureLabel,
+            })}
           </p>
         ) : (
-          <p>
-            GitDesktop couldn't sign in to Bitbucket with the saved token — it
-            may be expired, revoked, or missing scopes. Update it in Settings →
-            Accounts.
-          </p>
+          <p>{t("forgeNotReady.bitbucket.savedTokenInvalid")}</p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -313,7 +329,7 @@ export function ForgeNotReady({
             onClick={() => openSettings("accounts")}
           >
             <GearSixIcon data-icon="inline-start" />
-            Open Settings → Accounts
+            {t("forgeNotReady.openSettingsAccounts")}
           </Button>
           {!installed && (
             <Button
@@ -323,7 +339,7 @@ export function ForgeNotReady({
               onClick={() => openUrl(ATLASSIAN_TOKEN_URL)}
             >
               <ArrowSquareOutIcon data-icon="inline-start" />
-              Create an API token
+              {t("forgeNotReady.bitbucket.createToken")}
             </Button>
           )}
         </div>
@@ -348,7 +364,7 @@ export function ForgeNotReady({
         {/* Outside the aria-busy subtree: busy suppresses descendant live-region
             announcements, and this arm unmounts instead of flipping. */}
         <span role="status" className="sr-only">
-          {REMOTES_PENDING_REASON}
+          {t("forgeNotReady.checkingRemotes")}
         </span>
         <div aria-busy="true" />
       </div>
@@ -370,9 +386,7 @@ export function ForgeNotReady({
         tabIndex={-1}
         className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground outline-none"
       >
-        <p>
-          {REMOTES_FAILED_REASON}, so {feature} aren't available right now.
-        </p>
+        <p>{t("forgeNotReady.remotesFailed", { feature: featureLabel })}</p>
       </div>
     );
   }
@@ -388,20 +402,22 @@ export function ForgeNotReady({
         tabIndex={-1}
         className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground outline-none"
       >
-        <p>
-          This repository isn't published yet. Publish it to use {feature} here.
-        </p>
+        <p>{t("forgeNotReady.notPublished", { feature: featureLabel })}</p>
         <PublishRepoControl
           repoPath={repoPath}
           providers={providers}
           disabledTitle={
-            settled ? undefined : publishPendingReason(offlineHold)
+            settled
+              ? undefined
+              : offlineHold
+                ? t("forgeNotReady.publishAccountsOffline")
+                : t("forgeNotReady.checkingPublishAccounts")
           }
         />
         {/* Only while the button is held: the targets probe parks offline,
             so the accounts are checked only once the connection returns. */}
         {!settled && offlineHold && providers.length === 0 && (
-          <p>{PUBLISH_ACCOUNTS_OFFLINE}</p>
+          <p>{t("forgeNotReady.publishAccountsOffline")}</p>
         )}
       </div>
     );
@@ -412,7 +428,7 @@ export function ForgeNotReady({
       <RateLimitedNotice
         repoPath={repoPath}
         provider="github"
-        feature={feature}
+        feature={featureLabel}
         resetAt={health.data?.resetAt}
         checkedAt={health.dataUpdatedAt}
         landingRef={landingRef}
@@ -432,7 +448,7 @@ export function ForgeNotReady({
       <RateLimitedNotice
         repoPath={repoPath}
         provider="github"
-        feature={feature}
+        feature={featureLabel}
         resetAt={null}
         checkedAt={forge.dataUpdatedAt}
         landingRef={landingRef}
@@ -450,10 +466,7 @@ export function ForgeNotReady({
         tabIndex={-1}
         className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground outline-none"
       >
-        <p>
-          GitDesktop couldn't reach this repository's host, so {feature} aren't
-          available right now. Check your network connection.
-        </p>
+        <p>{t("forgeNotReady.hostUnreachable", { feature: featureLabel })}</p>
         <Button
           ref={retryRef}
           variant="outline"
@@ -462,7 +475,7 @@ export function ForgeNotReady({
           // Joins a probe already in flight rather than spawning a second one.
           onClick={() => void forge.refetch({ cancelRefetch: false })}
         >
-          Retry
+          {t("forgeNotReady.retry")}
         </Button>
       </div>
     );
@@ -481,8 +494,11 @@ export function ForgeNotReady({
       {!installed ? (
         <>
           <p>
-            The GitHub CLI (<span className="font-mono">gh</span>) isn't
-            installed. GitDesktop uses it to work with {feature}.
+            {t("forgeNotReady.github.cliNotInstalledLead")} (
+            <span className="font-mono">gh</span>){" "}
+            {t("forgeNotReady.github.cliNotInstalledTail", {
+              feature: featureLabel,
+            })}
           </p>
           <Button
             variant="outline"
@@ -491,17 +507,24 @@ export function ForgeNotReady({
             className="cursor-pointer"
           >
             <GithubLogoIcon data-icon="inline-start" />
-            Install GitHub CLI
+            {t("forgeNotReady.github.installCli")}
           </Button>
         </>
       ) : !authed ? (
         <>
           <p>
             {sessionBroken
-              ? `Your GitHub session${
-                  healthLogin ? ` for @${healthLogin}` : ""
-                } expired or was revoked. Reconnect to keep working with ${feature}.`
-              : `Sign in to GitHub to work with ${feature}.`}
+              ? t("forgeNotReady.sessionExpired", {
+                  provider: "GitHub",
+                  loginSuffix: healthLogin
+                    ? t("forgeNotReady.loginSuffix", { login: healthLogin })
+                    : "",
+                  feature: featureLabel,
+                })
+              : t("forgeNotReady.signInToWork", {
+                  provider: "GitHub",
+                  feature: featureLabel,
+                })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -515,7 +538,9 @@ export function ForgeNotReady({
                 })
               }
             >
-              {sessionBroken ? "Reconnect GitHub…" : "Sign in to GitHub…"}
+              {sessionBroken
+                ? t("forgeNotReady.reconnect", { provider: "GitHub" })
+                : t("forgeNotReady.signIn", { provider: "GitHub" })}
             </Button>
             <Button
               variant="ghost"
@@ -530,16 +555,18 @@ export function ForgeNotReady({
               }
             >
               <TerminalIcon data-icon="inline-start" />
-              Open terminal to sign in
+              {t("forgeNotReady.openTerminalToSignIn")}
             </Button>
           </div>
         </>
       ) : (
         <p>
-          GitDesktop couldn't connect this repository to GitHub, so {feature}{" "}
-          aren't available here. Run{" "}
-          <span className="font-mono text-foreground">gh auth status</span> in a
-          terminal to check the connection.
+          {t("forgeNotReady.couldNotConnect", {
+            provider: "GitHub",
+            feature: featureLabel,
+          })}{" "}
+          <span className="font-mono text-foreground">gh auth status</span>{" "}
+          {t("forgeNotReady.checkConnectionInTerminal")}
         </p>
       )}
     </div>
@@ -571,6 +598,7 @@ function RateLimitedNotice({
   /** The panel's focus landing spot, shared by every root it renders. */
   landingRef: Ref<HTMLDivElement>;
 }) {
+  const { t } = useTranslation("repository");
   const queryClient = useQueryClient();
   const now = useRelativeNow();
   const label = providerLabel(provider);
@@ -607,12 +635,16 @@ function RateLimitedNotice({
       className="space-y-1.5 px-3 py-4 text-xs text-muted-foreground outline-none"
     >
       <p className="font-medium text-foreground">
-        {label} API rate limit reached
+        {t("forgeNotReady.rateLimitReached", { provider: label })}
       </p>
       <p>
-        {`${label}'s API rate limit is in effect${
-          resumesAt ? ` — access resumes at ${resumesAt}` : ""
-        }. You don't need to sign in again: ${feature} will load once it lifts.`}
+        {t("forgeNotReady.rateLimitBody", {
+          provider: label,
+          resetText: resumesAt
+            ? t("forgeNotReady.rateLimitResumesAt", { time: resumesAt })
+            : "",
+          feature,
+        })}
       </p>
     </div>
   );

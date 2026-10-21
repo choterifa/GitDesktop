@@ -1,4 +1,5 @@
 import { ArrowLeftIcon, GearIcon, QuestionIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { BranchCiBadge } from "@/features/actions/BranchCiBadge";
@@ -16,6 +17,7 @@ export function RepoHeader({ repoPath }: { repoPath: string }) {
   const openSettings = useUiStore((s) => s.openSettings);
   const openHelp = useUiStore((s) => s.openHelp);
   const updateAvailable = Boolean(useUpdateCheck().data);
+  const { t } = useTranslation("repositoryOperations");
 
   return (
     // The named container drives the compact layout of the branch, badges and
@@ -24,8 +26,8 @@ export function RepoHeader({ repoPath }: { repoPath: string }) {
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Back to repositories"
-        title="Back to repositories"
+        aria-label={t("repoHeader.back")}
+        title={t("repoHeader.back")}
         onClick={closeRepo}
       >
         <ArrowLeftIcon />
@@ -42,8 +44,8 @@ export function RepoHeader({ repoPath }: { repoPath: string }) {
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="User guide"
-        title="User guide (F1)"
+        aria-label={t("repoHeader.help")}
+        title={t("repoHeader.helpTitle")}
         onClick={openHelp}
       >
         <QuestionIcon />
@@ -53,9 +55,15 @@ export function RepoHeader({ repoPath }: { repoPath: string }) {
         size="icon-sm"
         className="relative"
         aria-label={
-          updateAvailable ? "Settings — update available" : "Settings"
+          updateAvailable
+            ? t("repoHeader.settingsUpdateAvailable")
+            : t("repoHeader.settings")
         }
-        title={updateAvailable ? "Settings — update available" : "Settings"}
+        title={
+          updateAvailable
+            ? t("repoHeader.settingsUpdateAvailable")
+            : t("repoHeader.settings")
+        }
         onClick={() => openSettings()}
       >
         <GearIcon />

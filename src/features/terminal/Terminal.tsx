@@ -2,6 +2,7 @@ import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
+import { i18n } from "@/lib/i18n";
 import {
   type PtyOpts,
   ptyClose,
@@ -101,8 +102,16 @@ export function Terminal({
           term.write(decodeBase64(e.data));
         } else {
           exited = true;
-          const code = e.code != null ? ` (code ${e.code})` : "";
-          term.write(`\r\n\x1b[2m[process exited${code}]\x1b[0m\r\n`);
+          const code =
+            e.code != null
+              ? ` ${i18n.t("exitCodeSuffix", {
+                  ns: "terminal",
+                  code: e.code,
+                })}`
+              : "";
+          term.write(
+            `\r\n\x1b[2m[${i18n.t("processExited", { ns: "terminal" })}${code}]\x1b[0m\r\n`,
+          );
           onExitRef.current?.(e.code);
         }
       },

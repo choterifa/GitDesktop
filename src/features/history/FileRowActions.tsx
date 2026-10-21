@@ -1,5 +1,6 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -49,6 +50,7 @@ export function FileRowActions({
   /** The file rows (each carrying `data-path`). */
   children: ReactNode;
 }) {
+  const { t } = useTranslation("history");
   // The path under the cursor when the menu opened, or null for blank space.
   const [menuPath, setMenuPath] = useState<string | null>(null);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
@@ -84,11 +86,11 @@ export function FileRowActions({
         {menuPath && (
           <ContextMenuContent className="min-w-56">
             <ContextMenuItem onClick={() => setHistoryPath(menuPath)}>
-              View file history…
+              {t("fileRow.viewHistory")}
             </ContextMenuItem>
             {blameRev && (
               <ContextMenuItem onClick={() => setBlamePath(menuPath)}>
-                Blame…
+                {t("fileRow.blame")}
               </ContextMenuItem>
             )}
           </ContextMenuContent>

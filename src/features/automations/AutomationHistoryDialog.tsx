@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { create } from "zustand";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
 import { RelativeTime } from "@/components/relative-time";
@@ -44,7 +45,6 @@ import {
   type ActionId,
   effectiveActions,
   LIFECYCLE_EVENTS,
-  LIFECYCLE_LABELS,
   repoEntry,
 } from "@/lib/automations/types";
 import { clipTitle, clipTitleFromText } from "@/lib/clip-title";
@@ -82,6 +82,10 @@ export const useAutomationHistoryDialog =
 type TargetKind = AutomationHistoryEntry["targetKind"];
 type Outcome = AutomationHistoryEntry["outcomes"][number];
 type Tone = "success" | "destructive" | "warning" | "info" | "muted";
+type AutomationsTranslate = (
+  key: string,
+  options?: Record<string, unknown>,
+) => string;
 
 /** Tone → semantic token. Always applied to the WORDS of a reason line, never to
  *  the row's glyph, so no state is carried by color alone (WCAG AA). */
@@ -108,19 +112,12 @@ const TRIGGER_GLYPH: Partial<Record<AutomationTrigger, typeof LightningIcon>> =
 
 /** Where a delivered result landed, which is a property of the target, not of
  *  the outcome code. */
-const DELIVERED_TEXT: Record<TargetKind, string> = {
-  remote: "Posted as a comment",
-  local: "Posted as a comment",
-  commit: "Review saved",
-  none: "Delivered",
-};
-
 interface ReasonLine {
   text: string;
   tone: Tone;
+  /** Short reason used when several skipped commits are coalesced. */
+  countText?: string;
 }
-
-const UNKNOWN_REASON: ReasonLine = { text: "Unknown", tone: "muted" };
 
 /**
  * Reason copy + tone per outcome code, total over the union so a code added
@@ -130,10 +127,21 @@ const UNKNOWN_REASON: ReasonLine = { text: "Unknown", tone: "muted" };
  */
 const OUTCOME_REASON: Record<
   AutomationOutcomeCode,
-  (entry: AutomationHistoryEntry, outcome: Outcome, live: boolean) => ReasonLine
+  (
+    entry: AutomationHistoryEntry,
+    outcome: Outcome,
+    live: boolean,
+    t: AutomationsTranslate,
+  ) => ReasonLine
 > = {
-  delivered: (entry) => ({
-    text: DELIVERED_TEXT[entry.targetKind] ?? "Delivered",
+  delivered: (entry, _outcome, _live, t) => ({
+    text: t(
+      entry.targetKind === "remote" || entry.targetKind === "local"
+        ? "history.reasons.postedComment"
+        : entry.targetKind === "commit"
+          ? "history.reasons.reviewSaved"
+          : "history.reasons.delivered",
+    ),
     tone: "success",
   }),
   // Liveness, never the clock: instances share this store, so a row's age says
@@ -141,86 +149,80 @@ const OUTCOME_REASON: Record<
   // where this instance can show the row it points at; everything else — a
   // crash mid-run, or a run another instance owns and will still post — is the
   // same honest statement about the RECORD, which never settled.
-  started: (entry, _outcome, live) =>
+  started: (entry, _outcome, live, t) =>
     live
-      ? { text: "Running — watch it in Activity", tone: "info" }
+      ? { text: t("history.reasons.running"), tone: "info" }
       : {
           // Commit runs register a degenerate live target (no commit kind, empty
           // ref), so their rows can never match liveness — the honest set for
           // them includes "still running here".
-          text:
+          text: t(
             entry.targetKind === "commit"
-              ? "Didn't settle — it may still be running, or the app closed mid-run"
-              : "Didn't settle — the app closed mid-run, or another instance owns it",
+              ? "history.reasons.unsettledCommit"
+              : "history.reasons.unsettledOther",
+          ),
           tone: "warning",
         },
-  "branch-skip": () => ({
-    text: "Skipped — branch conditions didn't match",
-    tone: "muted",
-  }),
-  "needs-first-review": () => ({
-    text: "Skipped — waiting for a first review in this mode",
-    tone: "muted",
-  }),
-  "head-covered": () => ({
-    text: "Skipped — this head was already reviewed",
-    tone: "muted",
-  }),
-  "head-dismissed": () => ({
-    text: "Skipped — this head was dismissed",
-    tone: "muted",
-  }),
-  "already-reviewed": () => ({
-    text: "Skipped — already reviewed",
-    tone: "muted",
-  }),
-  "draft-skipped": () => ({
-    text: "Skipped — draft (draft reviews are off)",
-    tone: "muted",
-  }),
+  "branch-skip": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.branchSkip"),
+  "needs-first-review": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.needsFirstReview"),
+  "head-covered": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.headCovered"),
+  "head-dismissed": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.headDismissed"),
+  "already-reviewed": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.alreadyReviewed"),
+  "draft-skipped": (_entry, _outcome, _live, t) =>
+    skippedReason(t, "history.reasons.draftSkipped"),
   // The recorder attaches a detail when it could NOT measure the PR's age, so
   // the 14-day claim is only made where an age was actually read.
-  "too-old": (_entry, outcome) => ({
-    text: asText(outcome.detail) || "Skipped — opened more than 14 days ago",
-    tone: "muted",
-  }),
+  "too-old": (_entry, outcome, _live, t) =>
+    asText(outcome.detail)
+      ? { text: asText(outcome.detail), tone: "muted" }
+      : skippedReason(t, "history.reasons.tooOld"),
   // The runner attaches a detail whenever filtering emptied the diff, so the
   // fallback speaks only for a diff that had no changes.
-  "empty-diff": (_entry, outcome) => ({
-    text: asText(outcome.detail) || "Skipped — no changes to review",
+  "empty-diff": (_entry, outcome, _live, t) =>
+    asText(outcome.detail)
+      ? { text: asText(outcome.detail), tone: "muted" }
+      : skippedReason(t, "history.reasons.emptyDiff"),
+  cancelled: (_entry, _outcome, _live, t) => ({
+    text: t("history.reasons.cancelled"),
     tone: "muted",
   }),
-  cancelled: () => ({ text: "Cancelled", tone: "muted" }),
   // Not an ending: the run holding the claim is producing this review, so the
   // "Skipped — " grammar the other skips share would read as a dead end.
-  "claim-held": () => ({
-    text: "Handed off — another review run owns this head",
+  "claim-held": (_entry, _outcome, _live, t) => ({
+    text: t("history.reasons.claimHeld"),
     tone: "muted",
   }),
   // The Run-now toast sends users HERE for the error, so the recorded detail
   // must render (the row truncates with a full-text hover tooltip).
-  "eligibility-error": (_entry, outcome) => ({
+  "eligibility-error": (_entry, outcome, _live, t) => ({
     text: asText(outcome.detail)
-      ? `Couldn't read review history — ${asText(outcome.detail)}`
-      : "Couldn't read review history — treated as already reviewed",
+      ? t("history.reasons.eligibilityErrorDetail", {
+          detail: asText(outcome.detail),
+        })
+      : t("history.reasons.eligibilityError"),
     tone: "warning",
   }),
-  failed: (_entry, outcome) => ({
+  failed: (_entry, outcome, _live, t) => ({
     text: asText(outcome.detail)
-      ? `Failed — ${asText(outcome.detail)}`
-      : "Failed",
+      ? t("history.reasons.failedDetail", { detail: asText(outcome.detail) })
+      : t("history.reasons.failed"),
     tone: "destructive",
   }),
-  "timed-out": () => ({
-    text: "Timed out — partial output kept",
+  "timed-out": (_entry, _outcome, _live, t) => ({
+    text: t("history.reasons.timedOut"),
     tone: "destructive",
   }),
-  paused: () => ({
-    text: "AI features hidden — automations paused",
+  paused: (_entry, _outcome, _live, t) => ({
+    text: t("history.reasons.paused"),
     tone: "muted",
   }),
-  resumed: () => ({
-    text: "AI features shown — automations resumed",
+  resumed: (_entry, _outcome, _live, t) => ({
+    text: t("history.reasons.resumed"),
     tone: "muted",
   }),
 };
@@ -251,10 +253,24 @@ function asCount(value: unknown): number {
     : 1;
 }
 
-function actionLabel(action: ActionId | null): string {
+function actionLabel(
+  action: ActionId | null,
+  t: (key: string) => string,
+): string {
   // A row can record a decision that belongs to no single action (a marker, a
   // whole-event skip), and the stored id may be one this build doesn't know.
-  return (action && ACTION_LABELS[action]) || "Automations";
+  return action && Object.hasOwn(ACTION_LABELS, action)
+    ? t(`actions.${action}`)
+    : t("section.title");
+}
+
+function skippedReason(t: AutomationsTranslate, key: string): ReasonLine {
+  const countText = t(key);
+  return {
+    text: t("history.reasons.skipped", { reason: countText }),
+    countText,
+    tone: "muted",
+  };
 }
 
 /**
@@ -281,9 +297,16 @@ function reasonFor(
   entry: AutomationHistoryEntry,
   outcome: Outcome,
   live: boolean,
+  t: AutomationsTranslate,
 ): ReasonLine {
-  if (!Object.hasOwn(OUTCOME_REASON, outcome.code)) return UNKNOWN_REASON;
-  return OUTCOME_REASON[outcome.code]?.(entry, outcome, live) ?? UNKNOWN_REASON;
+  if (!Object.hasOwn(OUTCOME_REASON, outcome.code))
+    return { text: t("history.reasons.unknown"), tone: "muted" };
+  return (
+    OUTCOME_REASON[outcome.code]?.(entry, outcome, live, t) ?? {
+      text: t("history.reasons.unknown"),
+      tone: "muted",
+    }
+  );
 }
 
 /**
@@ -311,55 +334,72 @@ function viewableResultId(
  *  unmodified, so speech input can address the button by what it reads (WCAG
  *  2.5.3). A commit made on a detached HEAD with no subject titles as "", where
  *  the comma join would trail against nothing. */
-function viewResultLabel(action: ActionId | null, title: string): string {
-  const base = `View result — ${actionLabel(action)}`;
-  return title ? `${base}, ${title}` : base;
+function viewResultLabel(
+  action: ActionId | null,
+  title: string,
+  t: AutomationsTranslate,
+): string {
+  return t("history.viewResultLabel", {
+    action: actionLabel(action, t),
+    title: title ? `, ${title}` : "",
+  });
 }
 
 /** Marker rows carry no target, so their title comes from what was recorded. */
-function markerTitle(outcomes: Outcome[]): string {
-  if (outcomes.some((o) => o.code === "resumed")) return "Automations resumed";
-  if (outcomes.some((o) => o.code === "paused")) return "Automations paused";
-  return "Automations";
+function markerTitle(outcomes: Outcome[], t: AutomationsTranslate): string {
+  if (outcomes.some((o) => o.code === "resumed"))
+    return t("history.markerResumed");
+  if (outcomes.some((o) => o.code === "paused"))
+    return t("history.markerPaused");
+  return t("section.title");
 }
 
-const TITLE_FOR: Record<
-  TargetKind,
-  (entry: AutomationHistoryEntry, outcomes: Outcome[]) => string
-> = {
-  remote: (entry) => {
-    const title = asText(entry.title);
-    const ref = asText(entry.ref);
-    return title ? `#${ref} · ${title}` : `#${ref}`;
-  },
-  local: (entry) => asText(entry.title),
-  commit: (entry) => {
-    const title = asText(entry.title);
-    // ref is the BRANCH, which a commit made on a detached HEAD records as ""
-    // — the separator must not render against an empty side.
-    const ref = asText(entry.ref);
-    if (!title) return ref;
-    return ref ? `${ref} · ${title}` : title;
-  },
-  none: (_entry, outcomes) => markerTitle(outcomes),
-};
+function titleFor(
+  entry: AutomationHistoryEntry,
+  outcomes: Outcome[],
+  t: AutomationsTranslate,
+): string {
+  switch (entry.targetKind) {
+    case "remote": {
+      const title = asText(entry.title);
+      const ref = asText(entry.ref);
+      return title ? `#${ref} · ${title}` : `#${ref}`;
+    }
+    case "local":
+      return asText(entry.title);
+    case "commit": {
+      const title = asText(entry.title);
+      // ref is the BRANCH, which a commit made on a detached HEAD records as ""
+      // — the separator must not render against an empty side.
+      const ref = asText(entry.ref);
+      if (!title) return ref;
+      return ref ? `${ref} · ${title}` : title;
+    }
+    case "none":
+      return markerTitle(outcomes, t);
+  }
+}
 
 /** A coalesced row must read as a summary, not as one event: commit rows count
  *  the commits inside the skip, PR rows count the times the same decision
  *  recurred for one pull request. Only steady outcomes coalesce, so only they
  *  carry the count into their words. */
 function joinCount(
-  text: string,
+  reason: ReasonLine,
   count: number,
   kind: TargetKind,
   code: AutomationOutcomeCode,
+  t: AutomationsTranslate,
 ): string {
-  if (count <= 1 || !STEADY_OUTCOME_CODES.includes(code)) return text;
-  if (kind !== "commit") return `${text} (seen ${count}×)`;
-  const skip = "Skipped — ";
-  return text.startsWith(skip)
-    ? `Skipped ${count} commits — ${text.slice(skip.length)}`
-    : `${text} (${count} commits)`;
+  if (count <= 1 || !STEADY_OUTCOME_CODES.includes(code)) return reason.text;
+  if (kind !== "commit")
+    return t("history.count.seen", { count, text: reason.text });
+  if (reason.countText !== undefined)
+    return t("history.count.skippedCommits", {
+      count,
+      reason: reason.countText,
+    });
+  return t("history.count.commits", { count, text: reason.text });
 }
 
 type BannerTone = "info" | "warning";
@@ -400,6 +440,7 @@ function Banner({ tone, children }: { tone: BannerTone; children: ReactNode }) {
  * one would spend money and post publicly from a surface that reads as a log.
  */
 export function AutomationHistoryDialogHost() {
+  const { t } = useTranslation("automations");
   const openFor = useAutomationHistoryDialog((s) => s.openFor);
   const close = useAutomationHistoryDialog((s) => s.close);
   // Retained so the body keeps its repo through the close fade instead of
@@ -440,10 +481,8 @@ export function AutomationHistoryDialogHost() {
           config summary, and the records scroll as one body. */}
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Automation history</DialogTitle>
-          <DialogDescription>
-            What this repository's automations ran, what they skipped, and why.
-          </DialogDescription>
+          <DialogTitle>{t("history.title")}</DialogTitle>
+          <DialogDescription>{t("history.description")}</DialogDescription>
         </DialogHeader>
         {shownRepo !== null && (
           <AutomationHistoryBody
@@ -466,6 +505,7 @@ function AutomationHistoryBody({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("automations");
   const aiEnabled = useAiEnabled();
   const queryClient = useQueryClient();
   const reviewTasks = useReviewTasks();
@@ -614,15 +654,9 @@ function AutomationHistoryBody({
     // rows as a list, not as inset cards.
     <div className="-mx-4 -mb-4 min-h-0 flex-1 overflow-x-hidden overflow-y-auto border-t">
       {COLD_START_AUTOMATIONS_OFF && (
-        <Banner tone="info">
-          Automations are off in cold-start test mode.
-        </Banner>
+        <Banner tone="info">{t("history.coldStartBanner")}</Banner>
       )}
-      {!aiEnabled && (
-        <Banner tone="info">
-          Automations are paused while AI features are hidden.
-        </Banner>
-      )}
+      {!aiEnabled && <Banner tone="info">{t("history.pausedBanner")}</Banner>}
       {/* The effective config IS the answer to "why did nothing run for that
           event" — stated once here rather than repeated on every absent row. */}
       <div className="border-b px-3 py-2">
@@ -632,21 +666,20 @@ function AutomationHistoryBody({
             className="truncate text-[11px] text-muted-foreground"
             onMouseEnter={clipTitleFromText}
           >
-            <span className="font-medium">{LIFECYCLE_LABELS[lifecycle]}:</span>{" "}
+            <span className="font-medium">{t(`lifecycles.${lifecycle}`)}:</span>{" "}
             {actions.length === 0
-              ? "off"
-              : actions.map((a) => ACTION_LABELS[a.action]).join(" + ")}
+              ? t("history.off")
+              : actions.map((a) => actionLabel(a.action, t)).join(" + ")}
           </p>
         ))}
       </div>
       {rows.length > 0 && !anyEnabled && (
         <Banner tone="warning">
-          No automation is enabled for this repository
+          {t("history.noAutomationEnabled")}
           {newestStamp ? (
             <>
-              {" — the most recent decision here was recorded "}
-              <RelativeTime date={newestStamp} />
-              {"."}
+              {t("history.newestDecisionRecorded")}
+              <RelativeTime date={newestStamp} />.
             </>
           ) : (
             "."
@@ -654,7 +687,7 @@ function AutomationHistoryBody({
         </Banner>
       )}
       {history.isPending ? (
-        <ListRowSkeletons rows={4} lines={2} name="automation history" />
+        <ListRowSkeletons rows={4} lines={2} name={t("history.title")} />
       ) : (
         <HistoryList
           rows={rows}
@@ -697,17 +730,16 @@ function HistoryList({
   onFocusRow: (id: string) => void;
   onSetUp: () => void;
 }) {
+  const { t } = useTranslation("automations");
   if (rows.length === 0) {
     return (
       <div className="px-3 pt-4 pb-6 text-center">
         <p className="text-xs font-medium">
-          {anyEnabled
-            ? "No decisions recorded yet."
-            : "No automations are set up for this repository."}
+          {anyEnabled ? t("history.emptyRecorded") : t("history.emptyNotSetUp")}
         </p>
         {anyEnabled ? (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Decisions appear here as commits land and pull requests are checked.
+            {t("history.emptyDescription")}
           </p>
         ) : (
           <Button
@@ -716,7 +748,7 @@ function HistoryList({
             className="mt-2"
             onClick={onSetUp}
           >
-            Set up automations
+            {t("history.setUp")}
           </Button>
         )}
       </div>
@@ -732,7 +764,7 @@ function HistoryList({
       // arrival; `group` is the generic role that can hold one.
       role="group"
       tabIndex={0}
-      aria-label="Recorded automation decisions"
+      aria-label={t("history.recordedDecisions")}
       className="outline-none"
       onKeyDown={onListKeyDown}
     >
@@ -766,10 +798,10 @@ function HistoryRow({
   onViewResult: (resultId: string) => void;
   onFocusRow: (id: string) => void;
 }) {
+  const { t } = useTranslation("automations");
   const outcomes = Array.isArray(entry.outcomes) ? entry.outcomes : [];
   const Glyph = glyphFor(entry);
-  const title =
-    TITLE_FOR[entry.targetKind]?.(entry, outcomes) ?? markerTitle(outcomes);
+  const title = titleFor(entry, outcomes, t);
   const count = asCount(entry.count);
   const stamp = stampMs(entry.ts) !== null ? entry.ts : null;
   // Only a pull request has somewhere to go; a commit or marker row would give
@@ -801,6 +833,7 @@ function HistoryRow({
             entry,
             outcome,
             isLive(entry, outcome.action),
+            t,
           );
           // Per outcome, not per row: one commit can settle a code review AND a
           // security audit into the same row, and each keeps its own result.
@@ -818,15 +851,10 @@ function HistoryRow({
                 onMouseEnter={clipTitleFromText}
               >
                 <span className="text-muted-foreground">
-                  {actionLabel(outcome.action)} ·{" "}
+                  {actionLabel(outcome.action, t)} ·{" "}
                 </span>
                 <span className={TONE_CLASS[reason.tone]}>
-                  {joinCount(
-                    reason.text,
-                    count,
-                    entry.targetKind,
-                    outcome.code,
-                  )}
+                  {joinCount(reason, count, entry.targetKind, outcome.code, t)}
                 </span>
               </span>
               {/* Only commit outcomes qualify, and a commit row is never
@@ -837,7 +865,7 @@ function HistoryRow({
                   variant="ghost"
                   size="xs"
                   className="-my-0.5 shrink-0"
-                  aria-label={viewResultLabel(outcome.action, title)}
+                  aria-label={viewResultLabel(outcome.action, title, t)}
                   // Tab can land here without the arrow cursor ever moving, and
                   // an unseated cursor sends the next arrow to the start or the
                   // end of the list, not to the neighboring row. Same state the
@@ -845,7 +873,7 @@ function HistoryRow({
                   onFocus={() => onFocusRow(entry.id)}
                   onClick={() => onViewResult(resultId)}
                 >
-                  View result
+                  {t("history.viewResult")}
                 </Button>
               )}
             </span>
@@ -853,7 +881,7 @@ function HistoryRow({
         })}
         {latched && (
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
-            Won't retry for this head until you push or relaunch.
+            {t("history.wontRetry")}
           </span>
         )}
       </span>

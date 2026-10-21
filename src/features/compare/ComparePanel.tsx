@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type MouseEvent, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { ListRowSkeletons } from "@/components/list-row-skeleton";
@@ -31,7 +32,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CompareBranchCombobox } from "@/features/compare/CompareBranchCombobox";
 import { CommitContextMenuItems } from "@/features/history/CommitContextMenu";
 import {
-  CHERRY_PICK_ALREADY_APPLIED,
   checkoutCommitConfirm,
   checkoutCommitSuccessToast,
   cherryPickCommitConfirm,
@@ -45,7 +45,7 @@ import {
 } from "@/features/history/HistoryDialogs";
 import { useCommitCommentsGate } from "@/features/pulls/CommitComments";
 import { CreatePrDialog } from "@/features/pulls/CreatePrDialog";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { branchNamePlaceholder } from "@/lib/ai/branch-prefixes";
 import { suppressContextMenu } from "@/lib/context-menu";
 import { useAppForm } from "@/lib/form";
@@ -78,6 +78,8 @@ import { useRetained } from "@/lib/use-retained";
 import { cn } from "@/lib/utils";
 
 export function ComparePanel({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("compare");
+  const { t: historyT } = useTranslation("history");
   const status = useRepoStatus(repoPath);
   const branches = useBranches(repoPath);
   const defaultBranch = useDefaultBranch(repoPath);
@@ -103,7 +105,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
   // flips the affordance to "View" instead of "Create".
   const prProbe = forgeFeatureReady(gh.data, "pullRequests");
   const isGitLab = gh.data?.provider === "gitlab";
-  const prNoun = isGitLab ? "merge request" : "pull request";
+  const prNoun = isGitLab ? t("pr.mergeRequest") : t("pr.pullRequest");
   // Origin lens: this duplicate probe is about the FORK's own branch (the repo's
   // origin), not any upstream contribution. The lens switcher is a PR/Issues-tab
   // affordance; the Compare tab always reads origin.
@@ -214,7 +216,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       if (!branchHash) return;
       // This create always checks the branch out, so it moves HEAD.
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(promotionBlocksCheckoutCopy());
         return;
       }
       const name = sanitizeRefName(value.name);
@@ -224,7 +226,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
           checkout: true,
           startPoint: branchHash,
         });
-        toast.success(`Created branch ${name}`);
+        toast.success(t("toast.branchCreated", { name }));
         setBranchHash(null);
       } catch (e) {
         onError(e);
@@ -239,7 +241,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       const name = sanitizeRefName(value.name);
       try {
         await createTag.mutateAsync({ name, hash: tagHash });
-        toast.success(`Created tag ${name}`);
+        toast.success(t("toast.tagCreated", { name }));
         setTagHash(null);
       } catch (e) {
         onError(e);
@@ -251,11 +253,11 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
   // pose a different question than its twin.
   async function doCheckoutCommit(hash: string) {
     const checkoutIn = repoPath;
-    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(checkoutCommitConfirm(hash, historyT)))) return;
     if (refuseIfSwitched(checkoutIn, "nothing was checked out")) return;
     // Below the confirm: a promote can start while the prompt is open.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -264,7 +266,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       onError(e);
       return;
     }
-    toast.success(checkoutCommitSuccessToast(hash));
+    toast.success(checkoutCommitSuccessToast(hash, historyT));
   }
 
   // A merge commit routes to the mainline-parent dialog instead of the confirm.
@@ -274,10 +276,10 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       return;
     }
     const revertIn = repoPath;
-    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash)))) return;
+    if (!(await useConfirm.getState().ask(revertCommitConfirm(hash, historyT)))) return;
     if (refuseIfSwitched(revertIn, "nothing was reverted")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
@@ -295,10 +297,10 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
     const pickIn = repoPath;
     const ok = await useConfirm
       .getState()
-      .ask(cherryPickCommitConfirm(hash, currentName));
+      .ask(cherryPickCommitConfirm(hash, currentName, historyT));
     if (!ok || refuseIfSwitched(pickIn, "nothing was cherry-picked")) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     let applied: boolean;
@@ -309,9 +311,9 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
       return;
     }
     if (applied) {
-      toast.success(`Cherry-picked ${hash.slice(0, 7)}`);
+      toast.success(t("toast.cherryPicked", { hash: hash.slice(0, 7) }));
     } else {
-      toast.info(CHERRY_PICK_ALREADY_APPLIED);
+      toast.info(historyT("toast.nothingToCherryPick"));
     }
   }
 
@@ -355,10 +357,9 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
           <EmptyMedia variant="icon">
             <GitBranchIcon />
           </EmptyMedia>
-          <EmptyTitle>You're on a detached HEAD</EmptyTitle>
+          <EmptyTitle>{t("empty.detachedTitle")}</EmptyTitle>
           <EmptyDescription>
-            Compare needs a checked-out branch. Switch to a branch to see how it
-            differs from another.
+            {t("empty.detachedDescription")}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -368,7 +369,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             onClick={() => dispatchAction("show-branches")}
           >
             <GitBranchIcon data-icon="inline-start" />
-            Switch branch…
+            {t("actions.switchBranch")}
           </Button>
         </EmptyContent>
       </Empty>
@@ -381,11 +382,9 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
           <EmptyMedia variant="icon">
             <GitBranchIcon />
           </EmptyMedia>
-          <EmptyTitle>No other branches</EmptyTitle>
+          <EmptyTitle>{t("empty.noOtherBranchesTitle")}</EmptyTitle>
           <EmptyDescription>
-            Compare shows how <span className="font-mono">{currentName}</span>{" "}
-            diverges from another branch. Create a branch to have something to
-            compare against.
+            {t("empty.noOtherBranchesDescription", { branch: currentName })}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -395,7 +394,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             onClick={() => dispatchAction("new-branch")}
           >
             <GitBranchIcon data-icon="inline-start" />
-            New branch…
+            {t("actions.newBranch")}
           </Button>
         </EmptyContent>
       </Empty>
@@ -420,7 +419,8 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="space-y-1.5 border-b p-2">
         <p className="px-1 text-xs text-muted-foreground">
-          Compare <span className="font-mono">{currentName}</span> with
+          {t("header.compareWith")} <span className="font-mono">{currentName}</span>{" "}
+          {t("header.with")}
         </p>
         <CompareBranchCombobox
           repoPath={repoPath}
@@ -439,8 +439,8 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             title={existingPr.title}
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
-            View {prNoun} #{existingPr.number}
-            {existingPr.isDraft ? " (draft)" : ""}
+            {t("pr.view", { noun: prNoun, number: existingPr.number })}
+            {existingPr.isDraft ? ` (${t("pr.draft")})` : ""}
           </Button>
         )}
         {canPr && compareBranch && !existingPr && (
@@ -450,12 +450,12 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             wrapperClassName="w-full"
             className="w-full"
             disabled={ahead.length === 0}
-            reason={`${currentName} has no commits to propose onto ${compareBranch}`}
-            title={`Open a ${prNoun} into ${compareBranch}`}
+            reason={t("pr.noCommitsReason", { branch: currentName, base: compareBranch })}
+            title={t("pr.openTitle", { noun: prNoun, branch: compareBranch })}
             onClick={() => setPrOpen(true)}
           >
             <GitPullRequestIcon data-icon="inline-start" />
-            Create {prNoun}…
+            {t("pr.create", { noun: prNoun })}…
           </DisabledReasonButton>
         )}
         {compareBranch && compareBranch !== currentName && (
@@ -465,8 +465,8 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             wrapperClassName="w-full"
             className="w-full"
             disabled={ahead.length === 0}
-            reason={`${currentName} has no commits to propose onto ${compareBranch}`}
-            title={`Propose merging ${currentName} into ${compareBranch} locally`}
+            reason={t("pr.noCommitsReason", { branch: currentName, base: compareBranch })}
+            title={t("pr.proposeLocally", { branch: currentName, base: compareBranch })}
             onClick={() =>
               openLocalPrCreate({
                 defaultHead: currentName ?? undefined,
@@ -475,7 +475,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             }
           >
             <GitBranchIcon data-icon="inline-start" />
-            Create local PR…
+            {t("pr.createLocal")}
           </DisabledReasonButton>
         )}
       </div>
@@ -497,7 +497,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
               className="flex min-h-0 flex-1 flex-col"
               onKeyDown={onListKeyDown}
               role="listbox"
-              aria-label="Compare selection"
+              aria-label={t("list.ariaLabel")}
               onContextMenuCapture={handleContextMenu}
             />
           }
@@ -516,7 +516,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
             onClick={() => selectCompareCommit(null)}
           >
             <FilesIcon className="size-3.5 shrink-0" />
-            <span className="font-medium">All changes</span>
+            <span className="font-medium">{t("list.allChanges")}</span>
           </button>
 
           {comparison.isPending ? (
@@ -526,16 +526,16 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
                is `relative`-only) so a long list can't leak a window scrollbar. */
             <ScrollArea className="min-h-0 flex-1 overflow-hidden">
               <CommitSection
-                title={`${ahead.length} ahead`}
-                subtitle={`on ${currentName}, not on ${compareBranch}`}
+                title={t("list.ahead", { count: ahead.length })}
+                subtitle={t("list.onBranchNotOther", { branch: currentName, other: compareBranch })}
                 commits={ahead}
                 selectedHash={compareCommitHash}
                 onSelect={selectCompareCommit}
                 onHover={onHoverCommit}
               />
               <CommitSection
-                title={`${behind.length} behind`}
-                subtitle={`on ${compareBranch}, not on ${currentName}`}
+                title={t("list.behind", { count: behind.length })}
+                subtitle={t("list.onBranchNotOther", { branch: compareBranch, other: currentName })}
                 commits={behind}
                 selectedHash={compareCommitHash}
                 onSelect={selectCompareCommit}
@@ -543,7 +543,7 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
               />
               {ahead.length === 0 && behind.length === 0 && (
                 <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  These branches are even.
+                  {t("list.even")}
                 </p>
               )}
             </ScrollArea>
@@ -577,22 +577,22 @@ export function ComparePanel({ repoPath }: { repoPath: string }) {
         form={branchForm}
         open={branchHash !== null}
         onClose={() => setBranchHash(null)}
-        title="Create branch from commit"
-        description={`Creates a branch starting at ${shownBranchHash?.slice(0, 7) ?? ""} and switches to it.`}
-        fieldLabel="Branch name"
+        title={t("createBranch.title")}
+        description={t("createBranch.description", { hash: shownBranchHash?.slice(0, 7) ?? "" })}
+        fieldLabel={t("createBranch.name")}
         placeholder={fromCommitPlaceholder}
-        submitLabel="Create branch"
+        submitLabel={t("actions.createBranch")}
       />
 
       <CreateRefFromCommitDialog
         form={tagForm}
         open={tagHash !== null}
         onClose={() => setTagHash(null)}
-        title="Create tag"
-        description={`Tags commit ${shownTagHash?.slice(0, 7) ?? ""}.`}
-        fieldLabel="Tag name"
+        title={t("createTag.title")}
+        description={t("createTag.description", { hash: shownTagHash?.slice(0, 7) ?? "" })}
+        fieldLabel={t("createTag.name")}
         placeholder="v1.0.0"
-        submitLabel="Create tag"
+        submitLabel={t("actions.createTag")}
       />
 
       <MergeParentDialog

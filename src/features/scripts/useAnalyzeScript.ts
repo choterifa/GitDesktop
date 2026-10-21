@@ -8,6 +8,7 @@ import {
   INTERPRETERS,
   type Interpreter,
 } from "@/lib/scripts/types";
+import { useScriptsText } from "./use-scripts-text";
 import { stripFences } from "./useGenerateScript";
 
 /** Prompt budget for the script content — release/build scripts are tiny; a
@@ -60,6 +61,7 @@ function isAbsolute(p: string): boolean {
  * generators: `useAiStream` owns the client, cancel, and missing-key handling.
  */
 export function useAnalyzeScript(repoPath: string) {
+  const tx = useScriptsText();
   const { generating: analyzing, cancel, run } = useAiStream(repoPath);
 
   const analyze = useCallback(
@@ -83,7 +85,11 @@ export function useAnalyzeScript(repoPath: string) {
           try {
             content = await readTextFile(full);
           } catch {
-            toast.error(`Couldn't read ${opts.path} — does the file exist?`);
+            toast.error(
+              tx("Couldn't read {{path}} — does the file exist?", {
+                path: opts.path,
+              }),
+            );
             return null;
           }
           sourceLine = `Script file: ${opts.path}`;
@@ -92,7 +98,7 @@ export function useAnalyzeScript(repoPath: string) {
           sourceLine = "Inline script";
         }
         if (content.trim() === "") {
-          toast.error("Nothing to analyze — the script is empty.");
+          toast.error(tx("Nothing to analyze — the script is empty."));
           return null;
         }
         const truncated = content.length > MAX_SCRIPT_CHARS;
@@ -113,9 +119,9 @@ export function useAnalyzeScript(repoPath: string) {
       if (buffer === null) return;
       const analysis = parseAnalysis(buffer);
       if (analysis) opts.onResult(analysis);
-      else toast.error("Couldn't analyze the script — try again.");
+      else toast.error(tx("Couldn't analyze the script — try again."));
     },
-    [repoPath, run],
+    [repoPath, run, tx],
   );
 
   return { analyze, cancel, analyzing };

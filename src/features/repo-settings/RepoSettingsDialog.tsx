@@ -104,6 +104,10 @@ import {
 import { RulesetsSection } from "./RulesetsSection";
 import { SecretsSection } from "./SecretsSection";
 import { SecuritySection } from "./SecuritySection";
+import {
+  repoSettingsText as tr,
+  useRepoSettingsText,
+} from "./use-repo-settings-text";
 
 // A curated set of the events people wire webhooks to, plus the "everything"
 // option. Not GitHub's full ~30 — the long tail can be added later.
@@ -130,12 +134,16 @@ const CONTENT_TYPE_ITEMS: Record<string, string> = {
   form: "application/x-www-form-urlencoded",
 };
 
-function eventsSummary(events: string[]): string {
-  if (events.includes("*")) return "All events";
-  if (events.length === 0) return "No events";
-  const labels = events.map(
-    (e) => COMMON_EVENTS.find((c) => c.id === e)?.label ?? e,
-  );
+function eventsSummary(
+  events: string[],
+  tx: ReturnType<typeof useRepoSettingsText>,
+): string {
+  if (events.includes("*")) return tx("All events");
+  if (events.length === 0) return tx("No events");
+  const labels = events.map((e) => {
+    const label = COMMON_EVENTS.find((c) => c.id === e)?.label;
+    return label ? tx(label) : e;
+  });
   if (labels.length <= 3) return labels.join(", ");
   return `${labels.slice(0, 3).join(", ")} +${labels.length - 3}`;
 }
@@ -153,119 +161,100 @@ export type SectionId =
   | "webhooks"
   | "danger";
 
-interface SectionItem {
-  id: SectionId;
-  label: string;
+/** Build the provider-specific rail on each render so a language change is
+ *  reflected immediately in its labels. */
+function providerRailGroups(
+  tx: ReturnType<typeof useRepoSettingsText>,
+): Record<ForgeProvider, NavRailGroup[]> {
+  const danger = tx("Danger zone");
+  const automation = tx("Automation");
+  return {
+    github: [
+      {
+        label: tx("Repository"),
+        items: [
+          { id: "general", label: tx("General") },
+          { id: "access", label: tx("Access") },
+        ],
+      },
+      {
+        label: tx("Security"),
+        items: [
+          { id: "rules", label: tx("Rules") },
+          { id: "security", label: tx("Security") },
+        ],
+      },
+      {
+        label: tx("Publishing"),
+        items: [
+          { id: "pages", label: tx("Pages") },
+          { id: "sponsor", label: tx("Sponsor") },
+        ],
+      },
+      {
+        label: automation,
+        items: [
+          { id: "secrets", label: tx("Secrets") },
+          { id: "webhooks", label: tx("Webhooks") },
+        ],
+      },
+      {
+        separated: true,
+        items: [{ id: "danger", label: danger, destructive: true }],
+      },
+    ],
+    gitlab: [
+      {
+        label: tx("Project"),
+        items: [
+          { id: "general", label: tx("General") },
+          { id: "access", label: tx("Members") },
+        ],
+      },
+      {
+        label: tx("Repository"),
+        items: [{ id: "rules", label: tx("Protected branches") }],
+      },
+      {
+        label: automation,
+        items: [
+          { id: "secrets", label: tx("Variables") },
+          { id: "webhooks", label: tx("Webhooks") },
+        ],
+      },
+      {
+        separated: true,
+        items: [{ id: "danger", label: danger, destructive: true }],
+      },
+    ],
+    bitbucket: [
+      {
+        label: tx("Repository"),
+        items: [
+          { id: "general", label: tx("General") },
+          { id: "access", label: tx("Default reviewers") },
+          { id: "rules", label: tx("Branch restrictions") },
+        ],
+      },
+      {
+        label: tx("Pipelines"),
+        items: [
+          { id: "secrets", label: tx("Variables") },
+          { id: "schedules", label: tx("Schedules") },
+          { id: "environments", label: tx("Deployments") },
+        ],
+      },
+      {
+        label: automation,
+        items: [{ id: "webhooks", label: tx("Webhooks") }],
+      },
+      {
+        separated: true,
+        items: [{ id: "danger", label: danger, destructive: true }],
+      },
+    ],
+  };
 }
-
-/** The rail's grouped sections, mirroring GitHub's familiar settings buckets so
- *  the mental model stays intact while the headers keep the list scannable. */
-const SECTION_GROUPS: { label: string; items: SectionItem[] }[] = [
-  {
-    label: "Repository",
-    items: [
-      { id: "general", label: "General" },
-      { id: "access", label: "Access" },
-    ],
-  },
-  {
-    label: "Security",
-    items: [
-      { id: "rules", label: "Rules" },
-      { id: "security", label: "Security" },
-    ],
-  },
-  {
-    label: "Publishing",
-    items: [
-      { id: "pages", label: "Pages" },
-      { id: "sponsor", label: "Sponsor" },
-    ],
-  },
-  {
-    label: "Automation",
-    items: [
-      { id: "secrets", label: "Secrets" },
-      { id: "webhooks", label: "Webhooks" },
-    ],
-  },
-];
-
-/** The rail's groups: the grouped sections, then the Danger zone set off on its own
- *  so the first screen isn't also the densest and delete-the-repo is a deliberate
- *  click. */
-const RAIL_GROUPS: NavRailGroup[] = [
-  ...SECTION_GROUPS,
-  {
-    separated: true,
-    items: [{ id: "danger", label: "Danger zone", destructive: true }],
-  },
-];
-
-/** The GitLab rail: the sections with a GitLab implementation. The GitHub-only
- *  buckets (Rulesets, Security, Pages, Sponsor) don't map onto GitLab's model
- *  and stay off this rail rather than rendering dead ends; GitLab's one
- *  variable store fills the Automation bucket alongside webhooks. */
-const GITLAB_RAIL_GROUPS: NavRailGroup[] = [
-  {
-    label: "Project",
-    items: [
-      { id: "general", label: "General" },
-      { id: "access", label: "Members" },
-    ],
-  },
-  {
-    label: "Repository",
-    items: [{ id: "rules", label: "Protected branches" }],
-  },
-  {
-    label: "Automation",
-    items: [
-      { id: "secrets", label: "Variables" },
-      { id: "webhooks", label: "Webhooks" },
-    ],
-  },
-  {
-    separated: true,
-    items: [{ id: "danger", label: "Danger zone", destructive: true }],
-  },
-];
-
-/** The Bitbucket rail: the sections with a Bitbucket implementation. Bitbucket
- *  splits pipelines into their own bucket (variables + schedules), and has no
- *  GitHub-style rulesets/security/pages/sponsor surfaces. */
-const BITBUCKET_RAIL_GROUPS: NavRailGroup[] = [
-  {
-    label: "Repository",
-    items: [
-      { id: "general", label: "General" },
-      { id: "access", label: "Default reviewers" },
-      { id: "rules", label: "Branch restrictions" },
-    ],
-  },
-  {
-    label: "Pipelines",
-    items: [
-      { id: "secrets", label: "Variables" },
-      { id: "schedules", label: "Schedules" },
-      { id: "environments", label: "Deployments" },
-    ],
-  },
-  {
-    label: "Automation",
-    items: [{ id: "webhooks", label: "Webhooks" }],
-  },
-  {
-    separated: true,
-    items: [{ id: "danger", label: "Danger zone", destructive: true }],
-  },
-];
-
-const PROVIDER_RAIL_GROUPS: Record<ForgeProvider, NavRailGroup[]> = {
-  github: RAIL_GROUPS,
-  gitlab: GITLAB_RAIL_GROUPS,
-  bitbucket: BITBUCKET_RAIL_GROUPS,
-};
 
 /** The sections each provider's rail actually offers — a section remembered
  *  from another repo may not exist here. `null` = every section is valid. */
@@ -345,6 +334,7 @@ export function RepoSettingsDialog({
    *  the entrance, and only that caller wants the replay suppressed. */
   subdueEntrance?: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const [section, setSection] = useState<SectionId>(
     initialSection ?? "general",
   );
@@ -356,7 +346,6 @@ export function RepoSettingsDialog({
   // is the default rail — the same fallback `providerLabel` applies.
   const provider: ForgeProvider = forge.data?.provider ?? "github";
   const isGitLab = provider === "gitlab";
-  const isBitbucket = provider === "bitbucket";
   const remoteLabel = providerLabel(provider);
   const allowedSections = PROVIDER_SECTIONS[provider];
   const activeSection =
@@ -421,18 +410,21 @@ export function RepoSettingsDialog({
         onKeyDown={generateChord.onKeyDown}
       >
         <DialogHeader>
-          <DialogTitle>Repository settings</DialogTitle>
+          <DialogTitle>{tx("Repository settings")}</DialogTitle>
           <DialogDescription>
-            Manage this {remoteLabel} {isGitLab ? "project's" : "repository's"}{" "}
-            settings
-            {isGitLab || isBitbucket ? "" : " and webhooks"}. Changes apply on{" "}
-            {remoteLabel} immediately.
+            {tx(
+              "Manage settings for this {{resource}} on {{remoteLabel}}. Changes apply immediately.",
+              {
+                resource: tx(isGitLab ? "project" : "repository"),
+                remoteLabel,
+              },
+            )}
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 min-w-0 flex-1 gap-4">
           <NavRail
-            ariaLabel="Repository settings sections"
-            groups={PROVIDER_RAIL_GROUPS[provider]}
+            ariaLabel={tx("Repository settings sections")}
+            groups={providerRailGroups(tx)[provider]}
             activeId={activeSection}
             onSelect={(id) => setSection(id as SectionId)}
             className="w-40 overflow-y-auto"
@@ -530,8 +522,10 @@ function WebhooksSection({
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           {hooks.data?.length
-            ? `${hooks.data.length} webhook${hooks.data.length === 1 ? "" : "s"}`
-            : "Send a POST to a URL when events happen in this repo."}
+            ? hooks.data.length === 1
+              ? tr("{{count}} webhook", { count: hooks.data.length })
+              : tr("{{count}} webhooks", { count: hooks.data.length })
+            : tr("Send a POST to a URL when events happen in this repo.")}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -541,18 +535,18 @@ function WebhooksSection({
           onClick={() => setEditing("new")}
         >
           <PlusIcon data-icon="inline-start" />
-          Add webhook
+          {tr("Add webhook")}
         </Button>
       </div>
 
       <RemoteListSection
         query={hooks}
         rowCount={hooks.data?.length ?? 0}
-        noun="webhooks"
-        loadFailed="Couldn't load webhooks."
-        emptyLabel="No webhooks yet."
+        noun={tr("webhooks")}
+        loadFailed={tr("Couldn't load webhooks.")}
+        emptyLabel={tr("No webhooks yet.")}
         skeletonClassName="h-16 w-full"
-        errorTitle="Couldn't load webhooks."
+        errorTitle={tr("Couldn't load webhooks.")}
         errorScope="admin:repo_hook"
       >
         {hooks.data?.map((hook) => (
@@ -584,6 +578,7 @@ function WebhookRow({
   onEdit: () => void;
   onDeliveries: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const ping = usePingWebhook(repoPath);
   const test = useTestWebhook(repoPath);
   const del = useDeleteWebhook(repoPath);
@@ -606,7 +601,7 @@ function WebhookRow({
   async function handleDelete() {
     try {
       await del.mutateAsync(hook.id);
-      toast.success("Webhook removed");
+      toast.success(tx("Webhook removed"));
     } catch (e) {
       toastError(e);
     }
@@ -615,7 +610,7 @@ function WebhookRow({
   async function handlePing() {
     try {
       await ping.mutateAsync(hook.id);
-      toast.success("Ping sent");
+      toast.success(tx("Ping sent"));
     } catch (e) {
       toastError(e);
     }
@@ -624,7 +619,7 @@ function WebhookRow({
   async function handleTest() {
     try {
       await test.mutateAsync(hook.id);
-      toast.success("Test event sent");
+      toast.success(tx("Test event sent"));
     } catch (e) {
       toastError(e);
     }
@@ -643,30 +638,33 @@ function WebhookRow({
             </p>
             <CopyIconButton
               text={hook.config.url}
-              label="Copy URL"
-              toast="Webhook URL copied"
+              label={tx("Copy URL")}
+              toast={tx("Webhook URL copied")}
             />
           </div>
           <p className="mt-1 text-muted-foreground">
-            {eventsSummary(hook.events)} ·{" "}
+            {eventsSummary(hook.events, tx)} {tr("·")}{" "}
             <span className={lastTone}>
               {lastCode == null
-                ? "not yet delivered"
-                : `last: ${lastCode} ${hook.lastResponse.status}`}
+                ? tx("not yet delivered")
+                : tx("last: {{code}} {{status}}", {
+                    code: lastCode,
+                    status: hook.lastResponse.status,
+                  })}
             </span>
           </p>
         </div>
         <Badge variant={hook.active ? "default" : "secondary"}>
-          {hook.active ? "Active" : "Inactive"}
+          {hook.active ? tx("Active") : tx("Inactive")}
         </Badge>
       </div>
 
       <div className="mt-2 flex items-center justify-end gap-1">
         {confirmingDelete ? (
           <InlineConfirm
-            prompt="Remove this webhook?"
+            prompt={tr("Remove this webhook?")}
             promptClassName="mr-auto"
-            actLabel="Remove"
+            actLabel={tr("Remove")}
             pending={del.isPending}
             heldReason={offlineReason}
             swapFocusRef={swapFocus(hook.id)}
@@ -683,11 +681,11 @@ function WebhookRow({
                 offlineReason ??
                 (ping.isPending ? ACT_PENDING_REASON : undefined)
               }
-              title="Send a ping event"
+              title={tx("Send a ping event")}
               onClick={handlePing}
             >
               <BroadcastIcon data-icon="inline-start" />
-              Ping
+              {tx("Ping")}
             </DisabledReasonButton>
             {canTest && (
               <DisabledReasonButton
@@ -698,22 +696,22 @@ function WebhookRow({
                   offlineReason ??
                   (test.isPending ? ACT_PENDING_REASON : undefined)
                 }
-                title="Trigger a test push event"
+                title={tx("Trigger a test push event")}
                 onClick={handleTest}
               >
                 <ArrowClockwiseIcon data-icon="inline-start" />
-                Test
+                {tx("Test")}
               </DisabledReasonButton>
             )}
             <Button
               ref={swapFocus(rowFormSwapKey("deliveries", hook.id))}
               size="sm"
               variant="ghost"
-              title="Recent deliveries"
+              title={tx("Recent deliveries")}
               onClick={onDeliveries}
             >
               <ClockCounterClockwiseIcon data-icon="inline-start" />
-              Deliveries
+              {tx("Deliveries")}
             </Button>
             <Button
               ref={swapFocus(rowFormSwapKey("edit", hook.id))}
@@ -722,7 +720,7 @@ function WebhookRow({
               onClick={onEdit}
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Edit
+              {tx("Edit")}
             </Button>
             <Button
               ref={swapFocus(hook.id)}
@@ -730,10 +728,12 @@ function WebhookRow({
               variant="ghost"
               className="text-destructive hover:text-destructive"
               onClick={() => setConfirmingDelete(true)}
-              aria-label={`Delete webhook ${hook.config.url}`}
+              aria-label={tx("Delete webhook {{url}}", {
+                url: hook.config.url,
+              })}
             >
               <TrashIcon data-icon="inline-start" />
-              Delete
+              {tx("Delete")}
             </Button>
           </>
         )}
@@ -754,6 +754,7 @@ function DeliveriesView({
   swapFocusRef: SwapFocusRef;
   onBack: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const deliveries = useWebhookDeliveries(repoPath, hook.id, true);
 
   return (
@@ -766,7 +767,7 @@ function DeliveriesView({
           className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <CaretLeftIcon />
-          Back
+          {tx("Back")}
         </button>
         <p
           className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-muted-foreground"
@@ -789,7 +790,7 @@ function DeliveriesView({
       )}
       {deliveries.data?.length === 0 && (
         <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
-          No deliveries yet.
+          {tx("No deliveries yet.")}
         </p>
       )}
 
@@ -816,6 +817,7 @@ function DeliveryRow({
   hookId: number;
   delivery: HookDelivery;
 }) {
+  const tx = useRepoSettingsText();
   const [expanded, setExpanded] = useState(false);
   const detail = useWebhookDelivery(
     repoPath,
@@ -833,7 +835,7 @@ function DeliveryRow({
   async function handleRedeliver() {
     try {
       await redeliver.mutateAsync(delivery.id);
-      toast.success("Redelivery queued");
+      toast.success(tx("Redelivery queued"));
     } catch (e) {
       toastError(e);
     }
@@ -857,7 +859,7 @@ function DeliveryRow({
         <span className="truncate font-medium">{eventLabel}</span>
         {delivery.redelivery && (
           <Badge variant="secondary" className="shrink-0">
-            redelivered
+            {tx("redelivered")}
           </Badge>
         )}
         <span className="ml-auto shrink-0 text-muted-foreground">
@@ -885,7 +887,7 @@ function DeliveryRow({
               ) : (
                 <ArrowClockwiseIcon data-icon="inline-start" />
               )}
-              Redeliver
+              {tx("Redeliver")}
             </DisabledReasonButton>
           </div>
           {detail.isPending && <Skeleton className="h-16 w-full" />}
@@ -897,11 +899,11 @@ function DeliveryRow({
           {detail.data && (
             <>
               <DeliveryPayload
-                label="Request payload"
+                label={tx("Request payload")}
                 body={detail.data.requestPayload}
               />
               <DeliveryPayload
-                label="Response body"
+                label={tx("Response body")}
                 body={detail.data.responsePayload}
               />
             </>
@@ -924,6 +926,7 @@ function WebhookForm({
   swapFocusRef: SwapFocusRef;
   onDone: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const create = useCreateWebhook(repoPath);
   const update = useUpdateWebhook(repoPath);
   const pending = create.isPending || update.isPending;
@@ -984,7 +987,7 @@ function WebhookForm({
     try {
       if (hook) await update.mutateAsync({ id: hook.id, input });
       else await create.mutateAsync(input);
-      toast.success(hook ? "Webhook updated" : "Webhook created");
+      toast.success(tx(hook ? "Webhook updated" : "Webhook created"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -994,7 +997,7 @@ function WebhookForm({
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="hook-url">Payload URL</Label>
+        <Label htmlFor="hook-url">{tx("Payload URL")}</Label>
         {/* The form's first keyed node, so opening it lands here, not on Cancel. */}
         <Input
           ref={swapFocusRef}
@@ -1009,7 +1012,7 @@ function WebhookForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="hook-content-type">Content type</Label>
+          <Label htmlFor="hook-content-type">{tx("Content type")}</Label>
           <Select
             items={CONTENT_TYPE_ITEMS}
             value={contentType}
@@ -1028,7 +1031,7 @@ function WebhookForm({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="hook-secret">Secret</Label>
+          <Label htmlFor="hook-secret">{tx("Secret")}</Label>
           <Input
             id="hook-secret"
             type="password"
@@ -1039,16 +1042,16 @@ function WebhookForm({
           />
           {hadSecret && (
             <p className="text-[11px] text-muted-foreground">
-              Leave blank to keep the current secret.
+              {tx("Leave blank to keep the current secret.")}
             </p>
           )}
         </div>
       </div>
 
-      <LabeledGroup label="Events">
+      <LabeledGroup label={tx("Events")}>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch checked={allEvents} onCheckedChange={setAllEvents} />
-          Send me everything
+          {tx("Send me everything")}
         </label>
         {!allEvents && (
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1 sm:grid-cols-3">
@@ -1061,7 +1064,7 @@ function WebhookForm({
                   checked={events.has(ev.id)}
                   onCheckedChange={(c) => toggleEvent(ev.id, c === true)}
                 />
-                {ev.label}
+                {tx(ev.label)}
               </label>
             ))}
           </div>
@@ -1071,11 +1074,11 @@ function WebhookForm({
       <div className="flex items-center justify-between gap-4">
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch checked={verifySsl} onCheckedChange={setVerifySsl} />
-          Verify SSL certificate
+          {tx("Verify SSL certificate")}
         </label>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <Switch checked={active} onCheckedChange={setActive} />
-          Active
+          {tx("Active")}
         </label>
       </div>
 
@@ -1087,7 +1090,7 @@ function WebhookForm({
           disabled={pending}
           reason={pending ? SAVING_LAST_CHANGE_REASON : undefined}
         >
-          Cancel
+          {tx("Cancel")}
         </DisabledReasonButton>
         <DisabledReasonButton
           ref={swapFocusRef}

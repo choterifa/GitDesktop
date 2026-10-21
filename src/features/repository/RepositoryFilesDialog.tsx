@@ -1,5 +1,6 @@
 import { WarningIcon } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { TFunction } from "i18next";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -9,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { PathText } from "@/components/path-text";
@@ -61,12 +63,6 @@ type Tab = RepositoryFilesTab;
 
 /** How a tab names its contents in the filter, the count line and the empty
  *  states, since the id itself ("ai") doesn't read as English. */
-const TAB_LABEL: Record<Tab, string> = {
-  tracked: "tracked",
-  ignored: "ignored",
-  ai: "AI-excluded",
-};
-
 /** Rows carrying a second line need the taller estimate. */
 const ROW_HEIGHT: Record<Tab, number> = { tracked: 30, ignored: 48, ai: 48 };
 
@@ -139,61 +135,27 @@ type Pending =
   | { kind: "removeAiRule"; rules: AiRuleRef[] }
   | null;
 
+const pendingCount = (payload: NonNullable<Pending>) =>
+  "rules" in payload ? payload.rules.length : payload.paths.length;
+
 /** How many items the action names — paths for the file actions, rules for the
  *  two rule-removing ones. */
-const pendingCount = (p: NonNullable<Pending>) =>
-  "rules" in p ? p.rules.length : p.paths.length;
-
 /** Where removing AI rules lands depends on which stores the selected lines
  *  live in, so the confirm names exactly the ones it will touch. */
-function aiRemoveDescription(rules: AiRuleRef[]): string {
+function aiRemoveDescription(
+  rules: AiRuleRef[],
+  t: TFunction<"repositoryOperations">,
+): string {
   const repo = rules.some((r) => r.source === "repo");
   const global = rules.some((r) => r.source === "global");
   if (repo && global) {
-    return "Removing a rule un-hides every file it matches from AI context, unless another rule still matches them. Repo lines are deleted from .gitdesktop/aiignore (commit to share); Global lines are removed from Settings and affect every repository:";
+    return t("dialogs.files.removeAiRulesBoth");
   }
   if (global) {
-    return "Removing a rule un-hides every file it matches from AI context, in every repository, unless another rule still matches them. These lines are removed from your global AI ignore patterns in Settings:";
+    return t("dialogs.files.removeAiRulesGlobal");
   }
-  return "Removing a rule un-hides every file it matches from AI context, unless another rule still matches them. These lines are deleted from this repo's .gitdesktop/aiignore — commit the change to share it:";
+  return t("dialogs.files.removeAiRulesRepo");
 }
-
-/** The confirm dialog's whole voice per action, so its title, warning and
- *  button can never end up describing different ones. The description takes the
- *  payload, since the AI one reads differently per rule source. */
-const PENDING_COPY: Record<
-  NonNullable<Pending>["kind"],
-  {
-    title: (n: number) => string;
-    description: (p: NonNullable<Pending>) => string;
-    confirm: string;
-  }
-> = {
-  untrack: {
-    title: (n) => `Untrack ${n} ${n === 1 ? "file" : "files"}?`,
-    description: () =>
-      "These files stay on disk, but git stops tracking them. Each gets an anchored rule added to .gitignore so it isn't re-added. To undo, remove the rule from the Ignored tab and re-add the file.",
-    confirm: "Untrack",
-  },
-  forceAdd: {
-    title: (n) => `Force-add ${n} ${n === 1 ? "item" : "items"}?`,
-    description: () =>
-      "These start being tracked despite .gitignore. A directory (trailing “/”) tracks all of its currently-ignored contents — review the list before confirming:",
-    confirm: "Force-add",
-  },
-  removeRule: {
-    title: (n) => `Remove ${n} .gitignore rule${n === 1 ? "" : "s"}?`,
-    description: () =>
-      "Removing a rule un-ignores every file it matched across the repo — not just the ones you selected. These lines are deleted from their .gitignore files:",
-    confirm: "Remove",
-  },
-  removeAiRule: {
-    title: (n) => `Remove ${n} AI ignore rule${n === 1 ? "" : "s"}?`,
-    description: (p) =>
-      p.kind === "removeAiRule" ? aiRemoveDescription(p.rules) : "",
-    confirm: "Remove",
-  },
-};
 
 export function RepositoryFilesDialog({
   repoPath,
@@ -206,6 +168,33 @@ export function RepositoryFilesDialog({
   onOpenChange: (open: boolean) => void;
   initialTab?: RepositoryFilesTab;
 }) {
+  const { t } = useTranslation("repositoryOperations");
+  const tabLabel = (value: Tab) => t(`dialogs.files.tabs.${value}`);
+  const pendingCopy = {
+    untrack: {
+      title: (count: number) => t("dialogs.files.untrackTitle", { count }),
+      description: () => t("dialogs.files.untrackDescription"),
+      confirm: t("dialogs.files.untrack"),
+    },
+    forceAdd: {
+      title: (count: number) => t("dialogs.files.forceAddTitle", { count }),
+      description: () => t("dialogs.files.forceAddDescription"),
+      confirm: t("dialogs.files.forceAdd"),
+    },
+    removeRule: {
+      title: (count: number) => t("dialogs.files.removeRuleTitle", { count }),
+      description: () => t("dialogs.files.removeRuleDescription"),
+      confirm: t("dialogs.files.remove"),
+    },
+    removeAiRule: {
+      title: (count: number) => t("dialogs.files.removeAiRuleTitle", { count }),
+      description: (payload: NonNullable<Pending>) =>
+        payload.kind === "removeAiRule"
+          ? aiRemoveDescription(payload.rules, t)
+          : "",
+      confirm: t("dialogs.files.remove"),
+    },
+  };
   const [tab, setTab] = useState<Tab>("tracked");
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -459,9 +448,7 @@ export function RepositoryFilesDialog({
         pathspecs: paths.map(literalPathspec),
         ignorePatterns: paths.map(ignorePattern),
       });
-      toast.success(
-        `Untracked ${paths.length} file${paths.length === 1 ? "" : "s"} — kept on disk, added to .gitignore`,
-      );
+      toast.success(t("dialogs.files.untrackedToast", { count: paths.length }));
       setSelected(new Set());
       setPending(null);
     } catch (e) {
@@ -481,7 +468,7 @@ export function RepositoryFilesDialog({
     try {
       await forceAdd.mutateAsync(stageable.map(literalPathspec));
       toast.success(
-        `Force-added ${stageable.length} ${stageable.length === 1 ? "item" : "items"}`,
+        t("dialogs.files.forceAddedToast", { count: stageable.length }),
       );
       setSelected(new Set());
       setPending(null);
@@ -495,7 +482,7 @@ export function RepositoryFilesDialog({
     try {
       await unignore.mutateAsync(rules);
       toast.success(
-        `Removed ${rules.length} rule${rules.length === 1 ? "" : "s"} from .gitignore`,
+        t("dialogs.files.removedIgnoreRulesToast", { count: rules.length }),
       );
       setSelected(new Set());
       setPending(null);
@@ -559,10 +546,10 @@ export function RepositoryFilesDialog({
         }
       }
       if (removed === 0) {
-        toast.success("Those rules were already gone — the list is up to date");
+        toast.success(t("dialogs.files.rulesAlreadyGone"));
       } else {
         toast.success(
-          `Removed ${removed} AI ignore rule${removed === 1 ? "" : "s"}`,
+          t("dialogs.files.removedAiRulesToast", { count: removed }),
         );
       }
       setSelected(new Set());
@@ -570,10 +557,7 @@ export function RepositoryFilesDialog({
       setPending(null);
     } catch (e) {
       if (repoRemoved) {
-        toastErrorWithNote(
-          e,
-          "Repo rules removed; updating global patterns failed",
-        );
+        toastErrorWithNote(e, t("dialogs.files.repoRulesPartialFailure"));
       } else {
         onError(e);
       }
@@ -619,32 +603,30 @@ export function RepositoryFilesDialog({
   const aiRules = selectedAiRules();
 
   function countLine(): string {
-    if (count > 0) return `${count} selected`;
+    if (count > 0) return t("dialogs.files.selectedCount", { count });
     const n = filtered.length;
-    const s = n === 1 ? "" : "s";
-    if (activeRule !== null) return `${n} file${s} hidden by this rule`;
-    return `${n} ${TAB_LABEL[tab]} file${s}`;
+    if (activeRule !== null)
+      return t("dialogs.files.hiddenByRuleCount", { count: n });
+    return t("dialogs.files.tabFileCount", { count: n, tab: tabLabel(tab) });
   }
 
   function emptyMessage(): ReactNode {
     // `q`, not the raw field: a whitespace-only filter narrows nothing, so it
     // must not claim the filter emptied the list.
-    if (q) return "No files match the filter.";
-    if (tab === "tracked") return "No tracked files.";
-    if (tab === "ignored") return "Nothing is being ignored.";
+    if (q) return t("dialogs.files.noFilterMatches");
+    if (tab === "tracked") return t("dialogs.files.noTracked");
+    if (tab === "ignored") return t("dialogs.files.noIgnored");
     if (ruleStats.length === 0) {
       return (
         <>
-          Nothing is hidden from AI context yet. Right-click files in the
-          changes list and choose “Exclude from AI” to write a rule into this
-          repo's <span className="font-mono">.gitdesktop/aiignore</span>, or
-          fill in “Excluded files” under Settings → AI to cover every
-          repository.
+          {t("dialogs.files.noAiRulesStart")}{" "}
+          <span className="font-mono">.gitdesktop/aiignore</span>
+          {t("dialogs.files.noAiRulesEnd")}
         </>
       );
     }
-    if (activeRule !== null) return "No files match this rule.";
-    return "None of the current files match your AI ignore patterns.";
+    if (activeRule !== null) return t("dialogs.files.noRuleMatches");
+    return t("dialogs.files.noAiMatches");
   }
 
   const ignoredRowInfo = (path: string) => {
@@ -652,7 +634,7 @@ export function RepositoryFilesDialog({
     if (!info) return null;
     return (
       <span className="block truncate text-[11px] text-muted-foreground">
-        ignored by{" "}
+        {t("dialogs.files.ignoredBy")}{" "}
         <span className="font-mono">
           {info.source}
           {info.line ? `:${info.line}` : ""}
@@ -668,7 +650,7 @@ export function RepositoryFilesDialog({
     if (aiDerived.unreadable.has(path)) {
       return (
         <span className="block truncate text-[11px] text-muted-foreground">
-          always hidden — file name can't be read as text
+          {t("dialogs.files.alwaysHidden")}
         </span>
       );
     }
@@ -676,8 +658,13 @@ export function RepositoryFilesDialog({
     if (!v) return null;
     return (
       <span className="block truncate text-[11px] text-muted-foreground">
-        hidden by {v.patternIndex < aiDerived.repoCount ? "Repo" : "Global"} ·{" "}
-        <span className="font-mono">{v.pattern}</span>
+        {t("dialogs.files.hiddenBy", {
+          scope:
+            v.patternIndex < aiDerived.repoCount
+              ? t("dialogs.files.repo")
+              : t("dialogs.files.global"),
+        })}{" "}
+        · <span className="font-mono">{v.pattern}</span>
       </span>
     );
   };
@@ -685,7 +672,7 @@ export function RepositoryFilesDialog({
   const aiRowSuffix = (path: string) =>
     aiDerived.untracked.has(path) ? (
       <span className="shrink-0 font-sans text-muted-foreground">
-        · untracked
+        · {t("dialogs.files.untracked")}
       </span>
     ) : null;
 
@@ -696,11 +683,10 @@ export function RepositoryFilesDialog({
         initialFocus={() => filterRef.current}
       >
         <DialogHeader>
-          <DialogTitle>Repository files</DialogTitle>
+          <DialogTitle>{t("dialogs.files.title")}</DialogTitle>
           <DialogDescription>
-            Manage what git tracks beyond your pending changes — untrack files
-            committed by mistake, or surface and re-add files ignored by mistake
-            {aiEnabled ? ", or review what your AI ignore patterns hide." : "."}
+            {t("dialogs.files.description")}
+            {aiEnabled ? t("dialogs.files.aiDescriptionAppend") : "."}
           </DialogDescription>
         </DialogHeader>
 
@@ -712,7 +698,7 @@ export function RepositoryFilesDialog({
             aria-pressed={tab === "tracked"}
             onClick={() => setTab("tracked")}
           >
-            Tracked
+            {tabLabel("tracked")}
           </Button>
           <Button
             type="button"
@@ -721,7 +707,7 @@ export function RepositoryFilesDialog({
             aria-pressed={tab === "ignored"}
             onClick={() => setTab("ignored")}
           >
-            Ignored
+            {tabLabel("ignored")}
           </Button>
           {aiEnabled && (
             <Button
@@ -731,7 +717,7 @@ export function RepositoryFilesDialog({
               aria-pressed={tab === "ai"}
               onClick={() => setTab("ai")}
             >
-              AI excluded
+              {tabLabel("ai")}
             </Button>
           )}
         </div>
@@ -741,8 +727,10 @@ export function RepositoryFilesDialog({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onFilterKeyDown}
-          placeholder={`Filter ${TAB_LABEL[tab]} files — ↑↓ to move, Enter to select`}
-          aria-label={`Filter ${TAB_LABEL[tab]} files`}
+          placeholder={t("dialogs.files.filterPlaceholder", {
+            tab: tabLabel(tab),
+          })}
+          aria-label={t("dialogs.files.filterLabel", { tab: tabLabel(tab) })}
           className="h-8"
           autoComplete="off"
         />
@@ -753,7 +741,7 @@ export function RepositoryFilesDialog({
             onKeyDown={onRulesKeyDown}
           >
             <p className="px-1 pb-1 text-[11px] text-muted-foreground">
-              Rules — evaluated top to bottom; the last match wins
+              {t("dialogs.files.rulesHelp")}
             </p>
             {ruleStats.map((rule) => (
               <RuleRow
@@ -782,7 +770,7 @@ export function RepositoryFilesDialog({
                 className="ml-auto cursor-pointer underline underline-offset-2 hover:text-foreground"
                 onClick={() => setRuleFilter(null)}
               >
-                Show all
+                {t("dialogs.files.showAll")}
               </button>
             )}
           </div>
@@ -791,11 +779,11 @@ export function RepositoryFilesDialog({
         <div className="min-h-0 flex-1 border">
           {pendingLoad ? (
             <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
-              <Spinner /> Loading…
+              <Spinner /> {t("dialogs.files.loading")}
             </div>
           ) : isError ? (
             <p className="p-4 text-xs text-muted-foreground">
-              Couldn't load {TAB_LABEL[tab]} files.
+              {t("dialogs.files.loadFailed", { tab: tabLabel(tab) })}
             </p>
           ) : filtered.length === 0 ? (
             <p className="p-4 text-xs text-muted-foreground">
@@ -822,7 +810,7 @@ export function RepositoryFilesDialog({
         <DialogFooter className="flex-wrap gap-2 sm:justify-start">
           {count === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Select files to act on them.
+              {t("dialogs.files.selectToAct")}
             </p>
           ) : (
             <>
@@ -835,8 +823,7 @@ export function RepositoryFilesDialog({
                       setPending({ kind: "untrack", paths: selectedPaths })
                     }
                   >
-                    Untrack {count} {count === 1 ? "file" : "files"} (keep on
-                    disk)
+                    {t("dialogs.files.untrackSelection", { count })}
                   </Button>
                   {aiEnabled && (
                     <Button
@@ -845,7 +832,7 @@ export function RepositoryFilesDialog({
                       disabled={busy}
                       onClick={() => runExcludeFromAi(selectedPaths)}
                     >
-                      Exclude {count} from AI
+                      {t("dialogs.files.excludeSelection", { count })}
                     </Button>
                   )}
                 </>
@@ -857,7 +844,7 @@ export function RepositoryFilesDialog({
                     disabled={busy || stageableSelected.length === 0}
                     reason={
                       stageableSelected.length === 0
-                        ? "Git can't stage Windows-reserved device names, and every selected file has one"
+                        ? t("dialogs.files.reservedDeviceReason")
                         : null
                     }
                     onClick={() =>
@@ -868,8 +855,10 @@ export function RepositoryFilesDialog({
                     }
                   >
                     {stageableSelected.length === 0
-                      ? "Force-add"
-                      : `Force-add ${stageableSelected.length}`}
+                      ? t("dialogs.files.forceAdd")
+                      : t("dialogs.files.forceAddCount", {
+                          count: stageableSelected.length,
+                        })}
                   </DisabledReasonButton>
                   <Button
                     variant="outline"
@@ -877,7 +866,9 @@ export function RepositoryFilesDialog({
                     disabled={busy || rules.length === 0}
                     onClick={() => setPending({ kind: "removeRule", rules })}
                   >
-                    Remove {rules.length} rule{rules.length === 1 ? "" : "s"}
+                    {t("dialogs.files.removeRulesCount", {
+                      count: rules.length,
+                    })}
                   </Button>
                 </>
               )}
@@ -887,7 +878,7 @@ export function RepositoryFilesDialog({
                   disabled={busy || aiRules.length === 0}
                   reason={
                     aiRules.length === 0
-                      ? "These files are hidden because their names can't be read as text, so there's no rule to remove."
+                      ? t("dialogs.files.noAiRuleReason")
                       : null
                   }
                   onClick={() =>
@@ -895,8 +886,10 @@ export function RepositoryFilesDialog({
                   }
                 >
                   {aiRules.length === 0
-                    ? "Remove rules"
-                    : `Remove ${aiRules.length} rule${aiRules.length === 1 ? "" : "s"}`}
+                    ? t("dialogs.files.removeRules")
+                    : t("dialogs.files.removeRulesCount", {
+                        count: aiRules.length,
+                      })}
                 </DisabledReasonButton>
               )}
             </>
@@ -908,7 +901,7 @@ export function RepositoryFilesDialog({
               className="ml-auto"
               onClick={() => setSelected(new Set())}
             >
-              Clear
+              {t("dialogs.files.clear")}
             </Button>
           )}
         </DialogFooter>
@@ -925,13 +918,13 @@ export function RepositoryFilesDialog({
           <DialogHeader>
             <DialogTitle>
               {shownPending &&
-                PENDING_COPY[shownPending.kind].title(
+                pendingCopy[shownPending.kind].title(
                   pendingCount(shownPending),
                 )}
             </DialogTitle>
             <DialogDescription>
               {shownPending &&
-                PENDING_COPY[shownPending.kind].description(shownPending)}
+                pendingCopy[shownPending.kind].description(shownPending)}
             </DialogDescription>
           </DialogHeader>
           {shownPending?.kind === "untrack" && (
@@ -950,7 +943,7 @@ export function RepositoryFilesDialog({
                   <PathText path={p} />
                   {p.endsWith("/") && (
                     <span className="ml-1 shrink-0 font-sans text-muted-foreground">
-                      — directory, adds all contents
+                      — {t("dialogs.files.directoryAddsContents")}
                     </span>
                   )}
                 </li>
@@ -976,7 +969,9 @@ export function RepositoryFilesDialog({
                   {r.pattern}{" "}
                   <span className="font-sans text-muted-foreground">
                     —{" "}
-                    {r.source === "repo" ? "Repo aiignore" : "Global settings"}
+                    {r.source === "repo"
+                      ? t("dialogs.files.repoAiignore")
+                      : t("dialogs.files.globalSettings")}
                   </span>
                 </li>
               ))}
@@ -984,7 +979,7 @@ export function RepositoryFilesDialog({
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setPending(null)}>
-              Cancel
+              {t("dialogs.common.cancel")}
             </Button>
             <Button
               disabled={busy}
@@ -998,7 +993,7 @@ export function RepositoryFilesDialog({
                   void runRemoveAiRules(pending.rules);
               }}
             >
-              {shownPending && PENDING_COPY[shownPending.kind].confirm}
+              {shownPending && pendingCopy[shownPending.kind].confirm}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1010,20 +1005,25 @@ export function RepositoryFilesDialog({
 /** The right-hand status of a rule row. A negation reports what it KEEPS
  *  visible, never what it "re-includes": git reports the last match, and a `!`
  *  that matched was not necessarily putting anything back. */
-function ruleStatus(rule: RuleStat): string {
-  if (rule.negated) return `keeps ${rule.decided} visible`;
-  if (rule.hidden === 0) return "no matches";
-  return `${rule.hidden} file${rule.hidden === 1 ? "" : "s"}`;
+function ruleStatus(
+  rule: RuleStat,
+  t: TFunction<"repositoryOperations">,
+): string {
+  if (rule.negated)
+    return t("dialogs.files.keepsVisible", { count: rule.decided });
+  if (rule.hidden === 0) return t("dialogs.files.noMatches");
+  return t("dialogs.files.fileCount", { count: rule.hidden });
 }
 
 /** Why a `!` line decided nothing. The bare count can't tell the three causes
  *  apart, so the folder advice is appended only where the evidence backs it. */
-function deadNegationNote(rule: RuleStat): string {
-  const cause =
-    "matches nothing — no current file matches, or a later rule decides first";
-  if (!rule.folderTrap) return cause;
-  // No terminal period: it would abut the pattern and read as a literal `dir/.`
-  return `${cause}. A file inside an excluded folder can't be re-included; exclude with dir/* instead of dir/`;
+function deadNegationNote(
+  rule: RuleStat,
+  t: TFunction<"repositoryOperations">,
+): string {
+  return rule.folderTrap
+    ? t("dialogs.files.deadNegationFolder")
+    : t("dialogs.files.deadNegation");
 }
 
 /** One row of the rules strip. A positive rule is a button that narrows the list
@@ -1037,15 +1037,20 @@ function RuleRow({
   active: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const body = (
     <>
       <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
-        {rule.source === "repo" ? "Repo" : "Global"}
+        {rule.source === "repo"
+          ? t("dialogs.files.repo")
+          : t("dialogs.files.global")}
       </Badge>
       <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>
         {rule.pattern}
       </span>
-      <span className="shrink-0 text-muted-foreground">{ruleStatus(rule)}</span>
+      <span className="shrink-0 text-muted-foreground">
+        {ruleStatus(rule, t)}
+      </span>
     </>
   );
   return (
@@ -1069,14 +1074,14 @@ function RuleRow({
       {rule.negated && rule.decided === 0 && (
         <p className="flex items-start gap-1 px-1 pb-1 text-[11px] text-warning">
           <WarningIcon className="mt-px size-3 shrink-0" />
-          <span>{deadNegationNote(rule)}</span>
+          <span>{deadNegationNote(rule, t)}</span>
         </p>
       )}
       {!rule.negated &&
         rule.decided === 0 &&
         ESCAPED_CHAR.test(rule.pattern) && (
           <p className="px-1 pb-1 text-[11px] text-muted-foreground">
-            a backslash escapes the next character — for a path separator use /
+            {t("dialogs.files.backslashHelp")}
           </p>
         )}
     </div>

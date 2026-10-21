@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DiffStat } from "@/components/diff-stat";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -88,6 +89,7 @@ function TrafficSkeleton() {
 
 /** Top contributors as an accessible bar-list (name + commits + line churn). */
 function ContributorsList({ data }: { data: ContributorChurn[] }) {
+  const { t } = useTranslation("repository");
   const top = data.slice(0, 12);
   const max = Math.max(1, ...top.map((c) => c.commits));
   return (
@@ -99,7 +101,7 @@ function ContributorsList({ data }: { data: ContributorChurn[] }) {
               {c.name}
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              {fmt(c.commits)} {c.commits === 1 ? "commit" : "commits"} ·{" "}
+              {t("insights.commitCount", { count: c.commits })} ·{" "}
               <DiffStat
                 added={c.additions}
                 deleted={c.deletions}
@@ -140,6 +142,7 @@ export function InsightsBoard({
   repoPath: string;
   active: boolean;
 }) {
+  const { t } = useTranslation("repository");
   const [allTime, setAllTime] = useState(false);
   const weeks = allTime ? 0 : WINDOW_WEEKS;
 
@@ -203,12 +206,12 @@ export function InsightsBoard({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center justify-between border-b p-2">
         <h2 className="px-1 text-xs font-medium text-muted-foreground">
-          Insights
+          {t("insights.title")}
         </h2>
         <div
           className="flex items-center gap-0.5"
           role="group"
-          aria-label="Time window"
+          aria-label={t("insights.timeWindow")}
         >
           <Button
             type="button"
@@ -217,7 +220,7 @@ export function InsightsBoard({
             aria-pressed={!allTime}
             onClick={() => setAllTime(false)}
           >
-            {WINDOW_WEEKS} weeks
+            {t("insights.weeks", { count: WINDOW_WEEKS })}
           </Button>
           <Button
             type="button"
@@ -226,7 +229,7 @@ export function InsightsBoard({
             aria-pressed={allTime}
             onClick={() => setAllTime(true)}
           >
-            All time
+            {t("insights.allTime")}
           </Button>
         </div>
       </div>
@@ -234,7 +237,7 @@ export function InsightsBoard({
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <InsightCard
-            title="Commit activity"
+            title={t("insights.commitActivity")}
             bodyClassName={CARD_BODY.chart}
             stale={commitActivity.isPlaceholderData}
           >
@@ -243,12 +246,12 @@ export function InsightsBoard({
             ) : commitActivity.data?.length ? (
               <CommitActivityChart data={commitActivity.data} />
             ) : (
-              <Empty>No commits in this window.</Empty>
+              <Empty>{t("insights.noCommitsInWindow")}</Empty>
             )}
           </InsightCard>
 
           <InsightCard
-            title="Code frequency"
+            title={t("insights.codeFrequency")}
             bodyClassName={CARD_BODY.chart}
             stale={codeFreq.isPlaceholderData}
           >
@@ -257,12 +260,12 @@ export function InsightsBoard({
             ) : codeFreq.data?.length ? (
               <CodeFrequencyChart data={codeFreq.data} />
             ) : (
-              <Empty>No code changes in this window.</Empty>
+              <Empty>{t("insights.noCodeChangesInWindow")}</Empty>
             )}
           </InsightCard>
 
           <InsightCard
-            title="Contributors"
+            title={t("insights.contributors")}
             className="xl:col-span-2"
             bodyClassName={CARD_BODY.contributors}
             stale={contributors.isPlaceholderData}
@@ -272,12 +275,12 @@ export function InsightsBoard({
             ) : contributors.data?.length ? (
               <ContributorsList data={contributors.data} />
             ) : (
-              <Empty>No contributors in this window.</Empty>
+              <Empty>{t("insights.noContributorsInWindow")}</Empty>
             )}
           </InsightCard>
 
           <InsightCard
-            title="Commits by day & hour"
+            title={t("insights.commitsByDayHour")}
             className="xl:col-span-2"
             stale={punchCard.isPlaceholderData}
           >
@@ -286,18 +289,25 @@ export function InsightsBoard({
             ) : punchCard.data ? (
               <PunchCard grid={punchCard.data} />
             ) : (
-              <Empty>No commit times to chart.</Empty>
+              <Empty>{t("insights.noCommitTimesToChart")}</Empty>
             )}
           </InsightCard>
 
           {(canGh || forgeDetecting) && (
             <InsightCard
-              title={isGitLab || isBitbucket ? "Pipelines" : "Actions"}
+              title={
+                isGitLab || isBitbucket
+                  ? t("insights.pipelines")
+                  : t("insights.actions")
+              }
               bodyClassName={CARD_BODY.chart}
               action={
                 successRate !== null && (
                   <span className="text-[11px] text-muted-foreground tabular-nums">
-                    {successRate}% success · {completed.length} runs
+                    {t("insights.successRate", {
+                      rate: successRate,
+                      count: completed.length,
+                    })}
                   </span>
                 )
               }
@@ -308,8 +318,12 @@ export function InsightsBoard({
                 <ActionsDurationChart data={durationPoints} />
               ) : (
                 <Empty>
-                  No completed{" "}
-                  {isGitLab || isBitbucket ? "pipelines" : "workflow runs"} yet.
+                  {t("insights.noCompletedYet", {
+                    kind:
+                      isGitLab || isBitbucket
+                        ? t("insights.pipelineRuns")
+                        : t("insights.workflowRuns"),
+                  })}
                 </Empty>
               )}
             </InsightCard>
@@ -317,13 +331,14 @@ export function InsightsBoard({
 
           {((canForks && forkProvider) || forgeDetecting) && (
             <InsightCard
-              title="Fork activity"
+              title={t("insights.forkActivity")}
               bodyClassName={CARD_BODY.chart}
               action={
                 forkActivity.data?.totalCount != null && (
                   <span className="text-[11px] text-muted-foreground tabular-nums">
-                    {fmt(forkActivity.data.totalCount)}{" "}
-                    {forkActivity.data.totalCount === 1 ? "fork" : "forks"}
+                    {t("insights.forkCount", {
+                      count: forkActivity.data.totalCount,
+                    })}
                   </span>
                 )
               }
@@ -338,26 +353,29 @@ export function InsightsBoard({
                   canCompare={canCompare}
                 />
               ) : (
-                <Empty>Fork activity is unavailable.</Empty>
-              )}
-            </InsightCard>
-          )}
-
-          {(canGhOnly || forgeDetecting) && (
-            <InsightCard title="Community" bodyClassName={CARD_BODY.community}>
-              {community.isPending ? (
-                <ChartSkeleton />
-              ) : community.data ? (
-                <CommunityCard data={community.data} />
-              ) : (
-                <Empty>Community insights are unavailable.</Empty>
+                <Empty>{t("insights.forkActivityUnavailable")}</Empty>
               )}
             </InsightCard>
           )}
 
           {(canGhOnly || forgeDetecting) && (
             <InsightCard
-              title="Traffic"
+              title={t("insights.community")}
+              bodyClassName={CARD_BODY.community}
+            >
+              {community.isPending ? (
+                <ChartSkeleton />
+              ) : community.data ? (
+                <CommunityCard data={community.data} />
+              ) : (
+                <Empty>{t("insights.communityUnavailable")}</Empty>
+              )}
+            </InsightCard>
+          )}
+
+          {(canGhOnly || forgeDetecting) && (
+            <InsightCard
+              title={t("insights.traffic")}
               className="xl:col-span-2"
               bodyClassName={CARD_BODY.traffic}
             >
@@ -366,14 +384,14 @@ export function InsightsBoard({
               ) : traffic.data ? (
                 <TrafficCard data={traffic.data} />
               ) : (
-                <Empty>Traffic is unavailable.</Empty>
+                <Empty>{t("insights.trafficUnavailable")}</Empty>
               )}
             </InsightCard>
           )}
 
           {(canGhOnly || forgeDetecting) && (
             <InsightCard
-              title="Dependencies"
+              title={t("insights.dependencies")}
               bodyClassName={CARD_BODY.dependencies}
             >
               {dependencies.isPending ? (
@@ -381,13 +399,13 @@ export function InsightsBoard({
               ) : dependencies.data ? (
                 <DependenciesCard data={dependencies.data} />
               ) : (
-                <Empty>Dependencies are unavailable.</Empty>
+                <Empty>{t("insights.dependenciesUnavailable")}</Empty>
               )}
             </InsightCard>
           )}
 
           {(canGhOnly || forgeDetecting) && (
-            <InsightCard title="More on GitHub">
+            <InsightCard title={t("insights.moreOnGithub")}>
               {forgeDetecting ? (
                 <LinkOutsSkeleton />
               ) : (
@@ -412,7 +430,7 @@ export function InsightsBoard({
           {canGh && isGitLab && (
             // GitLab analytics that only render on the web (no usable API) —
             // link out rather than pretend they don't exist.
-            <InsightCard title="More on GitLab">
+            <InsightCard title={t("insights.moreOnGitlab")}>
               <GitLabLinkOutsCard repoPath={repoPath} />
             </InsightCard>
           )}
@@ -420,7 +438,7 @@ export function InsightsBoard({
           {canGh && isBitbucket && (
             // Bitbucket views that only render on the web (no usable API) —
             // link out rather than pretend they don't exist.
-            <InsightCard title="More on Bitbucket">
+            <InsightCard title={t("insights.moreOnBitbucket")}>
               <BitbucketLinkOutsCard repoPath={repoPath} />
             </InsightCard>
           )}

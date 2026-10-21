@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { cn } from "@/lib/utils";
 
 /** Fill for a surface with no distinctive loading shape. */
@@ -21,6 +22,7 @@ export function LazyPanelFallback({
   /** One Skeleton per entry, the entry being its size classes. */
   rows?: readonly string[];
 }) {
+  const tx = useCommonText();
   return (
     <div
       aria-busy
@@ -29,7 +31,7 @@ export function LazyPanelFallback({
       {/* aria-busy alone has no text; role="status" gives the busy region words
           for readers that announce it. */}
       <span role="status" className="sr-only">
-        Loading {name}…
+        {tx("Loading")} {tx(name)}…
       </span>
       {/* Index key: the rows are static and never reorder, and two rows may
           share the same size classes. */}

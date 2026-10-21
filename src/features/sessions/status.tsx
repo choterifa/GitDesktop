@@ -2,6 +2,7 @@ import { CheckCircleIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { AgentSession } from "./store";
+import { useSessionText } from "./use-session-text";
 
 /**
  * The one status vocabulary for a session, shared by the sidebar row and the
@@ -78,6 +79,7 @@ export function StatusIndicator({
   className?: string;
 }) {
   const { kind, label } = sessionStatus(session);
+  const tx = useSessionText();
   return (
     <span
       className={cn(
@@ -90,7 +92,7 @@ export function StatusIndicator({
       )}
     >
       <StatusGlyph kind={kind} />
-      <span className="truncate">{label}</span>
+      <span className="truncate">{tx(label)}</span>
     </span>
   );
 }

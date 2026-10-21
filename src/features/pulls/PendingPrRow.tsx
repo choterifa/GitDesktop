@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { clipTitleFromText } from "@/lib/clip-title";
 import type { PrCreate } from "@/lib/stores/pr-create";
+import { usePullsText } from "./use-pulls-text";
 
 /** The one spelling of "this hold is a settled fact": the forge answered the
  *  create, so the pull request exists and is presumed open until evidence says
@@ -18,16 +19,6 @@ function isHeldOpen(create: PrCreate): boolean {
  *  banner's verb so one screen never reads two words for one operation; the
  *  `created` arm splits on the guard, which is what separates a forge call still
  *  finishing from a pull request the forge opened and this view has yet to show. */
-const PHASE_META: {
-  [P in PrCreate["phase"]]: (create: Extract<PrCreate, { phase: P }>) => string;
-} = {
-  creating: (create) => `Creating ${create.noun}…`,
-  created: (create) =>
-    isHeldOpen(create)
-      ? `#${create.number} · opened, not in this view yet`
-      : `#${create.number} · updating list…`,
-};
-
 /**
  * The CONTENT of a row holding a running create's place, in the slot the real
  * row will take; the list panel owns the box. Row semantics split on phase:
@@ -38,6 +29,7 @@ const PHASE_META: {
  * stays the sole live region for this fact (a second one double-announces).
  */
 export function PendingPrRow({ create }: { create: PrCreate }) {
+  const tx = usePullsText();
   // The settled row drops the spinner: motion would claim work still running.
   // It takes the real row's own glyph, which the slot swap then leaves in place.
   const settled = isHeldOpen(create);
@@ -52,15 +44,19 @@ export function PendingPrRow({ create }: { create: PrCreate }) {
         <span className="min-w-0 truncate" title={create.title}>
           {create.title}
         </span>
-        {create.draft && <Badge variant="secondary">Draft</Badge>}
+        {create.draft && <Badge variant="secondary">{tx("Draft")}</Badge>}
       </p>
       <p
         className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground"
         onMouseEnter={clipTitleFromText}
       >
         {create.phase === "created"
-          ? PHASE_META.created(create)
-          : PHASE_META.creating(create)}
+          ? isHeldOpen(create)
+            ? tx("#{{number}} · opened, not in this view yet", {
+                number: create.number,
+              })
+            : tx("#{{number}} · updating list…", { number: create.number })
+          : tx("Creating {{noun}}…", { noun: tx(create.noun) })}
       </p>
       <p
         className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground"

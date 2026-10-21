@@ -48,6 +48,42 @@ import type { ReviewDraft } from "@/lib/pulls/review-drafts";
 import { cn } from "@/lib/utils";
 import { DraftCommentCard } from "./PendingReviewBar";
 import { ReviewThreadCard, type SuggestionApply } from "./ReviewThreads";
+import { usePullsText } from "./use-pulls-text";
+
+function translatedStackNotice(
+  source: string,
+  tx: ReturnType<typeof usePullsText>,
+): string {
+  const match = source.match(
+    /^This (pull request|merge request) is position (\d+) of (\d+) in a stack\. Merging it also merges (?:every still-open (?:pull request|merge request)|(.+)) below it — the stack merges bottom-up as one operation\.$/,
+  );
+  if (!match) return tx(source);
+  const [, rawNoun, position, size, below] = match;
+  const noun = tx(rawNoun);
+  return below
+    ? tx(
+        "This {{noun}} is position {{position}} of {{size}} in a stack. Merging it also merges {{below}} below it — the stack merges bottom-up as one operation.",
+        { noun, position, size, below },
+      )
+    : tx(
+        "This {{noun}} is position {{position}} of {{size}} in a stack. Merging it also merges every still-open {{nounPlural}} below it — the stack merges bottom-up as one operation.",
+        { noun, position, size, nounPlural: tx(`${rawNoun}s`) },
+      );
+}
+
+function translatedStackConfirmLabel(
+  source: string | undefined,
+  tx: ReturnType<typeof usePullsText>,
+): string | undefined {
+  if (!source) return undefined;
+  if (source === "Merge stack") return tx(source);
+  const match = source.match(/^Merge (\d+) (pull requests|merge requests)$/);
+  if (!match) return tx(source);
+  return tx("Merge {{count}} {{nounPlural}}", {
+    count: match[1],
+    nounPlural: tx(match[2]),
+  });
+}
 
 type PrFile = { path: string; additions: number; deletions: number };
 
@@ -396,6 +432,7 @@ export function MergePrDialog({
    *  PRs it lands. Absent = the strategy label, unchanged. */
   confirmLabel?: string;
 }) {
+  const tx = usePullsText();
   return (
     <Dialog
       open={open}
@@ -406,30 +443,41 @@ export function MergePrDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {auto ? "Auto-merge" : "Merge"} {prNoun} #{number}?
+            {tx(auto ? "Auto-merge" : "Merge")} {tx(prNoun)} #{number}?
           </DialogTitle>
           <DialogDescription>
             {auto ? (
               <>
-                {strategyLabel} when the pipeline passes — merges{" "}
-                <span className="font-mono break-all">{headRefName}</span> into{" "}
-                <span className="font-mono break-all">{baseRefName}</span> on{" "}
-                {host} once the running pipeline succeeds. This cannot be easily
-                undone once it merges.
+                {tx(
+                  "{{strategy}} when the pipeline passes — merges {{head}} into {{base}} on {{host}} once the running pipeline succeeds. This cannot be easily undone once it merges.",
+                  {
+                    strategy: strategyLabel,
+                    head: headRefName,
+                    base: baseRefName,
+                    host,
+                  },
+                )}
               </>
             ) : (
-              <>
-                {strategyLabel} — merges{" "}
-                <span className="font-mono break-all">{headRefName}</span> into{" "}
-                <span className="font-mono break-all">{baseRefName}</span> on{" "}
-                {host}. This cannot be easily undone.
-              </>
+              tx(
+                "{{strategy}} — merges {{head}} into {{base}} on {{host}}. This cannot be easily undone.",
+                {
+                  strategy: strategyLabel,
+                  head: headRefName,
+                  base: baseRefName,
+                  host,
+                },
+              )
             )}
           </DialogDescription>
         </DialogHeader>
         {/* A stacked merge lands more than the PR on screen — say so above the
             options, never only on the confirm button. */}
-        {stackNotice && <p className="text-xs text-warning">{stackNotice}</p>}
+        {stackNotice && (
+          <p className="text-xs text-warning">
+            {translatedStackNotice(stackNotice, tx)}
+          </p>
+        )}
         {/* Deleting the head after merge is offered only when it's actually
             possible: never for the default branch (hidden — the forge refuses),
             and disabled with a reason when a branch rule blocks its deletion. */}
@@ -450,12 +498,13 @@ export function MergePrDialog({
               }
             />
             <span className="min-w-0">
-              Delete <span className="font-mono break-all">{headRefName}</span>{" "}
-              on the remote after merging
+              {tx("Delete")}{" "}
+              <span className="font-mono break-all">{headRefName}</span>{" "}
+              {tx("on the remote after merging")}
               {deletionBlocked && (
                 <span className="text-warning">
                   {" "}
-                  — protected by a branch rule
+                  {tx("— protected by a branch rule")}
                 </span>
               )}
             </span>
@@ -463,17 +512,26 @@ export function MergePrDialog({
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {tx("Cancel")}
           </Button>
           {/* The running write outranks the hold, and having its own reason keeps
               the button aria-disabled through either flip. */}
           <DisabledReasonButton
             disabled={pending || heldReason !== undefined}
-            reason={pending ? ACT_PENDING_REASON : heldReason}
+            reason={
+              pending
+                ? tx(ACT_PENDING_REASON)
+                : heldReason
+                  ? tx(heldReason)
+                  : undefined
+            }
             onClick={onConfirm}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {auto ? "Enable auto-merge" : (confirmLabel ?? strategyLabel)}
+            {auto
+              ? tx("Enable auto-merge")
+              : (translatedStackConfirmLabel(confirmLabel, tx) ??
+                tx(strategyLabel))}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -509,6 +567,7 @@ export function MrTimeTracking({
    *  refuse until the hold ends. */
   held?: boolean;
 }) {
+  const tx = usePullsText();
   const stats = useGlMrTimeStats(repoPath, number);
   const setEstimate = useSetMrTimeEstimate(repoPath);
   const addSpent = useAddMrSpentTime(repoPath);
@@ -530,12 +589,16 @@ export function MrTimeTracking({
       <ClockIcon className="size-3 shrink-0" aria-hidden />
       {hasAny
         ? [
-            humanEstimate ? `${humanEstimate} est` : null,
-            humanSpent ? `${humanSpent} spent` : null,
+            humanEstimate
+              ? tx("{{duration}} est", { duration: humanEstimate })
+              : null,
+            humanSpent
+              ? tx("{{duration}} spent", { duration: humanSpent })
+              : null,
           ]
             .filter(Boolean)
             .join(" · ")
-        : "Track time"}
+        : tx("Track time")}
     </span>
   );
 
@@ -556,7 +619,7 @@ export function MrTimeTracking({
             variant="ghost"
             size="xs"
             className="text-muted-foreground"
-            aria-label="Time tracking"
+            aria-label={tx("Time tracking")}
           />
         }
       >
@@ -564,10 +627,10 @@ export function MrTimeTracking({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64">
         <p className="text-xs font-medium text-muted-foreground">
-          Time tracking
+          {tx("Time tracking")}
         </p>
         {stats.isPending ? (
-          <p className="text-[11px] text-muted-foreground">Loading…</p>
+          <p className="text-[11px] text-muted-foreground">{tx("Loading…")}</p>
         ) : (
           <TimeTrackingControls
             stats={data}

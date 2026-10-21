@@ -3,6 +3,7 @@ import { SmileyIcon } from "@phosphor-icons/react";
 import { type ComponentProps, useState } from "react";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { usePanelPortalContainer } from "@/components/panel-portal";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import type { Reaction } from "@/lib/git/types";
 import {
   ARIA_DISABLED_CLASS,
@@ -102,6 +103,7 @@ export function ReactionBar({
    *  re-target the item that lands; the at-rest controls keep their look. */
   held?: boolean;
 }) {
+  const tx = useCommonText();
   const [open, setOpen] = useState(false);
   if (held && open) setOpen(false);
   const portalContainer = usePanelPortalContainer();
@@ -114,7 +116,10 @@ export function ReactionBar({
       {reactions.map((r) => (
         <ReactionButton
           key={r.content}
-          aria-label={`${label(r.content)} reaction, ${r.count}`}
+          aria-label={tx("{{reaction}} reaction, {{count}}", {
+            reaction: tx(label(r.content)),
+            count: r.count,
+          })}
           aria-pressed={r.viewerReacted}
           disabled={disabled}
           reason={reason}
@@ -125,7 +130,7 @@ export function ReactionBar({
               ? "border-primary bg-primary/10 text-foreground"
               : "text-muted-foreground hover:bg-muted/60",
           )}
-          title={`${label(r.content)} · ${r.count}`}
+          title={`${tx(label(r.content))} · ${r.count}`}
         >
           <span aria-hidden>{REACTION_EMOJI[r.content] ?? "?"}</span>
           {r.count}
@@ -137,7 +142,7 @@ export function ReactionBar({
             <DisabledReasonButton
               variant="ghost"
               size="icon-xs"
-              aria-label="Add reaction"
+              aria-label={tx("Add reaction")}
               disabled={disabled}
               reason={reason}
               className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
@@ -156,7 +161,9 @@ export function ReactionBar({
               {REACTION_ORDER.map((content) => (
                 <ReactionButton
                   key={content}
-                  aria-label={`React with ${label(content)}`}
+                  aria-label={tx("React with {{reaction}}", {
+                    reaction: tx(label(content)),
+                  })}
                   aria-pressed={reacted.has(content)}
                   disabled={disabled}
                   reason={reason}
@@ -168,7 +175,7 @@ export function ReactionBar({
                     "flex size-7 items-center justify-center text-base hover:bg-muted/60",
                     reacted.has(content) && "bg-primary/10",
                   )}
-                  title={label(content)}
+                  title={tx(label(content))}
                 >
                   {REACTION_EMOJI[content]}
                 </ReactionButton>

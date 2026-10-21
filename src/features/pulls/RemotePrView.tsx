@@ -88,7 +88,7 @@ import { DiffPlaceholder } from "@/features/diff/DiffPlaceholder";
 import type { LineWidget } from "@/features/diff/DiffSurface";
 import { AssigneesPopover } from "@/features/issues/IssueMetaPickers";
 import { JiraRefRow } from "@/features/issues/JiraRefRow";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import {
   aiExcludePatterns,
   filterDiffByAiIgnore,
@@ -275,6 +275,7 @@ import {
   stackMergeDisclosure,
 } from "./StackSection";
 import { SubmitReviewDialog } from "./SubmitReviewDialog";
+import { usePullsText } from "./use-pulls-text";
 import { useBranchPickerOptions } from "./useBranchPickerOptions";
 import {
   unmetRequiredChecks,
@@ -348,15 +349,23 @@ const TOTALS_FROM_FILES: Record<ForgeProvider, boolean> = {
 /** Tab labels for this view's sections, function-valued because three of the four
  *  carry a live count. An unread or possibly partial list has no count to show,
  *  not its length. */
-const SECTION_LABEL: Record<PrSection, (pr: PrDetails) => string> = {
-  conversation: (pr) =>
+const SECTION_LABEL: Record<
+  PrSection,
+  (pr: PrDetails, tx: ReturnType<typeof usePullsText>) => string
+> = {
+  conversation: (pr, tx) =>
     pr.commentsUnknown
-      ? "Conversation"
-      : `Conversation (${pr.comments.length})`,
-  commits: (pr) =>
-    pr.commitsUnknown ? "Commits" : `Commits (${pr.commits.length})`,
-  files: (pr) => (pr.filesUnknown ? "Files" : `Files (${pr.files.length})`),
-  review: () => "Review",
+      ? tx("Conversation")
+      : tx("Conversation ({{count}})", { count: pr.comments.length }),
+  commits: (pr, tx) =>
+    pr.commitsUnknown
+      ? tx("Commits")
+      : tx("Commits ({{count}})", { count: pr.commits.length }),
+  files: (pr, tx) =>
+    pr.filesUnknown
+      ? tx("Files")
+      : tx("Files ({{count}})", { count: pr.files.length }),
+  review: (_pr, tx) => tx("Review"),
 };
 
 /** Whether a GitHub merge method is disabled by the repo's server-side merge
@@ -546,6 +555,7 @@ export function RemotePrView({
   repoPath: string;
   number: number;
 }) {
+  const tx = usePullsText();
   const queryClient = useQueryClient();
   // The read view is provider-neutral; GitHub-only mutations (full reviews,
   // ready-for-review, checkout) route through `gh_*` and gate on `canWrite`
@@ -1175,7 +1185,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await setDraft.mutateAsync({ number, lens, draft: false });
-      toast.success("Marked ready for review");
+      toast.success(tx("Marked ready for review"));
       void fireReadyReview();
     } catch (e) {
       onError(e);
@@ -1185,7 +1195,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await setDraft.mutateAsync({ number, lens, draft: true });
-      toast.success("Converted to draft");
+      toast.success(tx("Converted to draft"));
     } catch (e) {
       onError(e);
     }
@@ -1367,7 +1377,9 @@ export function RemotePrView({
       try {
         const outcome = await stackCreate.mutateAsync(stackOffer.members);
         toast.success(
-          `Stack created — ${outcome.members.length} pull requests`,
+          tx("Stack created — {{count}} pull requests", {
+            count: outcome.members.length,
+          }),
         );
       } catch (e) {
         showFailure(e);
@@ -1383,7 +1395,10 @@ export function RemotePrView({
       // The response lists the stack's members AFTER the append, so its length
       // is the new total — not just what this write added.
       toast.success(
-        `Added to stack #${stackNumber} — ${outcome.members.length} pull requests`,
+        tx("Added to stack #{{number}} — {{count}} pull requests", {
+          number: stackNumber,
+          count: outcome.members.length,
+        }),
       );
     } catch (e) {
       showFailure(e);
@@ -1428,7 +1443,7 @@ export function RemotePrView({
     if (!ok || refuseWhileOffline()) return;
     try {
       await stackDissolve.mutateAsync(nativeStackNumber);
-      toast.success(`Dissolved stack #${info.id}`);
+      toast.success(tx("Dissolved stack #{{id}}", { id: info.id }));
     } catch (e) {
       onError(e);
     }
@@ -1536,7 +1551,9 @@ export function RemotePrView({
       void gitFetch(repoPath)
         .then(() => invalidateRepoAfterWrite(queryClient, repoPath))
         .catch(() => undefined);
-      toast.success(`Branch updated from ${awaited.base}.`);
+      toast.success(
+        tx("Branch updated from {{base}}.", { base: awaited.base }),
+      );
       return;
     }
     // The ladder conceded with the head still behind: GitHub's job outlived it. Say
@@ -1545,7 +1562,11 @@ export function RemotePrView({
     // still running so six fresh rungs would just exhaust against UNKNOWN again, and the
     // strip's own Retry is the honest affordance. Focus and the stale windows catch the
     // eventual landing.
-    toast.info(`GitHub is still updating this branch from ${awaited.base}.`);
+    toast.info(
+      tx("GitHub is still updating this branch from {{base}}.", {
+        base: awaited.base,
+      }),
+    );
   });
   // Runs on mount and on either dep's change, not only the transition out of updating —
   // the ref guard is what makes a run with nothing pending a no-op. Held off while the
@@ -1712,7 +1733,10 @@ export function RemotePrView({
         // landed on the forge whether or not the user navigated away, and the
         // named PR keeps the toast honest from any screen.
         toast.success(
-          `No conflicts after all — merged ${info.baseRefName} into #${number} and pushed`,
+          tx(
+            "No conflicts after all — merged {{base}} into #{{number}} and pushed",
+            { base: info.baseRefName, number },
+          ),
         );
         return;
       }
@@ -1734,7 +1758,7 @@ export function RemotePrView({
       }
       // "conflicts" with no worktree to open is a broken outcome — say so rather
       // than leaving the user on an unchanged view wondering what happened.
-      toast.error("Could not open the conflict resolution worktree");
+      toast.error(tx("Could not open the conflict resolution worktree"));
     } catch (e) {
       onError(e);
     }
@@ -1753,7 +1777,7 @@ export function RemotePrView({
       setResolve((cur) =>
         cur?.worktreePath === target.worktreePath ? null : cur,
       );
-      toast.success("Resolution discarded");
+      toast.success(tx("Resolution discarded"));
     } catch (e) {
       onError(e);
     }
@@ -1998,7 +2022,11 @@ export function RemotePrView({
     }
     try {
       await action.mutateAsync(number);
-      toast.success(approved ? "Approval revoked" : `Approved this ${prNoun}`);
+      toast.success(
+        approved
+          ? tx("Approval revoked")
+          : tx("Approved this {{noun}}", { noun: tx(prNoun) }),
+      );
     } catch (e) {
       if (prev) queryClient.setQueryData(key, prev);
       onError(e);
@@ -2038,7 +2066,7 @@ export function RemotePrView({
     if (requested) {
       try {
         await unrequestChangesPr.mutateAsync(number);
-        toast.success("Change request revoked");
+        toast.success(tx("Change request revoked"));
       } catch (e) {
         if (prev) queryClient.setQueryData(key, prev);
         onError(e);
@@ -2051,7 +2079,7 @@ export function RemotePrView({
         number,
         body: compose.value.trim(),
       });
-      toast.success("Requested changes");
+      toast.success(tx("Requested changes"));
       compose.clearFor(submittedFor);
     } catch (e) {
       if (prev) queryClient.setQueryData(key, prev);
@@ -2073,7 +2101,7 @@ export function RemotePrView({
         body,
         author: forge.data?.login ?? "You",
       });
-      toast.success("Comment added");
+      toast.success(tx("Comment added"));
     } catch (e) {
       compose.setFor(submittedFor, (prev) => (prev.trim() ? prev : body));
       onError(e);
@@ -2164,7 +2192,7 @@ export function RemotePrView({
       if (withComment)
         toastErrorWithNote(
           e,
-          "Your comment was posted, but closing failed — try Close again.",
+          tx("Your comment was posted, but closing failed — try Close again."),
         );
       else onError(e);
     }
@@ -2196,7 +2224,9 @@ export function RemotePrView({
       if (withComment)
         toastErrorWithNote(
           e,
-          "Your comment was posted, but reopening failed — try Reopen again.",
+          tx(
+            "Your comment was posted, but reopening failed — try Reopen again.",
+          ),
         );
       else onError(e);
     }
@@ -2231,7 +2261,10 @@ export function RemotePrView({
         });
         closeDialogIfStillHere();
         toast.success(
-          `Auto-merge enabled for #${number} — merges when the pipeline passes`,
+          tx(
+            "Auto-merge enabled for #{{number}} — merges when the pipeline passes",
+            { number },
+          ),
         );
       } catch (e) {
         onError(e);
@@ -2252,7 +2285,10 @@ export function RemotePrView({
       // once — mirroring the auto-merge arm — instead of a "Merged" success
       // that the queue detail would immediately contradict.
       if (outcome.queued) {
-        toast.success(outcome.cleanupWarning ?? `Merge queued for #${number}`);
+        toast.success(
+          outcome.cleanupWarning ??
+            tx("Merge queued for #{{number}}", { number }),
+        );
         // The toast is gone in seconds and nothing fetchable carries queue
         // state, so record it: the chip below is the only lasting sign the
         // merge is waiting rather than done.
@@ -2264,7 +2300,7 @@ export function RemotePrView({
         else
           setQueuedWarning((prev) => (prev?.key === queuedKey ? null : prev));
       } else {
-        toast.success(`Merged #${number}`);
+        toast.success(tx("Merged #{{number}}", { number }));
         // Merged for real; a cleanupWarning here means only the post-merge
         // remote head-branch deletion failed. Surface it as a (non-error)
         // warning so the successful merge isn't dressed up as a failure.
@@ -2708,7 +2744,7 @@ export function RemotePrView({
               repoStatus.data?.branch?.name === row.headRefName ? (
                 <span className="inline-flex h-6 shrink-0 items-center gap-1 border border-border bg-background pr-2 pl-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground">
                   <CheckCircleIcon className="size-3" aria-hidden />
-                  Checked out
+                  {tx("Checked out")}
                 </span>
               ) : (
                 <DisabledReasonButton
@@ -2718,7 +2754,7 @@ export function RemotePrView({
                   reason={PR_SWITCH_LOADING_REASON}
                 >
                   <GitBranchIcon data-icon="inline-start" />
-                  Checkout
+                  {tx("Checkout")}
                 </DisabledReasonButton>
               ))}
             {rowOpen && canEdit && (
@@ -2729,7 +2765,7 @@ export function RemotePrView({
                 reason={PR_SWITCH_LOADING_REASON}
               >
                 <PencilSimpleIcon data-icon="inline-start" />
-                Edit
+                {tx("Edit")}
               </DisabledReasonButton>
             )}
             <DisabledReasonButton
@@ -2753,7 +2789,7 @@ export function RemotePrView({
           ) : (
             <>
               <Badge variant={rowOpen ? "default" : "secondary"}>
-                {row.isDraft ? "Draft" : row.state.toLowerCase()}
+                {tx(row.isDraft ? "Draft" : row.state.toLowerCase())}
               </Badge>
               {author ? (
                 <ForgeUserAvatar login={author} ghHost={ghHost} decorative />
@@ -2783,7 +2819,7 @@ export function RemotePrView({
             aria-pressed={section === s}
             disabled
           >
-            {TAB_NAME[s]}
+            {tx(TAB_NAME[s])}
             {TAB_COUNT_SLOT[s] && (
               <span aria-hidden className="invisible">
                 (00)
@@ -2798,9 +2834,9 @@ export function RemotePrView({
               value=""
               onChange={() => undefined}
               onSubmit={() => undefined}
-              submitLabel="Comment"
-              ariaLabel="Leave a comment"
-              placeholder="Leave a comment…"
+              submitLabel={tx("Comment")}
+              ariaLabel={tx("Leave a comment")}
+              placeholder={tx("Leave a comment…")}
               busy
               disabled
               reason={PR_SWITCH_LOADING_REASON}
@@ -3057,7 +3093,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await editComment.mutateAsync({ number, commentId, body });
-      toast.success("Comment updated");
+      toast.success(tx("Comment updated"));
     } catch (e) {
       onError(e);
     }
@@ -3068,7 +3104,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await editReviewComment.mutateAsync({ number, commentId, body });
-      toast.success("Comment updated");
+      toast.success(tx("Comment updated"));
     } catch (e) {
       onError(e);
     }
@@ -3105,7 +3141,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await minimizeComment.mutateAsync({ commentId, classifier });
-      toast.success("Comment hidden");
+      toast.success(tx("Comment hidden"));
     } catch (e) {
       onError(e);
     }
@@ -3115,7 +3151,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await unminimizeComment.mutateAsync(commentId);
-      toast.success("Comment shown");
+      toast.success(tx("Comment shown"));
     } catch (e) {
       onError(e);
     }
@@ -3144,12 +3180,12 @@ export function RemotePrView({
     if (runningCheckout || detailsStale) return;
     // Read at fire time: the promote's claim never re-renders anything.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     try {
       await checkout.mutateAsync({ number, lens });
-      toast.success(`Checked out ${headRefName}`);
+      toast.success(tx("Checked out {{branch}}", { branch: headRefName }));
     } catch (e) {
       onError(e);
     }
@@ -3159,7 +3195,7 @@ export function RemotePrView({
     if (detailsStale) return;
     try {
       await cancelAutoMerge.mutateAsync({ number, lens });
-      toast.success(`Auto-merge canceled for #${number}`);
+      toast.success(tx("Auto-merge canceled for #{{number}}", { number }));
     } catch (e) {
       onError(e);
     }
@@ -3187,7 +3223,7 @@ export function RemotePrView({
   async function deleteConversationComment(commentId: string) {
     try {
       await deleteComment.mutateAsync({ number, commentId });
-      toast.success("Comment deleted");
+      toast.success(tx("Comment deleted"));
     } catch (e) {
       onError(e);
     } finally {
@@ -3198,7 +3234,7 @@ export function RemotePrView({
   async function deleteThreadComment(commentId: string) {
     try {
       await deleteReviewComment.mutateAsync({ number, commentId });
-      toast.success("Comment deleted");
+      toast.success(tx("Comment deleted"));
     } catch (e) {
       onError(e);
     } finally {
@@ -3360,8 +3396,8 @@ export function RemotePrView({
   } else if (pr.labels.length > 0) {
     metaCells.push(
       <Fragment key="labels-static">
-        <MetaFieldLabel>Labels</MetaFieldLabel>
-        <MetaValueCell label="Labels">
+        <MetaFieldLabel>{tx("Labels")}</MetaFieldLabel>
+        <MetaValueCell label={tx("Labels")}>
           {pr.labels.map((label) => (
             <LabelChip key={label.name} label={label} />
           ))}
@@ -3388,8 +3424,8 @@ export function RemotePrView({
   } else if (pr.assignees.length > 0) {
     metaCells.push(
       <Fragment key="assignees-static">
-        <MetaFieldLabel>Assignees</MetaFieldLabel>
-        <MetaValueCell label="Assignees">
+        <MetaFieldLabel>{tx("Assignees")}</MetaFieldLabel>
+        <MetaValueCell label={tx("Assignees")}>
           {pr.assignees.map((user) => (
             <UserChip key={user.id} user={user} ghHost={ghHost} />
           ))}
@@ -3468,8 +3504,8 @@ export function RemotePrView({
   } else if (pr.reviewers.length > 0 || completedReviewers.length > 0) {
     metaCells.push(
       <Fragment key="reviewers-static">
-        <MetaFieldLabel>Reviewers</MetaFieldLabel>
-        <MetaValueCell label="Reviewers">
+        <MetaFieldLabel>{tx("Reviewers")}</MetaFieldLabel>
+        <MetaValueCell label={tx("Reviewers")}>
           {humanReviewers
             .filter((h) => !completedLogins.has(h.id))
             .map((user) => {
@@ -3527,12 +3563,17 @@ export function RemotePrView({
               // the whole thing on its own.
               <span
                 role="img"
-                aria-label={`Checked out — ${pr.headRefName} is the current branch`}
-                title={`${pr.headRefName} is the current branch`}
+                aria-label={tx(
+                  "Checked out — {{branch}} is the current branch",
+                  { branch: pr.headRefName },
+                )}
+                title={tx("{{branch}} is the current branch", {
+                  branch: pr.headRefName,
+                })}
                 className="inline-flex h-6 shrink-0 items-center gap-1 border border-border bg-background pr-2 pl-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground"
               >
                 <CheckCircleIcon className="size-3" aria-hidden />
-                Checked out
+                {tx("Checked out")}
               </span>
             ) : (
               <DisabledReasonButton
@@ -3547,14 +3588,16 @@ export function RemotePrView({
                       : `Checking out #${runningCheckout.target}…`
                 }
                 onClick={() => void checkoutHead(pr.headRefName)}
-                title={`Check out ${pr.headRefName} locally`}
+                title={tx("Check out {{branch}} locally", {
+                  branch: pr.headRefName,
+                })}
               >
                 {checkoutPending ? (
                   <Spinner data-icon="inline-start" />
                 ) : (
                   <GitBranchIcon data-icon="inline-start" />
                 )}
-                Checkout
+                {tx("Checkout")}
               </DisabledReasonButton>
             ))}
           {isOpen && canEdit && (
@@ -3566,17 +3609,20 @@ export function RemotePrView({
               disabled={detailsPlaceholder}
               reason={staleReason}
               onClick={openEditWithChips}
-              title="Edit the title and description"
+              title={tx("Edit the title and description")}
             >
               <PencilSimpleIcon data-icon="inline-start" />
-              Edit
+              {tx("Edit")}
             </DisabledReasonButton>
           )}
           <Button
             variant="outline"
             size="xs"
             onClick={() => openUrl(pr.url)}
-            title={`Open this ${prNoun} on ${remoteLabel}`}
+            title={tx("Open this {{noun}} on {{remote}}", {
+              noun: tx(prNoun),
+              remote: remoteLabel,
+            })}
             className="cursor-pointer"
           >
             <ArrowSquareOutIcon data-icon="inline-start" />
@@ -3746,7 +3792,7 @@ export function RemotePrView({
               aria-pressed={section === s}
               onClick={() => setSection(s)}
             >
-              {SECTION_LABEL[s](pr)}
+              {SECTION_LABEL[s](pr, tx)}
             </Button>
           ))}
         </div>
@@ -3902,7 +3948,7 @@ export function RemotePrView({
                       <Markdown refs={mentions.refs}>{pr.body}</Markdown>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        No description provided.
+                        {tx("No description provided.")}
                       </p>
                     )}
                   </div>
@@ -3912,7 +3958,7 @@ export function RemotePrView({
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          aria-label="Description actions"
+                          aria-label={tx("Description actions")}
                           className="shrink-0 text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                         />
                       }
@@ -3921,29 +3967,29 @@ export function RemotePrView({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-44">
                       <DropdownMenuItem
-                        onClick={() => copyText(pr.url, "Link copied")}
+                        onClick={() => copyText(pr.url, tx("Link copied"))}
                       >
-                        Copy link
+                        {tx("Copy link")}
                       </DropdownMenuItem>
                       {/* Absent, not disabled, while the description belongs to
                           the previous PR — the same shape the thread menus take
                           when their `onQuote` is withheld. */}
                       {!detailsPlaceholder && (
                         <DropdownMenuItem onClick={() => quoteReply(pr.body)}>
-                          Quote reply
+                          {tx("Quote reply")}
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
-                        onClick={() => copyText(pr.body, "Markdown copied")}
+                        onClick={() => copyText(pr.body, tx("Markdown copied"))}
                       >
-                        Copy markdown
+                        {tx("Copy markdown")}
                       </DropdownMenuItem>
                       {/* Absent for the same reason as Quote reply, and because
                           a disabled item drops pointer events — no hint could
                           reach the viewer to explain it. */}
                       {isOpen && canEdit && !detailsPlaceholder && (
                         <DropdownMenuItem onClick={openEditWithChips}>
-                          Edit
+                          {tx("Edit")}
                         </DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
@@ -4137,7 +4183,7 @@ export function RemotePrView({
                     threadClaims.visibleThreads !== undefined &&
                     threadClaims.visibleThreadCount === 0 && (
                       <p className="text-xs text-muted-foreground">
-                        No activity yet.
+                        {tx("No activity yet.")}
                       </p>
                     )}
                 </>
@@ -4162,9 +4208,9 @@ export function RemotePrView({
               onChange={compose.set}
               onSubmit={submitComment}
               onClear={() => compose.set("")}
-              submitLabel="Comment"
-              ariaLabel="Leave a comment"
-              placeholder="Leave a comment…"
+              submitLabel={tx("Comment")}
+              ariaLabel={tx("Leave a comment")}
+              placeholder={tx("Leave a comment…")}
               mentions={mentions}
               busy={busy}
               // Every term of `busy` gets words, so a held Submit is never mute —
@@ -4188,9 +4234,11 @@ export function RemotePrView({
                       // hold is never mute.
                       reason={composerReason ?? BUSY_HOLD_FALLBACK_REASON}
                       onClick={() => setSubmitOpen(true)}
-                      title="Submit a review (verdict, summary, and any pending comments)"
+                      title={tx(
+                        "Submit a review (verdict, summary, and any pending comments)",
+                      )}
                     >
-                      Review…
+                      {tx("Review…")}
                     </DisabledReasonButton>
                   )}
                   {isOpen && canApprove && (
@@ -4474,7 +4522,7 @@ export function RemotePrView({
               reason={writeReason ?? composerReason}
               onClick={() => void markReadyForReview()}
             >
-              Ready for review
+              {tx("Ready for review")}
             </DisabledReasonButton>
           )}
           {draftPairVisible && shownIsDraft === false && (
@@ -4483,10 +4531,10 @@ export function RemotePrView({
               size="sm"
               disabled={busy || writeBlocked}
               reason={writeReason ?? composerReason}
-              title="Turn this pull request back into a draft"
+              title={tx("Turn this pull request back into a draft")}
               onClick={() => void convertToDraft()}
             >
-              Convert to draft
+              {tx("Convert to draft")}
             </DisabledReasonButton>
           )}
           {/* The merge is in the forge's queue, not landed. Same icon + words
@@ -4500,11 +4548,11 @@ export function RemotePrView({
               title={
                 queuedWarning?.key === queuedKey
                   ? queuedWarning.text
-                  : "Merges when the queue reaches it"
+                  : tx("Merges when the queue reaches it")
               }
             >
               <ClockCountdownIcon className="size-3.5 shrink-0" />
-              Queued to merge
+              {tx("Queued to merge")}
             </span>
           )}
           {/* Auto-merge armed indicator + cancel (GitLab-only) — sits on the left,
@@ -4515,12 +4563,15 @@ export function RemotePrView({
                 className="flex items-center gap-1 text-xs text-info"
                 title={
                   mergeState.data?.pipelineStatus
-                    ? `Merges when the pipeline passes — pipeline: ${mergeState.data.pipelineStatus}`
-                    : "Merges when the pipeline passes"
+                    ? tx(
+                        "Merges when the pipeline passes — pipeline: {{status}}",
+                        { status: mergeState.data.pipelineStatus },
+                      )
+                    : tx("Merges when the pipeline passes")
                 }
               >
                 <ClockCountdownIcon className="size-3.5 shrink-0" />
-                Auto-merge enabled
+                {tx("Auto-merge enabled")}
               </span>
               <DisabledReasonButton
                 variant="outline"
@@ -4529,7 +4580,7 @@ export function RemotePrView({
                 reason={writeReason ?? composerReason}
                 onClick={() => void doCancelAutoMerge()}
               >
-                Cancel auto-merge
+                {tx("Cancel auto-merge")}
               </DisabledReasonButton>
             </div>
           )}
@@ -4545,11 +4596,11 @@ export function RemotePrView({
               onClick={doClose}
               title={
                 draftRidesStateChange
-                  ? "Closes and posts your draft as a comment"
+                  ? tx("Closes and posts your draft as a comment")
                   : undefined
               }
             >
-              {draftRidesStateChange ? "Close with comment" : "Close"}
+              {draftRidesStateChange ? tx("Close with comment") : tx("Close")}
             </DisabledReasonButton>
           )}
           {canMerge && (
@@ -4565,7 +4616,7 @@ export function RemotePrView({
                 }
               >
                 <GitMergeIcon data-icon="inline-start" />
-                Merge
+                {tx("Merge")}
                 <CaretDownIcon data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -4593,7 +4644,7 @@ export function RemotePrView({
                       disabled={blocked}
                       onClick={() => openMergeDialog(s, false)}
                     >
-                      {MERGE_LABEL[s]}
+                      {tx(MERGE_LABEL[s])}
                       {serverDisabled
                         ? " — disabled in repository settings"
                         : locallyBlocked && " — blocked by branch rule"}
@@ -4608,10 +4659,12 @@ export function RemotePrView({
                     {(["merge", "squash"] as const).map((s) => (
                       <DropdownMenuItem
                         key={`auto-${s}`}
-                        title="Merges when the running pipeline succeeds"
+                        title={tx("Merges when the running pipeline succeeds")}
                         onClick={() => openMergeDialog(s, true)}
                       >
-                        Auto-merge: {MERGE_LABEL[s]}
+                        {tx("Auto-merge: {{strategy}}", {
+                          strategy: tx(MERGE_LABEL[s]),
+                        })}
                       </DropdownMenuItem>
                     ))}
                   </>
@@ -4653,7 +4706,7 @@ export function RemotePrView({
         prNoun={prNoun}
         headRefName={pr.headRefName}
         baseRefName={pr.baseRefName}
-        strategyLabel={MERGE_LABEL[mergeStrategy]}
+        strategyLabel={tx(MERGE_LABEL[mergeStrategy])}
         deleteBranch={deleteBranch}
         onDeleteBranchChange={setDeleteBranch}
         headIsDefault={headIsDefault}
@@ -4674,8 +4727,11 @@ export function RemotePrView({
           if (!open) prGen.cancel();
           edit.setOpen(open);
         }}
-        title={`Edit ${prNoun}`}
-        description={`Updates the title, description, and base branch of #${number} on ${remoteLabel}.`}
+        title={tx("Edit {{noun}}", { noun: tx(prNoun) })}
+        description={tx(
+          "Updates the title, description, and base branch of #{{number}} on {{remote}}.",
+          { number, remote: remoteLabel },
+        )}
         contentClassName="sm:max-w-lg"
         bodyTextareaClassName="max-h-72 min-h-24 resize-y font-mono"
         mentions={mentions}
@@ -4722,7 +4778,7 @@ export function RemotePrView({
               onClick={prGen.cancel}
             >
               <XIcon data-icon="inline-start" />
-              Cancel
+              {tx("Cancel")}
             </Button>
           ) : (
             <Button
@@ -4730,10 +4786,10 @@ export function RemotePrView({
               variant="outline"
               size="xs"
               onClick={runGenerate}
-              title={`Generate the title and description with AI${generateHint}`}
+              title={`${tx("Generate the title and description with AI")}${generateHint}`}
             >
               <SparkleIcon data-icon="inline-start" />
-              Generate
+              {tx("Generate")}
             </Button>
           )
         }
@@ -4747,7 +4803,10 @@ export function RemotePrView({
           writePaused("delete-comment"),
           COMMENT_DELETE_PENDING_REASON,
         )}
-        description={`This permanently deletes the comment on ${remoteLabel}. This cannot be undone.`}
+        description={tx(
+          "This permanently deletes the comment on {{remote}}. This cannot be undone.",
+          { remote: remoteLabel },
+        )}
         onConfirm={(commentId) => void deleteConversationComment(commentId)}
       />
 
@@ -4759,7 +4818,10 @@ export function RemotePrView({
           writePaused("delete-review-comment"),
           COMMENT_DELETE_PENDING_REASON,
         )}
-        description={`This permanently deletes the comment on ${remoteLabel}. This cannot be undone.`}
+        description={tx(
+          "This permanently deletes the comment on {{remote}}. This cannot be undone.",
+          { remote: remoteLabel },
+        )}
         onConfirm={(commentId) => void deleteThreadComment(commentId)}
       />
 
@@ -4787,9 +4849,14 @@ export function RemotePrView({
       <ConfirmDialog
         open={discardConfirmOpen && hold.interactive}
         onCancel={() => setDiscardConfirmOpen(false)}
-        title="Discard pending review?"
-        body={`This deletes all ${draftCount} pending comment${draftCount === 1 ? "" : "s"}. They haven't been posted yet and can't be recovered.`}
-        confirmLabel="Discard review"
+        title={tx("Discard pending review?")}
+        body={tx(
+          draftCount === 1
+            ? "This deletes all {{count}} pending comment. They haven't been posted yet and can't be recovered."
+            : "This deletes all {{count}} pending comments. They haven't been posted yet and can't be recovered.",
+          { count: draftCount },
+        )}
+        confirmLabel={tx("Discard review")}
         confirmVariant="destructive"
         pending={clearingDrafts}
         onConfirm={() => void discardPendingReview()}
@@ -4820,12 +4887,14 @@ function BaseBranchField({
    *  tooltip, so the reason would be unreachable. */
   lockedNote: string | null;
 }) {
+  const tx = usePullsText();
+
   return (
     <div className="space-y-2">
       {/* sizeToContent: branch names run long, so the popup sizes to its widest
           option rather than the trigger — same as the create-PR picker. */}
       <SelectControl
-        label="Base branch"
+        label={tx("Base branch")}
         items={items}
         value={value}
         onValueChange={onChange}

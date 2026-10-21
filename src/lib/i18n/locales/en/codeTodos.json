@@ -1,0 +1,28 @@
+{
+  "title": "Code TODOs",
+  "rescan": "Rescan for TODOs",
+  "filterPlaceholder": "Filter by text or path",
+  "selectMarker": "Select a marker above to scan.",
+  "scanFailed": "Couldn't scan for TODOs.",
+  "retry": "Retry",
+  "empty": {
+    "title": "No TODO comments found",
+    "description": "Nothing in the working tree matches {{markers}}.",
+    "filtered": "No matches for this filter."
+  },
+  "truncated": "Showing the first {{count}} matches — deselect markers to scan fewer, or filter the text below.",
+  "detail": {
+    "fallbackTitle": "{{marker}} in {{file}}:{{line}}",
+    "generatedFrom": "From {{path}}:",
+    "pathCopied": "Path copied",
+    "copyFailed": "Could not copy to clipboard",
+    "noDescription": "no description",
+    "addedBy": "Added by {{author}}",
+    "notTracked": "Not tracked yet — no history.",
+    "openInEditor": "Open in editor",
+    "promoteToIssue": "Promote to issue",
+    "copyPathLine": "Copy path:line",
+    "staleLine": "This line is no longer in the file — the scan may be stale.",
+    "noPreview": "No file preview available."
+  }
+}

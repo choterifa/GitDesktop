@@ -43,6 +43,7 @@ import { useUiStore } from "@/lib/stores/ui";
 import { toastError } from "@/lib/toast";
 import { useOnline } from "@/lib/use-online";
 import { DescriptionField } from "./DescriptionField";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 import {
   ACT_PENDING_REASON,
   AI_DRAFT_PENDING_REASON,
@@ -62,6 +63,7 @@ export function BitbucketGeneralSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const settings = useBbRepoSettings(repoPath, open);
   const branches = useBranches(repoPath);
 
@@ -76,7 +78,7 @@ export function BitbucketGeneralSection({
           <Skeleton className="h-9 w-full" />
         </div>
       }
-      errorTitle="Couldn't load settings."
+      errorTitle={tx("Couldn't load settings.")}
     >
       {(data) => (
         <BitbucketGeneralForm
@@ -101,18 +103,6 @@ function toInput(s: BitbucketRepoSettings): BitbucketRepoSettingsInput {
 }
 
 /** Bitbucket's fork policy enum, with its own UI vocabulary. */
-const FORK_POLICIES = [
-  { value: "allow_forks", label: "Allow all forks" },
-  { value: "no_public_forks", label: "Allow only private forks" },
-  { value: "no_forks", label: "No forks" },
-] as const;
-
-/** Base UI's <Select> resolves value → label from an `items` map; without it a
- *  closed select falls back to the raw value ("allow_forks") until reopened. */
-const FORK_POLICY_ITEMS: Record<string, string> = Object.fromEntries(
-  FORK_POLICIES.map((o) => [o.value, o.label]),
-);
-
 function BitbucketGeneralForm({
   repoPath,
   settings,
@@ -122,6 +112,7 @@ function BitbucketGeneralForm({
   settings: BitbucketRepoSettings;
   branches: Branch[];
 }) {
+  const tx = useRepoSettingsText();
   const update = useBbUpdateRepoSettings(repoPath);
   const online = useOnline();
   const base = toInput(settings);
@@ -137,6 +128,15 @@ function BitbucketGeneralForm({
   // stream this mount launched, the store covers one it inherited.
   const storeBusy = useIsGeneratingRepoDesc(repoPath);
   const busy = descGen.generating || storeBusy;
+  const forkPolicies = [
+    { value: "allow_forks", label: tx("Allow all forks") },
+    { value: "no_public_forks", label: tx("Allow only private forks") },
+    { value: "no_forks", label: tx("No forks") },
+  ] as const;
+  /** Base UI needs labels in both the closed trigger and the popup. */
+  const forkPolicyItems = Object.fromEntries(
+    forkPolicies.map((option) => [option.value, option.label]),
+  );
 
   function set<K extends keyof BitbucketRepoSettingsInput>(
     key: K,
@@ -208,7 +208,7 @@ function BitbucketGeneralForm({
   async function handleSave() {
     try {
       await update.mutateAsync(form);
-      toast.success("Settings saved");
+      toast.success(tx("Settings saved"));
     } catch (e) {
       toastError(e);
     }
@@ -230,7 +230,7 @@ function BitbucketGeneralForm({
         id="bb-repo-description"
         value={form.description}
         onChange={(v) => set("description", v)}
-        placeholder="Short description of this repository"
+        placeholder={tx("Short description of this repository")}
         generate={
           aiEnabled &&
           (!aiConfigured ? (
@@ -242,7 +242,7 @@ function BitbucketGeneralForm({
               onClick={() => openSettings("ai")}
             >
               <SparkleIcon data-icon="inline-start" />
-              Set up AI
+              {tx("Set up AI")}
             </Button>
           ) : busy ? (
             <Button
@@ -256,18 +256,18 @@ function BitbucketGeneralForm({
               }}
             >
               <Spinner data-icon="inline-start" />
-              Cancel
+              {tx("Cancel")}
             </Button>
           ) : (
             <Button
               type="button"
               variant="ghost"
               size="xs"
-              title={`Suggest a description from the README with AI${generateHint}`}
+              title={`${tx("Suggest a description from the README with AI")}${generateHint}`}
               onClick={runGenerate}
             >
               <SparkleIcon data-icon="inline-start" />
-              Generate
+              {tx("Generate")}
             </Button>
           ))
         }
@@ -275,7 +275,7 @@ function BitbucketGeneralForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="bb-repo-website">Website</Label>
+          <Label htmlFor="bb-repo-website">{tx("Website")}</Label>
           <Input
             id="bb-repo-website"
             value={form.website}
@@ -286,7 +286,7 @@ function BitbucketGeneralForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="bb-repo-language">Language</Label>
+          <Label htmlFor="bb-repo-language">{tx("Language")}</Label>
           <Input
             id="bb-repo-language"
             value={form.language}
@@ -300,9 +300,9 @@ function BitbucketGeneralForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="bb-fork-policy">Fork policy</Label>
+          <Label htmlFor="bb-fork-policy">{tx("Fork policy")}</Label>
           <Select
-            items={FORK_POLICY_ITEMS}
+            items={forkPolicyItems}
             value={form.forkPolicy}
             onValueChange={(v) => {
               if (v) set("forkPolicy", v);
@@ -312,7 +312,7 @@ function BitbucketGeneralForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FORK_POLICIES.map((o) => (
+              {forkPolicies.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}
                 </SelectItem>
@@ -321,7 +321,7 @@ function BitbucketGeneralForm({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="bb-main-branch">Default branch</Label>
+          <Label htmlFor="bb-main-branch">{tx("Default branch")}</Label>
           <Select
             items={Object.fromEntries(branchOptions.map((b) => [b, b]))}
             value={form.mainBranch}
@@ -331,7 +331,7 @@ function BitbucketGeneralForm({
           >
             <SelectTrigger id="bb-main-branch" className="w-full">
               <SelectValue
-                placeholder="No default branch yet"
+                placeholder={tx("No default branch yet")}
                 onMouseEnter={clipTitleFromText}
               />
             </SelectTrigger>
@@ -348,7 +348,7 @@ function BitbucketGeneralForm({
 
       <div className="grid grid-cols-2 gap-4 rounded-md border p-3 text-xs">
         <div className="min-w-0">
-          <p className="font-medium text-muted-foreground">Project</p>
+          <p className="font-medium text-muted-foreground">{tx("Project")}</p>
           <p className="mt-0.5 truncate" title={settings.projectName}>
             {settings.projectName || settings.projectKey || "—"}
             {settings.projectKey && settings.projectName ? (
@@ -360,9 +360,9 @@ function BitbucketGeneralForm({
           </p>
         </div>
         <div className="min-w-0">
-          <p className="font-medium text-muted-foreground">Visibility</p>
+          <p className="font-medium text-muted-foreground">{tx("Visibility")}</p>
           <p className="mt-0.5 capitalize">
-            {settings.isPrivate ? "private" : "public"}
+            {settings.isPrivate ? tx("private") : tx("public")}
           </p>
         </div>
       </div>
@@ -374,7 +374,7 @@ function BitbucketGeneralForm({
           onClick={handleSave}
         >
           {update.isPending && <Spinner data-icon="inline-start" />}
-          Save changes
+          {tx("Save changes")}
         </DisabledReasonButton>
       </div>
     </div>

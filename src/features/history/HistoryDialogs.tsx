@@ -1,5 +1,6 @@
 import { formOptions } from "@tanstack/react-form";
 import { type ReactNode, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { LabeledGroup } from "@/components/form/labeled-group";
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { PROMOTION_BLOCKS_CHECKOUT } from "@/features/repository/checkout-copy";
+import { promotionBlocksCheckoutCopy } from "@/features/repository/checkout-copy";
 import { clipTitleFromText } from "@/lib/clip-title";
 import { required, withForm } from "@/lib/form";
 import type { CherryPickRangeResult } from "@/lib/git/api";
@@ -57,10 +58,8 @@ import { useLatestRef } from "@/lib/use-latest-ref";
 import { useRetained } from "@/lib/use-retained";
 import {
   CHERRY_PICK_ALREADY_APPLIED,
-  MERGE_PARENT_COPY,
-  MERGE_PARENT_DESCRIPTION,
+  CHERRY_PICK_ALREADY_APPLIED_SHORT,
   type MergeParentOp,
-  mergeParentPrompt,
 } from "./commit-confirms";
 
 const onError = (e: unknown) => toastError(e);
@@ -91,6 +90,7 @@ export function DeleteTagDialog({
   onRemoteChange: (v: boolean) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("history");
   const deleteLocalTag = useDeleteLocalTag(repoPath);
   const deleteTagOnOrigin = useDeleteTagOnOrigin(repoPath);
   // Offline holds only the origin arm; the local-only delete runs offline.
@@ -131,7 +131,9 @@ export function DeleteTagDialog({
       closeIfStillOpen();
       return;
     }
-    toast.success(`Deleted tag ${name}${remote ? " (local and origin)" : ""}`);
+    toast.success(
+      t(remote ? "toast.deletedTagEverywhere" : "toast.deletedTag", { name }),
+    );
     closeIfStillOpen();
   }
   return (
@@ -143,10 +145,11 @@ export function DeleteTagDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete tag {shownName}?</DialogTitle>
+          <DialogTitle>
+            {t("dialogs.deleteTagTitle", { name: shownName })}
+          </DialogTitle>
           <DialogDescription>
-            Removes the tag from this repository. The commit it points at is not
-            affected.
+            {t("dialogs.deleteTagDescription")}
           </DialogDescription>
         </DialogHeader>
         <label className="flex cursor-pointer items-center gap-2 text-xs">
@@ -154,11 +157,11 @@ export function DeleteTagDialog({
             checked={remote}
             onCheckedChange={(v) => onRemoteChange(v === true)}
           />
-          Also delete the tag on origin
+          {t("dialogs.deleteTagOrigin")}
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("dialogs.cancel")}
           </Button>
           <DisabledReasonButton
             variant="destructive"
@@ -176,7 +179,7 @@ export function DeleteTagDialog({
             onClick={() => void run()}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Delete tag
+            {t("dialogs.deleteTagAction")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -196,6 +199,7 @@ export function ResetCommitDialog({
   openedIn: string | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("history");
   const resetMutation = useResetToCommit(repoPath);
   const shownHash = useRetained(hash);
   const liveHash = useLatestRef(hash);
@@ -207,7 +211,7 @@ export function ResetCommitDialog({
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const startedFor = hash;
@@ -223,7 +227,7 @@ export function ResetCommitDialog({
       closeIfStillOpen();
       return;
     }
-    toast.success(`Reset to ${hash.slice(0, 7)}`);
+    toast.success(t("toast.resetTo", { hash: hash.slice(0, 7) }));
     closeIfStillOpen();
   }
   return (
@@ -235,24 +239,21 @@ export function ResetCommitDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Reset to commit?</DialogTitle>
+          <DialogTitle>{t("dialogs.resetTitle")}</DialogTitle>
           <DialogDescription>
-            Moves the current branch to {shownHash?.slice(0, 7)}. Changes from
-            later commits stay in your working tree as uncommitted changes
-            (mixed reset). Commits that were only on this branch will be
-            orphaned.
+            {t("dialogs.resetDescription", { hash: shownHash?.slice(0, 7) })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("dialogs.cancel")}
           </Button>
           <Button
             variant="destructive"
             disabled={resetMutation.isPending}
             onClick={() => void run()}
           >
-            Reset
+            {t("dialogs.resetAction")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -265,6 +266,7 @@ export function ResetCommitDialog({
  *  is keyed by commit AND `op` (what the choice is for), so every new subject
  *  starts on Parent 1 without a seed. A null `hash` asks nothing and holds nothing. */
 function useMainlineChoice(repo: string, hash: string | null, op: string) {
+  const { t } = useTranslation("history");
   const parents = useCommitParents(repo, hash);
   const [picked, setPicked] = useState<{
     hash: string;
@@ -280,9 +282,9 @@ function useMainlineChoice(repo: string, hash: string | null, op: string) {
       case hash === null:
         return undefined;
       case parents.isPending:
-        return "Reading this commit's parents…";
+        return t("dialogs.readingParents");
       case parents.isError:
-        return "Couldn't read this commit's parents.";
+        return t("dialogs.parentsError");
       default:
         return undefined;
     }
@@ -309,13 +311,14 @@ function MainlineParentList({
   choice: ReturnType<typeof useMainlineChoice>;
   ariaLabel?: string;
 }) {
+  const { t } = useTranslation("history");
   const { parents, mainline, pick } = choice;
   switch (true) {
     case parents.isPending:
       return (
         <>
           <span role="status" className="sr-only">
-            Loading parents…
+            {t("dialogs.loadingParents")}
           </span>
           <div aria-busy className="flex flex-col gap-2">
             <Skeleton className="h-4 w-full" />
@@ -326,7 +329,7 @@ function MainlineParentList({
     case parents.isError:
       return (
         <p className="text-xs text-muted-foreground">
-          Couldn't read this commit's parents.
+          {t("dialogs.parentsError")}
         </p>
       );
     default:
@@ -346,7 +349,7 @@ function MainlineParentList({
             >
               <Radio value={String(i + 1)} />
               <span className="shrink-0">
-                Parent {i + 1} ·{" "}
+                {t("dialogs.parentNumber", { count: i + 1 })} ·{" "}
                 <span className="font-mono">{p.hash.slice(0, 7)}</span> —
               </span>
               <span
@@ -390,6 +393,7 @@ export function CherryPickOntoDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation("history");
   const cherryPickOnto = useCherryPickOnto(repoPath);
   const destId = useId();
   const shownHashes = useRetained(hashes);
@@ -415,7 +419,7 @@ export function CherryPickOntoDialog({
     }
     // It switches to the destination branch, so it moves HEAD.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     // Compared by value: the host hands a fresh array on every open.
@@ -442,7 +446,7 @@ export function CherryPickOntoDialog({
       if (isAppError(e) && e.kind === "conflict") {
         toastErrorWithNote(
           e,
-          `You're now on ${target} — resolve the conflicts there, then continue the cherry-pick.`,
+          t("toast.cherryPickConflictNote", { branch: target }),
         );
       } else {
         onError(e);
@@ -452,13 +456,14 @@ export function CherryPickOntoDialog({
     }
     const { applied, skipped } = result;
     if (applied === 0) {
-      toast.info(
-        `Nothing to copy onto ${target} — those changes are already there.`,
-      );
+      toast.info(t("toast.nothingToCherryPickOnto", { branch: target }));
     } else {
-      const note = skipped > 0 ? ` (${skipped} already present)` : "";
+      const note =
+        skipped > 0
+          ? ` (${t("toast.alreadyPresent", { count: skipped })})`
+          : "";
       toast.success(
-        `Copied ${applied} commit${applied === 1 ? "" : "s"} onto ${target}${note}`,
+        t("toast.cherryPickRange", { count: applied, branch: target, note }),
       );
     }
     // Another repo's dialog and selection are never this pick's to clear.
@@ -477,7 +482,7 @@ export function CherryPickOntoDialog({
       case cherryPickOnto.isPending:
         return ACT_PENDING_REASON;
       case !branch:
-        return "Choose a destination branch first.";
+        return t("dialogs.chooseDestination");
       default:
         return choice.heldReason;
     }
@@ -492,28 +497,26 @@ export function CherryPickOntoDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cherry-pick to branch</DialogTitle>
+          <DialogTitle>{t("dialogs.cherryPickToBranchTitle")}</DialogTitle>
           <DialogDescription>
             {count > 1 ? (
               <>
-                Copies these {count} commits onto the chosen branch and switches
-                to it. They stay on {currentBranch ?? "this branch"} too.
-                Commits already present are skipped; any failure rolls the whole
-                batch back automatically.
+                {t("dialogs.cherryPickManyDescription", {
+                  count,
+                  branch: currentBranch ?? t("dialogs.thisBranch"),
+                })}
               </>
             ) : (
               <>
-                Copies this commit onto the chosen branch and switches to it. It
-                stays on {currentBranch ?? "this branch"} too. If the
-                destination already has it, it's skipped; a conflict pauses the
-                cherry-pick on the destination branch, where you can resolve it
-                and continue; any other failure rolls it back automatically.
+                {t("dialogs.cherryPickOneDescription", {
+                  branch: currentBranch ?? t("dialogs.thisBranch"),
+                })}
               </>
             )}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label htmlFor={destId}>Destination branch</Label>
+          <Label htmlFor={destId}>{t("dialogs.destinationBranch")}</Label>
           <Select
             items={Object.fromEntries(branches.map((b) => [b.name, b.name]))}
             value={branch || null}
@@ -532,23 +535,23 @@ export function CherryPickOntoDialog({
           </Select>
         </div>
         {mergeHash !== null && (
-          <LabeledGroup label="Mainline parent" className="min-w-0">
+          <LabeledGroup label={t("dialogs.mainlineParent")} className="min-w-0">
             <p className="text-xs text-muted-foreground">
-              {MERGE_PARENT_DESCRIPTION}
+              {t("dialogs.mergeParentDescription")}
             </p>
             <MainlineParentList choice={choice} />
           </LabeledGroup>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={close}>
-            Cancel
+            {t("dialogs.cancel")}
           </Button>
           <DisabledReasonButton
             disabled={heldReason !== undefined}
             reason={heldReason}
             onClick={() => void run()}
           >
-            Cherry-pick
+            {t("dialogs.cherryPickAction")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -579,6 +582,7 @@ export function MergeParentDialog({
   openedIn: string | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("history");
   const revertCommit = useRevertCommit(repoPath);
   const cherryPick = useCherryPick(repoPath);
   const pending = revertCommit.isPending || cherryPick.isPending;
@@ -592,8 +596,20 @@ export function MergeParentDialog({
   const { mainline } = choice;
   const liveTarget = useLatestRef(target);
   const liveRepo = useLatestRef(repoPath);
-  const copy = MERGE_PARENT_COPY[shown?.op ?? "revert"];
-  const prompt = mergeParentPrompt(shown?.op ?? "revert", shown?.hash ?? "");
+  const shownOp = shown?.op ?? "revert";
+  const prompt = {
+    title: t(
+      shownOp === "revert"
+        ? "dialogs.mergeRevertTitle"
+        : "dialogs.mergeCherryPickTitle",
+      { hash: shown?.hash.slice(0, 7) ?? "" },
+    ),
+    body: `${t("dialogs.mergeParentDescription")} ${t(
+      shownOp === "revert"
+        ? "dialogs.revertConflict"
+        : "dialogs.cherryPickConflict",
+    )}`,
+  };
 
   function close() {
     choice.reset();
@@ -602,12 +618,21 @@ export function MergeParentDialog({
 
   async function run() {
     if (!target || !openedIn) return;
-    if (refuseIfSwitched(openedIn, MERGE_PARENT_COPY[target.op].nothingDone)) {
+    if (
+      refuseIfSwitched(
+        openedIn,
+        t(
+          target.op === "revert"
+            ? "dialogs.nothingReverted"
+            : "dialogs.nothingCherryPicked",
+        ),
+      )
+    ) {
       close();
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       return;
     }
     const { hash, op, alreadyApplied = CHERRY_PICK_ALREADY_APPLIED } = target;
@@ -627,9 +652,15 @@ export function MergeParentDialog({
       if (op === "revert") {
         await revertCommit.mutateAsync({ hash, mainline });
       } else if (await cherryPick.mutateAsync({ hash, mainline })) {
-        toast.success(`Cherry-picked ${hash.slice(0, 7)}`);
+        toast.success(t("toast.cherryPicked", { hash: hash.slice(0, 7) }));
       } else {
-        toast.info(alreadyApplied);
+        toast.info(
+          alreadyApplied === CHERRY_PICK_ALREADY_APPLIED
+            ? t("toast.nothingToCherryPick")
+            : alreadyApplied === CHERRY_PICK_ALREADY_APPLIED_SHORT
+              ? t("toast.nothingToCherryPickShort")
+              : alreadyApplied,
+        );
       }
     } catch (e) {
       onError(e);
@@ -654,11 +685,14 @@ export function MergeParentDialog({
           <DialogDescription>{prompt.body}</DialogDescription>
         </DialogHeader>
         <div className="min-w-0">
-          <MainlineParentList choice={choice} ariaLabel="Mainline parent" />
+          <MainlineParentList
+            choice={choice}
+            ariaLabel={t("dialogs.mainlineParent")}
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={close}>
-            Cancel
+            {t("dialogs.cancel")}
           </Button>
           <DisabledReasonButton
             disabled={heldReason !== undefined}
@@ -666,7 +700,11 @@ export function MergeParentDialog({
             onClick={() => void run()}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {copy.confirmLabel}
+            {t(
+              shownOp === "revert"
+                ? "dialogs.revertCommitAction"
+                : "dialogs.cherryPickAction",
+            )}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -708,6 +746,7 @@ export const CreateRefFromCommitDialog = withForm({
     placeholder,
     submitLabel,
   }) {
+    const { t } = useTranslation("history");
     return (
       <Dialog
         open={open}
@@ -741,7 +780,7 @@ export const CreateRefFromCommitDialog = withForm({
             </form.AppField>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
+                {t("dialogs.cancel")}
               </Button>
               <form.AppForm>
                 <form.SubmitButton>{submitLabel}</form.SubmitButton>

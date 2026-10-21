@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { PathText } from "@/components/path-text";
 import {
   Dialog,
@@ -43,6 +44,7 @@ export function BlameFilePickerDialog({
   /** Called with the chosen path; the caller opens the blame view. */
   onPick: (path: string) => void;
 }) {
+  const { t } = useTranslation("history");
   const [filter, setFilter] = useState("");
   const [activePath, setActivePath] = useState<string | null>(null);
   const tracked = useTrackedFiles(repoPath, open);
@@ -106,11 +108,8 @@ export function BlameFilePickerDialog({
         initialFocus={() => filterRef.current}
       >
         <DialogHeader>
-          <DialogTitle>Blame a file</DialogTitle>
-          <DialogDescription>
-            Pick a tracked file to see line-by-line blame for its current
-            contents.
-          </DialogDescription>
+          <DialogTitle>{t("blamePicker.title")}</DialogTitle>
+          <DialogDescription>{t("blamePicker.description")}</DialogDescription>
         </DialogHeader>
 
         <Input
@@ -118,8 +117,8 @@ export function BlameFilePickerDialog({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onFilterKeyDown}
-          placeholder="Filter files — ↑↓ to move, Enter to blame"
-          aria-label="Filter tracked files"
+          placeholder={t("blamePicker.filterPlaceholder")}
+          aria-label={t("blamePicker.filterLabel")}
           className="h-8"
           autoComplete="off"
         />
@@ -131,13 +130,13 @@ export function BlameFilePickerDialog({
             </div>
           ) : tracked.isError ? (
             <p className="p-4 text-xs text-muted-foreground">
-              Couldn't load tracked files.
+              {t("blamePicker.loadError")}
             </p>
           ) : filtered.length === 0 ? (
             <p className="p-4 text-xs text-muted-foreground">
               {(tracked.data ?? []).length === 0
-                ? "No tracked files."
-                : "No files match."}
+                ? t("blamePicker.noFiles")
+                : t("blamePicker.noMatches")}
             </p>
           ) : (
             <FileList

@@ -1,6 +1,7 @@
 import { ArrowSquareOutIcon, CheckIcon, CopyIcon } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import { useRetained } from "@/lib/use-retained";
  * hashes) with a Copy action.
  */
 export function ErrorDialog() {
+  const { t } = useTranslation("errors");
   const presentation = useErrorDialog((s) => s.presentation);
   const close = useErrorDialog((s) => s.close);
   const shownPresentation = useRetained(presentation);
@@ -113,16 +115,16 @@ export function ErrorDialog() {
             </Button>
           )}
           <Button ref={closeRef} variant="outline" onClick={handleClose}>
-            Close
+            {t("dialog.close")}
           </Button>
           <Button variant="secondary" onClick={copy}>
             {copied ? (
               <>
-                <CheckIcon data-icon="inline-start" /> Copied
+                <CheckIcon data-icon="inline-start" /> {t("dialog.copied")}
               </>
             ) : (
               <>
-                <CopyIcon data-icon="inline-start" /> Copy
+                <CopyIcon data-icon="inline-start" /> {t("dialog.copy")}
               </>
             )}
           </Button>

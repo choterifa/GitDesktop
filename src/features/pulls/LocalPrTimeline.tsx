@@ -8,6 +8,7 @@ import {
 import { RelativeTime } from "@/components/relative-time";
 import { parseableDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /** The lifecycle events a local PR emits — no CI/remote activity, just the
  *  local create/merge/close/reopen milestones. */
@@ -15,31 +16,34 @@ export type LocalLifecycleKind = "created" | "merged" | "closed" | "reopened";
 
 /** Presentation (icon, tone, verb) for a local lifecycle event. Icon + word,
  *  never color-alone; tones use the shared semantic tokens. */
-function lifecyclePresentation(kind: LocalLifecycleKind): {
+function lifecyclePresentation(
+  kind: LocalLifecycleKind,
+  tx: (source: string) => string,
+): {
   Icon: typeof GitCommitIcon;
   tone?: string;
   label: string;
 } {
   switch (kind) {
     case "created":
-      return { Icon: GitBranchIcon, label: "created this local PR" };
+      return { Icon: GitBranchIcon, label: tx("created this local PR") };
     case "merged":
       return {
         Icon: GitMergeIcon,
         tone: "text-merged",
-        label: "merged this",
+        label: tx("merged this"),
       };
     case "closed":
       return {
         Icon: XCircleIcon,
         tone: "text-destructive",
-        label: "closed this",
+        label: tx("closed this"),
       };
     case "reopened":
       return {
         Icon: ArrowCounterClockwiseIcon,
         tone: "text-success",
-        label: "reopened this",
+        label: tx("reopened this"),
       };
   }
 }
@@ -58,7 +62,8 @@ export function LocalPrLifecycleRow({
   kind: LocalLifecycleKind;
   date?: string;
 }) {
-  const { Icon, tone, label } = lifecyclePresentation(kind);
+  const tx = usePullsText();
+  const { Icon, tone, label } = lifecyclePresentation(kind, tx);
   return (
     <div className="flex items-start gap-2 text-xs">
       <div className="relative flex w-5 shrink-0 justify-center">

@@ -14,6 +14,7 @@ import {
 } from "@/lib/git/api";
 import { useSettings } from "@/lib/settings/queries";
 import { toastError } from "@/lib/toast";
+import { useSessionText } from "./use-session-text";
 
 /**
  * Open a session's worktree so you can inspect the changes — view the files,
@@ -32,6 +33,7 @@ export function SessionOpenMenu({
   worktreePath: string;
   isolation: "worktree" | "container";
 }) {
+  const tx = useSessionText();
   const settings = useSettings();
   const editorPath = (settings.data?.externalEditor ?? "").trim();
   const editorName =
@@ -46,10 +48,10 @@ export function SessionOpenMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="outline" size="sm" />}
-        title="Open the worktree to inspect the changes"
+        title={tx("Open the worktree to inspect the changes")}
       >
         <FolderOpenIcon data-icon="inline-start" />
-        Open
+        {tx("Open")}
         <CaretDownIcon className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-52">
@@ -59,7 +61,7 @@ export function SessionOpenMenu({
               openWithProgram(editorPath, worktreePath).catch(onError)
             }
           >
-            Open in {editorName}
+            {tx("Open in {{editor}}", { editor: editorName })}
           </DropdownMenuItem>
         )}
         {/* Host terminal/default are misleading for a container session (host env),
@@ -76,19 +78,19 @@ export function SessionOpenMenu({
               ).catch(onError)
             }
           >
-            Open in terminal
+            {tx("Open in terminal")}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
           onClick={() => revealInExplorer(worktreePath).catch(onError)}
         >
-          Reveal in file manager
+          {tx("Reveal in file manager")}
         </DropdownMenuItem>
         {!container && (
           <DropdownMenuItem
             onClick={() => openWithDefault(worktreePath).catch(onError)}
           >
-            Open with default program
+            {tx("Open with default program")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

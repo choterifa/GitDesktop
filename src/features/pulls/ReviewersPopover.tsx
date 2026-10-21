@@ -12,6 +12,7 @@ import { useReviewerCandidates } from "@/lib/git/queries";
 import type { ForgeUserRef, RemoteLens } from "@/lib/git/types";
 import { useRovingRows } from "@/lib/list-keyboard-nav";
 import { cn } from "@/lib/utils";
+import { usePullsText } from "./use-pulls-text";
 
 /**
  * A short, stable disambiguator for a reviewer whose label collides with a
@@ -83,6 +84,7 @@ export function ReviewersPopover({
   // rather than dropping them silently.
   | { cells?: false; children?: never }
 )) {
+  const tx = usePullsText();
   const candidates = useReviewerCandidates(repoPath, number, enabled, lens);
   // GitHub reviewer ids are logins (avatars served at `<host>/<login>.png`), so the
   // avatar is login-derived there; off GitHub it's the initial fallback unless the
@@ -143,14 +145,14 @@ export function ReviewersPopover({
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Edit reviewers"
+            aria-label={tx("Edit reviewers")}
             disabled={!!disabledReason}
             reason={disabledReason}
           />
         }
       >
         <UserCheckIcon data-icon="inline-start" />
-        Reviewers
+        {tx("Reviewers")}
       </Popover.Trigger>
       <Popover.Portal container={portalContainer}>
         <Popover.Positioner
@@ -165,16 +167,18 @@ export function ReviewersPopover({
               render={<p />}
               className="px-1 pb-1.5 text-xs font-medium"
             >
-              Reviewers
+              {tx("Reviewers")}
             </Popover.Title>
             {(candidates.data ?? []).length === 0 && (
               <p className="px-1 py-1 text-xs text-muted-foreground">
-                {emptyPickerCopy(candidates, {
-                  noun: "reviewers",
-                  loadFailed: "Couldn't load workspace members.",
-                  empty:
-                    "No eligible reviewers — the workspace has no other members.",
-                })}
+                {tx(
+                  emptyPickerCopy(candidates, {
+                    noun: "reviewers",
+                    loadFailed: "Couldn't load workspace members.",
+                    empty:
+                      "No eligible reviewers — the workspace has no other members.",
+                  }),
+                )}
               </p>
             )}
             {/* Unstyled but NOT removable — see `useRovingRows`. */}
@@ -217,7 +221,7 @@ export function ReviewersPopover({
                 render={<p />}
                 className="mt-1 border-t px-1 pt-1.5 text-[11px] text-muted-foreground"
               >
-                Tab cycles the rows; Esc closes.
+                {tx("Tab cycles the rows; Esc closes.")}
               </Popover.Description>
             )}
           </Popover.Popup>
@@ -247,7 +251,7 @@ export function ReviewersPopover({
     return (
       <>
         {trigger}
-        <MetaValueCell label="Reviewers" empty={empty}>
+        <MetaValueCell label={tx("Reviewers")} empty={empty}>
           {chips}
           {children}
         </MetaValueCell>

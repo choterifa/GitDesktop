@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Fragment, type ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { HeldSwitch } from "@/components/held-switch";
 import { Button } from "@/components/ui/button";
@@ -47,8 +48,6 @@ import type {
 } from "@/lib/git/types";
 import {
   ACT_PENDING_REASON,
-  pendingWriteReason,
-  SAVING_LAST_CHANGE_REASON,
 } from "@/lib/offline-writes";
 import { useSettings } from "@/lib/settings/queries";
 import { useUiStore } from "@/lib/stores/ui";
@@ -74,14 +73,15 @@ import {
 /** What a control held through an issue switch says: the issue on screen is
  *  not the selected one yet. Shared by every issue view's stale-held controls so
  *  the one wording can't drift. */
-export const ISSUE_SWITCH_LOADING_REASON = "Loading this issue…";
+export const ISSUE_SWITCH_LOADING_REASON_KEY = "remoteParts.loadingIssue";
 
 /** A rail row's hold while its own write is pending: parked offline or saving. */
 function rowPendingReason(
   pending: { paused: boolean } | undefined,
-  inFlight = SAVING_LAST_CHANGE_REASON,
+  saving: string,
+  offline: string,
 ): string | undefined {
-  return pending ? pendingWriteReason(pending.paused, inFlight) : undefined;
+  return pending ? (pending.paused ? offline : saving) : undefined;
 }
 
 /** One row of an issue's metadata rail. Two shapes, because the shared pickers
@@ -182,11 +182,15 @@ function RailLinkButton({
 
 /** The static milestone row: the hybrid rail's fallback when the picker isn't
  *  available, and the read-only rail's only milestone shape. */
-function milestoneValueRow(issue: IssueDetails, when: boolean): IssueRailRow {
+function milestoneValueRow(
+  issue: IssueDetails,
+  when: boolean,
+  heading: string,
+): IssueRailRow {
   return {
     key: "milestone-value",
     when: when && issue.milestone !== null,
-    heading: "Milestone",
+    heading,
     render: () => <p className="text-xs">{issue.milestone?.title}</p>,
   };
 }
@@ -194,17 +198,17 @@ function milestoneValueRow(issue: IssueDetails, when: boolean): IssueRailRow {
 /** The "View on <provider>" row every non-GitHub rail ends with. */
 function viewOnRemoteRow(
   issue: IssueDetails,
-  remoteLabel: string,
   when: boolean,
   loadingReason: string | undefined,
+  label: string,
 ): IssueRailRow {
   return {
     key: "links",
     when,
-    heading: "Links",
+      heading: label,
     render: () => (
       <RailLinkButton url={issue.url} disabledReason={loadingReason}>
-        View on {remoteLabel}
+        {label}
       </RailLinkButton>
     ),
   };
@@ -278,6 +282,7 @@ export function IssueSidebar({
    *  rows' own `when` gate, which is what decides they mount at all. */
   paletteEnabled?: boolean;
 }) {
+  const { t } = useTranslation("issues");
   const setAssignees = useSetIssueAssignees(repoPath, lens);
   const setMilestone = useSetIssueMilestone(repoPath, lens);
   const setType = useSetIssueType(repoPath, lens);
@@ -288,6 +293,8 @@ export function IssueSidebar({
   const pendingWrites = usePendingIssueWrites(repoPath);
   const dueDateReason = rowPendingReason(
     pendingIssueWrite(pendingWrites, "due-date", (v) => v.number === number),
+    t("shared.saving"),
+    t("shared.offlineQueued"),
   );
   const confidentialReason = rowPendingReason(
     pendingIssueWrite(
@@ -295,6 +302,8 @@ export function IssueSidebar({
       "confidential",
       (v) => v.number === number,
     ),
+    t("shared.saving"),
+    t("shared.offlineQueued"),
   );
 
   // A provider we can only read from (Bitbucket, or a not-ready repo): static rail.
@@ -415,7 +424,7 @@ export function IssueSidebar({
         />
       ),
     },
-    milestoneValueRow(issue, !canSetMilestone),
+    milestoneValueRow(issue, !canSetMilestone, t("remoteParts.milestone")),
     {
       key: "relationships",
       when: canWrite,
@@ -449,10 +458,10 @@ export function IssueSidebar({
     {
       key: "notifications",
       when: canWrite,
-      heading: "Notifications",
+      heading: t("remoteParts.notifications"),
       render: () => (
         <RailLinkButton url={issue.url} disabledReason={loadingReason}>
-          Subscribe on GitHub
+          {t("remoteParts.subscribeGitHub")}
         </RailLinkButton>
       ),
     },
@@ -509,7 +518,12 @@ export function IssueSidebar({
       ),
     },
     // GitHub frames its link out as Notifications above instead.
-    viewOnRemoteRow(issue, remoteLabel, !canWrite, loadingReason),
+    viewOnRemoteRow(
+      issue,
+      !canWrite,
+      loadingReason,
+      t("remoteParts.viewOn", { provider: remoteLabel }),
+    ),
   ];
 
   return <IssueRail rows={rows} held={held} />;
@@ -555,6 +569,7 @@ export function DueDateRow({
    *  visible but disabled, with this text as their hint. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const pastDue = open && value !== null && isPastDue(value);
   const blocked = !!disabledReason;
   const held = blocked || pendingReason !== undefined;
@@ -565,7 +580,7 @@ export function DueDateRow({
           htmlFor="issue-due-date"
           className="text-xs font-medium text-muted-foreground"
         >
-          Due date
+          {t("remoteParts.dueDate")}
         </Label>
         {value !== null && (
           // The hint sits on the control, not the row — the Label stays live
@@ -579,7 +594,7 @@ export function DueDateRow({
             reason={disabledReason ?? pendingReason}
             onClick={() => onChange(null)}
           >
-            Clear
+            {t("remoteParts.clear")}
           </DisabledReasonButton>
         )}
       </div>
@@ -607,7 +622,11 @@ export function DueDateRow({
           }}
         />
       </span>
-      {pastDue && <p className="text-[11px] text-destructive">Past due</p>}
+      {pastDue && (
+        <p className="text-[11px] text-destructive">
+          {t("remoteParts.pastDue")}
+        </p>
+      )}
       <PendingWriteNote reason={pendingReason} />
     </div>
   );
@@ -629,6 +648,7 @@ function ConfidentialRow({
    *  but held, with this text as its hint. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
@@ -636,7 +656,7 @@ function ConfidentialRow({
           htmlFor="issue-confidential"
           className="text-xs font-medium text-muted-foreground"
         >
-          Confidential
+          {t("remoteParts.confidential")}
         </Label>
         <HeldSwitch
           id="issue-confidential"
@@ -647,7 +667,7 @@ function ConfidentialRow({
       </div>
       {value && (
         <p className="text-[11px] text-muted-foreground">
-          Only visible to project members.
+          {t("remoteParts.onlyProjectMembers")}
         </p>
       )}
       <PendingWriteNote reason={pendingReason} />
@@ -692,6 +712,7 @@ export function TimeTrackingControls({
    *  is a read and stays live. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const estimate = stats?.timeEstimate ?? 0;
   const spent = stats?.totalTimeSpent ?? 0;
   const humanEstimate = stats?.humanTimeEstimate ?? "";
@@ -707,11 +728,15 @@ export function TimeTrackingControls({
       {hasAny ? (
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-muted-foreground">Estimate</span>
+            <span className="text-muted-foreground">
+              {t("remoteParts.estimate")}
+            </span>
             <span className="tabular-nums">{humanEstimate || "—"}</span>
           </div>
           <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-muted-foreground">Spent</span>
+            <span className="text-muted-foreground">
+              {t("remoteParts.spent")}
+            </span>
             <span className={cn("tabular-nums", overSpent && "text-warning")}>
               {humanSpent || "—"}
             </span>
@@ -720,7 +745,10 @@ export function TimeTrackingControls({
             <div
               className="h-1 w-full bg-muted"
               aria-hidden
-              title={`${humanSpent} of ${humanEstimate}`}
+              title={t("remoteParts.progressTitle", {
+                spent: humanSpent,
+                estimate: humanEstimate,
+              })}
             >
               <div
                 className={cn(
@@ -733,12 +761,14 @@ export function TimeTrackingControls({
           )}
           {overSpent && (
             <p className="text-[11px] text-warning">
-              {humanTimeOver(spent - estimate)} over
+              {humanTimeOver(spent - estimate)} {t("remoteParts.over")}
             </p>
           )}
         </div>
       ) : (
-        <p className="text-[11px] text-muted-foreground">No time tracked.</p>
+        <p className="text-[11px] text-muted-foreground">
+          {t("remoteParts.noTimeTracked")}
+        </p>
       )}
       {editable && (
         // Group-level hint: the disabled inputs and buttons inside swallow
@@ -756,8 +786,8 @@ export function TimeTrackingControls({
               key={humanEstimate}
               defaultValue={humanEstimate}
               className="h-7"
-              placeholder="Estimate (e.g. 3h)"
-              aria-label="Set time estimate"
+              placeholder={t("remoteParts.estimatePlaceholder")}
+              aria-label={t("remoteParts.setTimeEstimate")}
               disabled={pending || !!disabledReason}
               onBlur={(e) => {
                 const next = e.target.value.trim();
@@ -776,7 +806,7 @@ export function TimeTrackingControls({
                 disabled={pending || !!disabledReason}
                 onClick={() => onSetEstimate(null)}
               >
-                Clear
+                {t("remoteParts.clear")}
               </Button>
             )}
           </div>
@@ -784,8 +814,8 @@ export function TimeTrackingControls({
             <Input
               id={`${idPrefix}-time-spent`}
               className="h-7"
-              placeholder="Add spent (e.g. 45m, -15m)"
-              aria-label="Add spent time"
+              placeholder={t("remoteParts.addSpentPlaceholder")}
+              aria-label={t("remoteParts.addSpentTime")}
               disabled={pending || !!disabledReason}
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
@@ -806,7 +836,7 @@ export function TimeTrackingControls({
                 disabled={pending || !!disabledReason}
                 onClick={() => onAddSpent(null)}
               >
-                Reset
+                {t("remoteParts.reset")}
               </Button>
             )}
           </div>
@@ -842,6 +872,7 @@ function IssueTimeTrackingSection({
    *  is a read and stays live. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const stats = useGlIssueTimeStats(repoPath, number);
   const setEstimate = useSetIssueTimeEstimate(repoPath);
   const addSpent = useAddIssueSpentTime(repoPath);
@@ -864,13 +895,19 @@ function IssueTimeTrackingSection({
     timePending.length > 0
       ? { paused: timePending.every((p) => p.paused) }
       : undefined,
+    t("shared.saving"),
+    t("shared.offlineQueued"),
   );
 
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-medium text-muted-foreground">Time tracking</p>
+      <p className="text-xs font-medium text-muted-foreground">
+        {t("remoteParts.timeTracking")}
+      </p>
       {stats.isPending ? (
-        <p className="text-[11px] text-muted-foreground">Loading…</p>
+        <p className="text-[11px] text-muted-foreground">
+          {t("remoteParts.loading")}
+        </p>
       ) : (
         <TimeTrackingControls
           stats={stats.data}
@@ -907,6 +944,7 @@ function IssueLinksSection({
    *  removes disable, with this text as their hint. The list stays live. */
   disabledReason?: string;
 }) {
+  const { t } = useTranslation("issues");
   const links = useGlIssueLinks(repoPath, number);
   const linkIssue = useLinkIssue(repoPath);
   const unlinkIssue = useUnlinkIssue(repoPath);
@@ -916,7 +954,8 @@ function IssueLinksSection({
   const pendingWrites = usePendingIssueWrites(repoPath);
   const linkReason = rowPendingReason(
     pendingIssueWrite(pendingWrites, "link", (v) => v.number === number),
-    "Linking the issue…",
+    t("remoteParts.linkingIssue"),
+    t("shared.offlineQueued"),
   );
   const unlinking = (linkId: string) =>
     rowPending(
@@ -925,7 +964,8 @@ function IssueLinksSection({
         "unlink",
         (v) => v.number === number && v.linkId === linkId,
       ),
-      "Removing this link…",
+      t("remoteParts.removingLink"),
+      t("shared.offlineQueued"),
     );
   // A second link while one is pending could name the same issue twice.
   const addReason = disabledReason ?? linkReason;
@@ -952,20 +992,20 @@ function IssueLinksSection({
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          Related issues
+          {t("remoteParts.relatedIssues")}
         </span>
         <span className="flex-1" />
         {editable && !adding && (
           <DisabledReasonButton
             variant="ghost"
             size="xs"
-            aria-label="Link a related issue"
+            aria-label={t("remoteParts.linkRelated")}
             disabled={addReason !== undefined}
             reason={addReason}
             onClick={() => setAdding(true)}
           >
             <PlusIcon data-icon="inline-start" />
-            Add
+            {t("remoteParts.add")}
             <CaretDownIcon data-icon="inline-end" />
           </DisabledReasonButton>
         )}
@@ -984,12 +1024,14 @@ function IssueLinksSection({
       <PendingWriteNote reason={linkReason} />
 
       {links.isPending ? (
-        <p className="text-[11px] text-muted-foreground">Loading…</p>
+        <p className="text-[11px] text-muted-foreground">
+          {t("remoteParts.loading")}
+        </p>
       ) : (
         data.length === 0 &&
         !adding && (
           <p className="text-[11px] text-muted-foreground">
-            No related issues.
+            {t("remoteParts.noRelated")}
           </p>
         )
       )}
@@ -1006,7 +1048,7 @@ function IssueLinksSection({
             />
           </div>
           <Button variant="ghost" size="xs" onClick={() => setAdding(false)}>
-            Cancel
+            {t("remoteParts.cancel")}
           </Button>
         </div>
       )}
@@ -1042,6 +1084,7 @@ function ReadOnlyIssueSidebar({
   remoteLabel: string;
   loadingReason: string | undefined;
 }) {
+  const { t } = useTranslation("issues");
   const hasMeta =
     issue.assignees.length > 0 ||
     issue.labels.length > 0 ||
@@ -1053,7 +1096,7 @@ function ReadOnlyIssueSidebar({
     {
       key: "assignees",
       when: issue.assignees.length > 0,
-      heading: "Assignees",
+      heading: t("remoteParts.assignees"),
       render: () => (
         <ul className="space-y-1">
           {issue.assignees.map((user) => (
@@ -1070,7 +1113,7 @@ function ReadOnlyIssueSidebar({
     {
       key: "labels",
       when: issue.labels.length > 0,
-      heading: "Labels",
+      heading: t("remoteParts.labels"),
       render: () => (
         <div className="flex flex-wrap gap-1.5">
           {issue.labels.map((label) => (
@@ -1079,29 +1122,36 @@ function ReadOnlyIssueSidebar({
         </div>
       ),
     },
-    milestoneValueRow(issue, true),
+    milestoneValueRow(issue, true, t("remoteParts.milestone")),
     {
       key: "due-date",
       when: !!issue.dueDate,
-      heading: "Due date",
+      heading: t("remoteParts.dueDate"),
       render: () => <p className="text-xs">{issue.dueDate}</p>,
     },
     {
       key: "confidential",
       when: issue.confidential,
-      heading: "Confidential",
-      render: () => <p className="text-xs">Only visible to project members.</p>,
+      heading: t("remoteParts.confidential"),
+      render: () => (
+        <p className="text-xs">{t("remoteParts.onlyProjectMembers")}</p>
+      ),
     },
     {
       key: "empty",
       when: !hasMeta,
       render: () => (
         <p className="text-xs text-muted-foreground">
-          No assignees, labels, milestone, or due date.
+          {t("remoteParts.noMetadata")}
         </p>
       ),
     },
-    viewOnRemoteRow(issue, remoteLabel, true, loadingReason),
+    viewOnRemoteRow(
+      issue,
+      true,
+      loadingReason,
+      t("remoteParts.viewOn", { provider: remoteLabel }),
+    ),
   ];
 
   return <IssueRail rows={rows} />;
@@ -1131,13 +1181,14 @@ export function IssueLoadingFrame({
    *  close/reopen bar alone, or nothing. */
   composer: "comment" | "bar" | null;
 }) {
+  const { t } = useTranslation("issues");
   // The composer's collapse is one global preference, read as it reads it.
   const composerCollapsed =
     useSettings().data?.commentComposerCollapsed ?? false;
   return (
     <>
       <span role="status" className="sr-only">
-        {ISSUE_SWITCH_LOADING_REASON}
+        {t(ISSUE_SWITCH_LOADING_REASON_KEY)}
       </span>
       {/* The loaded header's rows, class for class: the title row wraps
           around the same actions, and the meta row is its avatar's 24px. */}
@@ -1251,7 +1302,7 @@ export function TransferIssueDialog({
   onSubmit: () => void;
   move?: boolean;
 }) {
-  const verb = move ? "Move" : "Transfer";
+  const { t } = useTranslation("issues");
   return (
     <Dialog
       open={open}
@@ -1269,12 +1320,14 @@ export function TransferIssueDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              {verb} issue #{number}
+              {move
+                ? t("remoteParts.moveIssue", { number })
+                : t("remoteParts.transferIssue", { number })}
             </DialogTitle>
             <DialogDescription>
               {move
-                ? "Moves this issue to another project with issues enabled. Its comments, labels, and milestone move with it; the original closes with a “moved” marker."
-                : "Moves this issue to another repository you can push to. Its comments, labels, and assignees move with it."}
+                ? t("remoteParts.moveDescription")
+                : t("remoteParts.transferDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
@@ -1282,7 +1335,11 @@ export function TransferIssueDialog({
               autoFocus
               value={dest}
               onChange={(e) => onDestChange(e.target.value)}
-              placeholder={move ? "group/project" : "owner/repo"}
+              placeholder={
+                move
+                  ? t("remoteParts.projectPathPlaceholder")
+                  : t("remoteParts.repositoryPlaceholder")
+              }
               autoComplete="off"
             />
             {suggestions.length > 0 && (
@@ -1302,7 +1359,7 @@ export function TransferIssueDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {t("remoteParts.cancel")}
             </Button>
             {/* The running write outranks the hold. An empty destination stays a
                 plain disable: no copy names it. */}
@@ -1312,7 +1369,7 @@ export function TransferIssueDialog({
               reason={pending ? ACT_PENDING_REASON : heldReason}
             >
               {pending && <Spinner data-icon="inline-start" />}
-              {verb}
+              {move ? t("remoteParts.move") : t("remoteParts.transfer")}
             </DisabledReasonButton>
           </DialogFooter>
         </form>
@@ -1347,6 +1404,7 @@ export function DeleteIssueDialog({
   /** The provider's role requirement (e.g. "requires admin or triage access"). */
   roleHint: string;
 }) {
+  const { t } = useTranslation("issues");
   return (
     <Dialog
       open={open}
@@ -1356,15 +1414,20 @@ export function DeleteIssueDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete issue #{number}?</DialogTitle>
+          <DialogTitle>
+            {t("remoteParts.deleteIssueTitle", { number })}
+          </DialogTitle>
           <DialogDescription>
-            This permanently deletes “{title}” on {remoteLabel}. This cannot be
-            undone, and {roleHint}.
+            {t("remoteParts.deleteIssueBody", {
+              title,
+              remoteLabel,
+              roleHint,
+            })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("remoteParts.cancelDelete")}
           </Button>
           <DisabledReasonButton
             variant="destructive"
@@ -1373,7 +1436,7 @@ export function DeleteIssueDialog({
             onClick={onConfirm}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Delete issue
+            {t("remoteParts.deleteIssue")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>

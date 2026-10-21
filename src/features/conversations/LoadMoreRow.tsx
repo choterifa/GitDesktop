@@ -1,4 +1,5 @@
 import { CircleNotchIcon } from "@phosphor-icons/react";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 
 /** The number of items a list loads per page; "Load more" bumps a panel's limit
  *  by this. A deliberate bump from the old silent gh-CLI defaults (30 PRs/issues,
@@ -16,6 +17,7 @@ export function LoadMoreRow(props: {
   loading: boolean;
   onLoadMore: () => void;
 }) {
+  const tx = useCommonText();
   const { count, loading, onLoadMore } = props;
   return (
     <div className="border-t p-2">
@@ -32,10 +34,10 @@ export function LoadMoreRow(props: {
               animate-spin). Rendered only while loading; the label swaps too, so
               there's no reserved-slot shift to manage. */}
           {loading && <CircleNotchIcon className="size-3 animate-spin" />}
-          {loading ? "Loading…" : `Load ${PAGE_SIZE} more`}
+          {loading ? tx("Loading…") : tx("Load {{count}} more", { count: PAGE_SIZE })}
         </span>
         <span className="text-[11px] text-muted-foreground tabular-nums">
-          Showing first {count.toLocaleString()}
+          {tx("Showing first {{count}}", { count: count.toLocaleString() })}
         </span>
       </button>
     </div>

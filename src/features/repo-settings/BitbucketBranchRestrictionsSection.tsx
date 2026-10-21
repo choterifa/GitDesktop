@@ -22,6 +22,7 @@ import {
 import type { BitbucketBranchRestriction } from "@/lib/git/types";
 import { toastError } from "@/lib/toast";
 import { useOnline } from "@/lib/use-online";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 import {
   ACT_PENDING_REASON,
   formExitSwapKey,
@@ -58,12 +59,12 @@ const KINDS: { value: string; label: string; needsValue?: boolean }[] = [
 
 /** Base UI's <Select> resolves value → label from an `items` map; without it a
  *  closed select falls back to the raw value ("push") until reopened. */
-const KIND_ITEMS: Record<string, string> = Object.fromEntries(
-  KINDS.map((o) => [o.value, o.label]),
-);
-
-function kindLabel(kind: string): string {
-  return KINDS.find((k) => k.value === kind)?.label ?? kind;
+function kindLabel(
+  kind: string,
+  tx: ReturnType<typeof useRepoSettingsText>,
+): string {
+  const label = KINDS.find((k) => k.value === kind)?.label;
+  return label ? tx(label) : kind;
 }
 
 function kindNeedsValue(kind: string): boolean {
@@ -80,6 +81,7 @@ export function BitbucketBranchRestrictionsSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const restrictions = useBbBranchRestrictions(repoPath, open);
   const remove = useBbDeleteBranchRestriction(repoPath);
   const online = useOnline();
@@ -96,7 +98,7 @@ export function BitbucketBranchRestrictionsSection({
   async function handleRemove(id: string) {
     try {
       await remove.mutateAsync(id);
-      toast.success("Restriction deleted");
+      toast.success(tx("Restriction deleted"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -125,7 +127,7 @@ export function BitbucketBranchRestrictionsSection({
     <div data-confirm-section className="min-w-0 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Rules that limit who can push, merge, or delete matching branches.
+          {tx("Rules that limit who can push, merge, or delete matching branches.")}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -134,19 +136,19 @@ export function BitbucketBranchRestrictionsSection({
           onClick={() => setEditing("new")}
         >
           <PlusIcon data-icon="inline-start" />
-          Add restriction
+          {tx("Add restriction")}
         </Button>
       </div>
 
       <RemoteListSection
         query={restrictions}
         rowCount={restrictions.data?.length ?? 0}
-        noun="branch restrictions"
-        loadFailed="Couldn't load branch restrictions."
-        emptyLabel="No branch restrictions yet."
+        noun={tx("branch restrictions")}
+        loadFailed={tx("Couldn't load branch restrictions.")}
+        emptyLabel={tx("No branch restrictions yet.")}
         skeletonClassName="h-12 w-full"
-        errorTitle="Couldn't load branch restrictions."
-        errorHint="If this is a permissions error, managing branch restrictions needs admin on this repository."
+        errorTitle={tx("Couldn't load branch restrictions.")}
+        errorHint={tx("If this is a permissions error, managing branch restrictions needs admin on this repository.")}
       >
         {restrictions.data?.map((r) => (
           <div
@@ -156,7 +158,7 @@ export function BitbucketBranchRestrictionsSection({
           >
             <div className="flex items-center gap-2">
               <p className="min-w-0 flex-1">
-                <span className="font-medium">{kindLabel(r.kind)}</span>
+                <span className="font-medium">{kindLabel(r.kind, tx)}</span>
                 <span className="text-muted-foreground"> · </span>
                 <span className="font-mono" title={r.pattern}>
                   {r.pattern}
@@ -167,8 +169,8 @@ export function BitbucketBranchRestrictionsSection({
               </p>
               {confirming === r.id ? (
                 <InlineConfirm
-                  prompt="Delete?"
-                  actLabel="Delete"
+                  prompt={tx("Delete?")}
+                  actLabel={tx("Delete")}
                   pending={remove.isPending}
                   heldReason={online ? undefined : OFFLINE_WRITE_REASON}
                   swapFocusRef={swapFocus(r.id)}
@@ -183,7 +185,7 @@ export function BitbucketBranchRestrictionsSection({
                     variant="ghost"
                     onClick={() => setEditing(r)}
                   >
-                    Edit
+                    {tx("Edit")}
                   </Button>
                   <Button
                     ref={swapFocus(r.id)}
@@ -191,9 +193,12 @@ export function BitbucketBranchRestrictionsSection({
                     variant="ghost"
                     className="text-muted-foreground hover:text-destructive"
                     onClick={() => setConfirming(r.id)}
-                    aria-label={`Delete ${kindLabel(r.kind)} on ${r.pattern}`}
+                    aria-label={tx("Delete {{kind}} on {{pattern}}", {
+                      kind: kindLabel(r.kind, tx),
+                      pattern: r.pattern,
+                    })}
                   >
-                    Delete
+                    {tx("Delete")}
                   </Button>
                 </>
               )}
@@ -217,6 +222,7 @@ function RestrictionForm({
   swapFocusRef: SwapFocusRef;
   onDone: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const create = useBbCreateBranchRestriction(repoPath);
   const update = useBbUpdateBranchRestriction(repoPath);
   const editing = restriction !== null;
@@ -238,9 +244,9 @@ function RestrictionForm({
   const canSave = trimmed.length > 0 && valueValid && !pending && online;
   const offlineReason = online ? undefined : OFFLINE_WRITE_REASON;
   const warning = !trimmed
-    ? "Enter a branch pattern."
+    ? tx("Enter a branch pattern.")
     : !valueValid
-      ? "Enter a whole number between 1 and 10."
+      ? tx("Enter a whole number between 1 and 10.")
       : null;
 
   async function submit() {
@@ -260,7 +266,9 @@ function RestrictionForm({
           value: payloadValue,
         });
       }
-      toast.success(editing ? "Restriction updated" : "Restriction added");
+      toast.success(
+        tx(editing ? "Restriction updated" : "Restriction added"),
+      );
       onDone();
     } catch (e) {
       toastError(e);
@@ -271,13 +279,15 @@ function RestrictionForm({
     <div className="min-w-0 space-y-3">
       <Button ref={swapFocusRef} size="sm" variant="ghost" onClick={onDone}>
         <CaretLeftIcon data-icon="inline-start" />
-        Back to restrictions
+        {tx("Back to restrictions")}
       </Button>
       <div className="space-y-3 rounded-md border p-3">
         <div className="space-y-1.5">
-          <Label htmlFor="bb-restriction-kind">Restriction</Label>
+          <Label htmlFor="bb-restriction-kind">{tx("Restriction")}</Label>
           <Select
-            items={KIND_ITEMS}
+            items={Object.fromEntries(
+              KINDS.map((option) => [option.value, tx(option.label)]),
+            )}
             value={kind}
             disabled={editing}
             onValueChange={(v) => {
@@ -290,21 +300,20 @@ function RestrictionForm({
             <SelectContent>
               {KINDS.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
-                  {o.label}
+                  {tx(o.label)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {editing && (
             <p className="text-[11px] text-muted-foreground">
-              The restriction type can't be changed — delete and re-add to
-              switch it.
+              {tx("The restriction type can't be changed — delete and re-add to switch it.")}
             </p>
           )}
         </div>
         <div className="grid grid-cols-[1fr_auto] gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="bb-restriction-pattern">Branch pattern</Label>
+            <Label htmlFor="bb-restriction-pattern">{tx("Branch pattern")}</Label>
             <Input
               id="bb-restriction-pattern"
               value={pattern}
@@ -317,7 +326,7 @@ function RestrictionForm({
           </div>
           {needsValue && (
             <div className="space-y-1.5">
-              <Label htmlFor="bb-restriction-value">Count</Label>
+              <Label htmlFor="bb-restriction-value">{tx("Count")}</Label>
               <Input
                 id="bb-restriction-value"
                 type="number"
@@ -331,8 +340,9 @@ function RestrictionForm({
           )}
         </div>
         <p className="text-[11px] text-muted-foreground">
-          A glob like <span className="font-mono">release/*</span> matches every
-          matching branch.
+          {tx("A glob like {{pattern}} matches every matching branch.", {
+            pattern: "release/*",
+          })}
         </p>
         {warning && <p className="text-[11px] text-warning">{warning}</p>}
         <div className="flex items-center justify-end gap-2 border-t pt-3">
@@ -342,7 +352,7 @@ function RestrictionForm({
             size="sm"
             onClick={onDone}
           >
-            Cancel
+            {tx("Cancel")}
           </Button>
           <DisabledReasonButton
             ref={swapFocusRef}
@@ -356,7 +366,7 @@ function RestrictionForm({
             onClick={submit}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {editing ? "Save changes" : "Add"}
+            {editing ? tx("Save changes") : tx("Add")}
           </DisabledReasonButton>
         </div>
       </div>

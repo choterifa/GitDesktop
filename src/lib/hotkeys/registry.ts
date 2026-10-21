@@ -1201,6 +1201,27 @@ export const ACTIONS = [
 
 export type ActionId = (typeof ACTIONS)[number]["id"];
 
+/** Stable catalog keys for all UI surfaces that present an action. The English
+ *  `label` remains the search/fallback text and never becomes a persisted id. */
+export function actionLabelKey(id: ActionId | string): string {
+  return `actions.${id}`;
+}
+
+const CATEGORY_TRANSLATION_KEYS: Record<ActionCategory, string> = {
+  Application: "categories.application",
+  Navigation: "categories.navigation",
+  Repository: "categories.repository",
+  "Branches & stash": "categories.branchesAndStash",
+  Changes: "categories.changes",
+  Agent: "categories.agent",
+  "Pull requests": "categories.pullRequests",
+  Actions: "categories.actions",
+};
+
+export function actionCategoryKey(category: ActionCategory): string {
+  return CATEGORY_TRANSLATION_KEYS[category];
+}
+
 export const CATEGORY_ORDER: ActionCategory[] = [
   "Application",
   "Navigation",
@@ -1217,6 +1238,7 @@ export const CATEGORY_ORDER: ActionCategory[] = [
  * sheet's "Built-in" section so the documentation is complete.
  */
 export const BUILT_IN_KEYS: {
+  id: string;
   keys: string;
   what: string;
   /** Canonical binding, formatted per-platform at render (⌘ on macOS). When set,
@@ -1224,13 +1246,15 @@ export const BUILT_IN_KEYS: {
   binding?: string;
 }[] = [
   {
+    id: "listMovement",
     keys: "↑ / ↓",
     what: "Move through lists (files, commits, PRs, repositories)",
   },
-  { keys: "Shift+↑ / Shift+↓", what: "Extend the selection in History" },
-  { keys: "Enter", what: "Open or select the highlighted item" },
-  { keys: "Esc", what: "Close dialogs, menus, and settings" },
+  { id: "extendHistorySelection", keys: "Shift+↑ / Shift+↓", what: "Extend the selection in History" },
+  { id: "openHighlighted", keys: "Enter", what: "Open or select the highlighted item" },
+  { id: "closeOverlay", keys: "Esc", what: "Close dialogs, menus, and settings" },
   {
+    id: "submitComment",
     keys: "Ctrl+Enter",
     what: "Submit a comment from its text box, or a PR or issue create/edit dialog from any field",
     binding: "mod+enter",

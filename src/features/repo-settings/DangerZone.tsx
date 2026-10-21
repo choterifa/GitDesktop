@@ -53,6 +53,10 @@ import {
 } from "./parts";
 import { reseedRename } from "./rename-seed";
 import { ScopeRefreshHint } from "./ScopeRefreshHint";
+import {
+  repoSettingsText as tr,
+  useRepoSettingsText,
+} from "./use-repo-settings-text";
 
 /** The provider-neutral facts the danger actions need, sourced from whichever
  *  provider's settings read is active. */
@@ -108,7 +112,9 @@ function DangerDialog({
     (pending ? ACT_PENDING_REASON : undefined) ??
     heldReason ??
     disabledReason ??
-    (matches ? undefined : `Type ${confirmPhrase} to confirm`);
+    (matches
+      ? undefined
+      : tr("Type {{phrase}} to confirm", { phrase: confirmPhrase }));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -120,7 +126,8 @@ function DangerDialog({
         {children}
         <div className="space-y-1.5">
           <Label htmlFor="danger-confirm" className="text-xs">
-            Type <span className="font-mono">{confirmPhrase}</span> to confirm
+            {tr("Type")} <span className="font-mono">{confirmPhrase}</span>{" "}
+            {tr("to confirm")}
           </Label>
           <Input
             id="danger-confirm"
@@ -133,7 +140,7 @@ function DangerDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tr("Cancel")}
           </Button>
           <DisabledReasonButton
             variant="destructive"
@@ -182,14 +189,20 @@ const DANGER_COPY: Record<
   {
     rename: {
       desc: string;
-      toast: (name: string) => string;
+      toast: (
+        tx: ReturnType<typeof useRepoSettingsText>,
+        name: string,
+      ) => string;
       /** Why Rename is held on a name the provider would reject. */
       invalid: string;
     };
     forkDesc: string;
     visibility: {
       dialogDesc: string;
-      toast: (target: string) => string;
+      toast: (
+        tx: ReturnType<typeof useRepoSettingsText>,
+        target: string,
+      ) => string;
       internalNote: string;
     };
     transfer: {
@@ -208,7 +221,7 @@ const DANGER_COPY: Record<
   github: {
     rename: {
       desc: "Old links and clones keep working.",
-      toast: (name) => `Renamed to ${name} — links redirect`,
+      toast: (tx, name) => tx("Renamed to {{name}} — links redirect", { name }),
       invalid: "Use only letters, digits, '.', '-', and '_'",
     },
     forkDesc:
@@ -216,7 +229,7 @@ const DANGER_COPY: Record<
     visibility: {
       dialogDesc:
         "Changing visibility erases this repo's stars and watchers. Making it public exposes all code and history; making it private detaches existing forks, unpublishes Pages, and disables push rulesets.",
-      toast: (target) => `Repository is now ${target}`,
+      toast: (tx, target) => tx("Repository is now {{target}}", { target }),
       internalNote:
         "“Internal” requires the organization to belong to an enterprise.",
     },
@@ -239,7 +252,8 @@ const DANGER_COPY: Record<
   gitlab: {
     rename: {
       desc: "Renaming changes the name and path; GitDesktop will update your local 'origin' remote automatically.",
-      toast: (name) => `Renamed to ${name} — origin remote updated`,
+      toast: (tx, name) =>
+        tx("Renamed to {{name}} — origin remote updated", { name }),
       invalid:
         "Start with a letter or digit, then use only letters, digits, '.', '-', and '_'",
     },
@@ -248,7 +262,7 @@ const DANGER_COPY: Record<
     visibility: {
       dialogDesc:
         "Making a project public exposes all code, issues, and history; making it private hides it from everyone without access and unlinks existing forks.",
-      toast: (target) => `Project is now ${target}`,
+      toast: (tx, target) => tx("Project is now {{target}}", { target }),
       internalNote:
         "“Internal” is limited to self-managed GitLab (gitlab.com disallows it for new projects).",
     },
@@ -271,7 +285,8 @@ const DANGER_COPY: Record<
   bitbucket: {
     rename: {
       desc: "Renaming changes the repository URL; GitDesktop will update your local 'origin' remote automatically.",
-      toast: (name) => `Renamed to ${name} — origin remote updated`,
+      toast: (tx, name) =>
+        tx("Renamed to {{name}} — origin remote updated", { name }),
       invalid: "Use only letters, digits, '.', '-', and '_'",
     },
     forkDesc:
@@ -279,7 +294,8 @@ const DANGER_COPY: Record<
     visibility: {
       dialogDesc:
         "Making a repository public exposes all code and history to anyone; making it private restricts it to people with access.",
-      toast: (target) => `Repository is now ${target}`,
+      toast: (tx, target) =>
+        tx("Repository is now {{target}}", { target: tx(target) }),
       internalNote:
         "“Internal” requires the organization to belong to an enterprise.",
     },
@@ -330,6 +346,7 @@ function RenameAction({
   info: DangerInfo;
   provider: ForgeProvider;
 }) {
+  const tx = useRepoSettingsText();
   const rename = useRenameRepo(repoPath);
   const online = useOnline();
   const current = info.currentName;
@@ -365,11 +382,11 @@ function RenameAction({
       case rename.isPending:
         return ACT_PENDING_REASON;
       case !name.trim():
-        return "Enter a new name";
+        return tx("Enter a new name");
       case !valid:
-        return copy.invalid;
+        return tx(copy.invalid);
       case !changed:
-        return "Enter a new name";
+        return tx("Enter a new name");
       default:
         return undefined;
     }
@@ -385,7 +402,7 @@ function RenameAction({
     setSentName(next);
     try {
       await rename.mutateAsync(next);
-      toast.success(copy.toast(next));
+      toast.success(copy.toast(tx, next));
     } catch (e) {
       setSentName(null);
       toastError(e);
@@ -394,8 +411,8 @@ function RenameAction({
 
   return (
     <Row
-      title={isGitLab ? "Rename project" : "Rename repository"}
-      desc={copy.desc}
+      title={tx(isGitLab ? "Rename project" : "Rename repository")}
+      desc={tx(copy.desc)}
     >
       <div className="flex shrink-0 items-center gap-2">
         <Input
@@ -414,7 +431,7 @@ function RenameAction({
           onClick={handleRename}
         >
           {rename.isPending && <Spinner data-icon="inline-start" />}
-          Rename
+          {tr("Rename")}
         </DisabledReasonButton>
       </div>
     </Row>
@@ -445,7 +462,11 @@ function ArchiveAction({
     if (refuseWhileOffline()) return;
     try {
       await setArchived.mutateAsync(!archived);
-      toast.success(archived ? `${nounCap} unarchived` : `${nounCap} archived`);
+      toast.success(
+        tr(archived ? "{{noun}} unarchived" : "{{noun}} archived", {
+          noun: tr(nounCap),
+        }),
+      );
       setConfirming(false);
     } catch (e) {
       toastError(e);
@@ -454,17 +475,19 @@ function ArchiveAction({
 
   return (
     <Row
-      title={archived ? `Unarchive ${noun}` : `Archive ${noun}`}
+      title={tr(archived ? "Unarchive {{noun}}" : "Archive {{noun}}", {
+        noun: tr(noun),
+      })}
       desc={
         archived
-          ? `Make the ${noun} writable again.`
-          : `Make the ${noun} read-only. Reversible.`
+          ? tr("Make the {{noun}} writable again.", { noun: tr(noun) })
+          : tr("Make the {{noun}} read-only. Reversible.", { noun: tr(noun) })
       }
     >
       {confirming ? (
         <div className="flex shrink-0 items-center gap-2">
           <InlineConfirm
-            actLabel={archived ? "Unarchive" : "Archive"}
+            actLabel={tr(archived ? "Unarchive" : "Archive")}
             actVariant={archived ? "default" : "destructive"}
             pending={setArchived.isPending}
             heldReason={online ? undefined : OFFLINE_WRITE_REASON}
@@ -478,7 +501,7 @@ function ArchiveAction({
           ref={swapFocus()}
           variant="outline"
           disabled={!isOwner}
-          hint={isOwner ? undefined : OWNER_HINT}
+          hint={isOwner ? undefined : tr(OWNER_HINT)}
           className="shrink-0"
           onClick={() => setConfirming(true)}
         >
@@ -512,13 +535,13 @@ function RemoveUpstreamAction({ repoPath }: { repoPath: string }) {
     <>
       <div className="border-t" />
       <Row
-        title="Remove upstream remote"
+        title={tr("Remove upstream remote")}
         desc="Detaches this clone from the fork's parent locally: the Fork/Upstream switcher and “Update from upstream” disappear, and branches that tracked upstream lose their tracking. Reversible — re-add the remote to restore it."
       >
         {confirming ? (
           <div className="flex shrink-0 items-center gap-2">
             <InlineConfirm
-              actLabel="Remove"
+              actLabel={tr("Remove")}
               pending={removeUpstream.isPending}
               swapFocusRef={swapFocus()}
               onCancel={() => setConfirming(false)}
@@ -532,7 +555,7 @@ function RemoveUpstreamAction({ repoPath }: { repoPath: string }) {
             className="shrink-0"
             onClick={() => setConfirming(true)}
           >
-            Remove upstream
+            {tr("Remove upstream")}
           </DangerButton>
         )}
       </Row>
@@ -605,12 +628,18 @@ function LeaveForkNetworkAction({
       // gone) — the badge still clears, but don't present that as a verified
       // detach.
       if (probe === null) {
-        toast.success(`Couldn't verify on ${label} — fork badge cleared`);
+        toast.success(
+          tr("Couldn't verify on {{provider}} — fork badge cleared", {
+            provider: label,
+          }),
+        );
       } else {
         toast.success(
           probe.isFork
-            ? `Still a fork on ${label}`
-            : `No longer a fork on ${label} — badge cleared`,
+            ? tr("Still a fork on {{provider}}", { provider: label })
+            : tr("No longer a fork on {{provider}} — badge cleared", {
+                provider: label,
+              }),
         );
       }
     } catch (e) {
@@ -624,7 +653,7 @@ function LeaveForkNetworkAction({
     if (refuseWhileOffline()) return;
     try {
       await removeFork.mutateAsync(undefined);
-      toast.success("Fork relationship removed");
+      toast.success(tr("Fork relationship removed"));
       setConfirming(false);
       // Re-probe to flip the persisted badge; the row unmounts
       // itself once `isFork` reads false.
@@ -643,7 +672,7 @@ function LeaveForkNetworkAction({
         size="sm"
         onClick={() => openUrl(`https://${ghHost}/${fullName}/settings`)}
       >
-        Leave on GitHub…
+        {tr("Leave on GitHub…")}
       </Button>
     ),
     gitlab: () =>
@@ -652,7 +681,7 @@ function LeaveForkNetworkAction({
         // the button inside it — the confirm takes its own row, like Archive's.
         <div className="flex items-center gap-2">
           <InlineConfirm
-            actLabel="Remove"
+            actLabel={tr("Remove")}
             pending={removeFork.isPending}
             heldReason={online ? undefined : OFFLINE_WRITE_REASON}
             swapFocusRef={swapFocus()}
@@ -665,10 +694,10 @@ function LeaveForkNetworkAction({
           ref={swapFocus()}
           variant="destructive"
           disabled={!isOwner}
-          hint={isOwner ? undefined : OWNER_HINT}
+          hint={isOwner ? undefined : tr(OWNER_HINT)}
           onClick={() => setConfirming(true)}
         >
-          Remove fork relationship
+          {tr("Remove fork relationship")}
         </DangerButton>
       ),
     bitbucket: () => (
@@ -677,7 +706,7 @@ function LeaveForkNetworkAction({
         size="sm"
         onClick={() => openUrl(`https://${bbHost}/${fullName}/admin`)}
       >
-        Detach on Bitbucket…
+        {tr("Detach on Bitbucket…")}
       </Button>
     ),
   };
@@ -685,7 +714,10 @@ function LeaveForkNetworkAction({
   return (
     <>
       <div className="border-t" />
-      <Row title="Leave fork network" desc={DANGER_COPY[provider].forkDesc}>
+      <Row
+        title={tr("Leave fork network")}
+        desc={tr(DANGER_COPY[provider].forkDesc)}
+      >
         {/* Stacked so the description keeps its width — two side-by-side
             buttons squeezed the copy into a tall, narrow column. */}
         <div className="flex shrink-0 flex-col gap-2">
@@ -697,11 +729,11 @@ function LeaveForkNetworkAction({
             size="sm"
             className="w-full"
             disabled={rechecking}
-            reason={rechecking ? "Checking fork status…" : undefined}
+            reason={rechecking ? tr("Checking fork status…") : undefined}
             onClick={recheck}
           >
             {rechecking && <Spinner data-icon="inline-start" />}
-            Re-check fork status
+            {tr("Re-check fork status")}
           </DisabledReasonButton>
         </div>
       </Row>
@@ -737,7 +769,7 @@ function VisibilityAction({
     if (refuseWhileOffline()) return;
     try {
       await setVisibility.mutateAsync(target);
-      toast.success(copy.toast(target));
+      toast.success(copy.toast(tr, target));
       setOpen(false);
     } catch (e) {
       toastError(e);
@@ -746,31 +778,35 @@ function VisibilityAction({
 
   return (
     <Row
-      title={
-        isGitLab ? "Change project visibility" : "Change repository visibility"
-      }
-      desc={`Currently ${info.visibility || "unknown"}.`}
+      title={tr(
+        isGitLab ? "Change project visibility" : "Change repository visibility",
+      )}
+      desc={tr("Currently {{visibility}}.", {
+        visibility: tr(info.visibility || "unknown"),
+      })}
     >
       <DangerButton
         variant="outline"
         disabled={!isOwner}
-        hint={isOwner ? undefined : OWNER_HINT}
+        hint={isOwner ? undefined : tr(OWNER_HINT)}
         onClick={() => {
           setTarget(info.visibility || "public");
           setOpen(true);
         }}
       >
-        Change visibility
+        {tr("Change visibility")}
       </DangerButton>
       <DangerDialog
         open={open}
         onOpenChange={setOpen}
-        title="Change visibility"
-        description={copy.dialogDesc}
+        title={tr("Change visibility")}
+        description={tr(copy.dialogDesc)}
         confirmPhrase={info.fullName}
-        confirmLabel="Change visibility"
+        confirmLabel={tr("Change visibility")}
         disabledReason={
-          target === info.visibility ? "Pick a different visibility" : undefined
+          target === info.visibility
+            ? tr("Pick a different visibility")
+            : undefined
         }
         heldReason={online ? undefined : OFFLINE_WRITE_REASON}
         pending={setVisibility.isPending}
@@ -778,7 +814,7 @@ function VisibilityAction({
       >
         <div className="space-y-1.5">
           <Label htmlFor="visibility-target" className="text-xs">
-            New visibility
+            {tr("New visibility")}
           </Label>
           <Select value={target} onValueChange={(v) => v && setTarget(v)}>
             <SelectTrigger id="visibility-target" className="w-40">
@@ -794,7 +830,7 @@ function VisibilityAction({
           </Select>
           {!isBitbucket && (
             <p className="text-[11px] text-muted-foreground">
-              {copy.internalNote}
+              {tr(copy.internalNote)}
             </p>
           )}
         </div>
@@ -824,7 +860,7 @@ function TransferAction({
     if (refuseWhileOffline()) return;
     try {
       await transfer.mutateAsync({ newOwner: newOwner.trim(), newName: null });
-      toast.success(copy.toast);
+      toast.success(tr(copy.toast));
       setOpen(false);
     } catch (e) {
       toastError(e);
@@ -836,52 +872,52 @@ function TransferAction({
   if (provider === "bitbucket") {
     return (
       <Row
-        title="Transfer ownership"
-        desc="Bitbucket transfers happen on the web."
+        title={tr("Transfer ownership")}
+        desc={tr("Bitbucket transfers happen on the web.")}
       >
         <DangerButton
           variant="outline"
           disabled={!isOwner || !info.webUrl}
-          hint={isOwner ? undefined : OWNER_HINT}
+          hint={isOwner ? undefined : tr(OWNER_HINT)}
           onClick={() => info.webUrl && openUrl(`${info.webUrl}/admin`)}
         >
-          Transfer on Bitbucket…
+          {tr("Transfer on Bitbucket…")}
         </DangerButton>
       </Row>
     );
   }
 
   return (
-    <Row title="Transfer ownership" desc={copy.desc}>
+    <Row title={tr("Transfer ownership")} desc={tr(copy.desc)}>
       <DangerButton
         variant="outline"
         disabled={!isOwner}
-        hint={isOwner ? undefined : OWNER_HINT}
+        hint={isOwner ? undefined : tr(OWNER_HINT)}
         onClick={() => setOpen(true)}
       >
-        Transfer
+        {tr("Transfer")}
       </DangerButton>
       <DangerDialog
         open={open}
         onOpenChange={setOpen}
-        title={copy.dialogTitle}
-        description={copy.dialogDesc}
+        title={tr(copy.dialogTitle)}
+        description={tr(copy.dialogDesc)}
         confirmPhrase={info.fullName}
-        confirmLabel="Transfer"
-        disabledReason={newOwner.trim() ? undefined : copy.ownerMissing}
+        confirmLabel={tr("Transfer")}
+        disabledReason={newOwner.trim() ? undefined : tr(copy.ownerMissing)}
         heldReason={online ? undefined : OFFLINE_WRITE_REASON}
         pending={transfer.isPending}
         onConfirm={handleTransfer}
       >
         <div className="space-y-1.5">
           <Label htmlFor="transfer-owner" className="text-xs">
-            {copy.ownerLabel}
+            {tr(copy.ownerLabel)}
           </Label>
           <Input
             id="transfer-owner"
             value={newOwner}
             onChange={(e) => setNewOwner(e.target.value)}
-            placeholder={copy.ownerPlaceholder}
+            placeholder={tr(copy.ownerPlaceholder)}
             autoComplete="off"
             spellCheck={false}
           />
@@ -917,7 +953,7 @@ function DeleteAction({
     if (refuseWhileOffline()) return;
     try {
       await del.mutateAsync(undefined);
-      toast.success(copy.toast);
+      toast.success(tr(copy.toast));
       setOpen(false);
       // The remote is gone — re-probe the repo's hosted panels so they
       // stop showing stale data, and close the settings dialog (it only
@@ -931,24 +967,27 @@ function DeleteAction({
 
   return (
     <Row
-      title={`Delete this ${noun}`}
-      desc={`Permanently remove the ${noun} on ${providerLabel(provider)}.`}
+      title={tr("Delete this {{noun}}", { noun: tr(noun) })}
+      desc={tr("Permanently remove the {{noun}} on {{provider}}.", {
+        noun: tr(noun),
+        provider: providerLabel(provider),
+      })}
     >
       <DangerButton
         variant="destructive"
         disabled={!isOwner}
-        hint={isOwner ? undefined : OWNER_HINT}
+        hint={isOwner ? undefined : tr(OWNER_HINT)}
         onClick={() => setOpen(true)}
       >
-        Delete
+        {tr("Delete")}
       </DangerButton>
       <DangerDialog
         open={open}
         onOpenChange={setOpen}
-        title={`Delete ${noun}`}
-        description={copy.dialogDesc}
+        title={tr("Delete {{noun}}", { noun: tr(noun) })}
+        description={tr(copy.dialogDesc)}
         confirmPhrase={info.fullName}
-        confirmLabel="Delete forever"
+        confirmLabel={tr("Delete forever")}
         heldReason={online ? undefined : OFFLINE_WRITE_REASON}
         pending={del.isPending}
         onConfirm={handleDelete}
@@ -1038,7 +1077,9 @@ export function DangerZone({
       data-confirm-section
       className="space-y-3 rounded-md border border-destructive/40 p-3"
     >
-      <h3 className="text-xs font-semibold text-destructive">Danger zone</h3>
+      <h3 className="text-xs font-semibold text-destructive">
+        {tr("Danger zone")}
+      </h3>
       <RenameAction repoPath={repoPath} info={info} provider={provider} />
       {/* Local detach — any provider, whenever an `upstream` remote exists. */}
       <RemoveUpstreamAction repoPath={repoPath} />

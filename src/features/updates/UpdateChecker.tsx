@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { i18n } from "@/lib/i18n";
 import { installUpdateWithToast } from "./install";
 import { useUpdateCheck } from "./useUpdateCheck";
 
@@ -20,19 +21,22 @@ export function UpdateChecker() {
   useEffect(() => {
     if (!update || notifiedVersion.current === update.version) return;
     notifiedVersion.current = update.version;
-    const id = toast(`Update available: v${update.version}`, {
-      description: "A new version of GitDesktop is ready to install.",
-      duration: Number.POSITIVE_INFINITY,
-      action: {
-        label: "Install & restart",
-        onClick: (event) => {
-          // Kept until the install proceeds: a declined confirm leaves the offer
-          // up, since this version is never toasted again.
-          event.preventDefault();
-          void installUpdateWithToast(update, () => toast.dismiss(id));
+    const id = toast(
+      i18n.t("available", { ns: "updates", version: update.version }),
+      {
+        description: i18n.t("readyToInstall", { ns: "updates" }),
+        duration: Number.POSITIVE_INFINITY,
+        action: {
+          label: i18n.t("installRestart", { ns: "updates" }),
+          onClick: (event) => {
+            // Kept until the install proceeds: a declined confirm leaves the offer
+            // up, since this version is never toasted again.
+            event.preventDefault();
+            void installUpdateWithToast(update, () => toast.dismiss(id));
+          },
         },
       },
-    });
+    );
   }, [update]);
 
   return null;

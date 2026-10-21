@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useAiStream } from "@/features/conversations/useAiStream";
 import { readRepoInstructions } from "@/lib/git/api";
 import { INTERPRETERS, type Interpreter } from "@/lib/scripts/types";
+import { useScriptsText } from "./use-scripts-text";
 
 const INTERPRETER_LABELS: Record<string, string> = Object.fromEntries(
   INTERPRETERS.map((i) => [i.id, i.label]),
@@ -22,6 +23,7 @@ export function stripFences(text: string): string {
  * missing-key handling; this only shapes the prompt and cleans the result.
  */
 export function useGenerateScript(repoPath: string) {
+  const tx = useScriptsText();
   const { generating, cancel, run } = useAiStream(repoPath);
 
   const generate = useCallback(
@@ -32,7 +34,7 @@ export function useGenerateScript(repoPath: string) {
     }) => {
       const description = opts.description.trim();
       if (!description) {
-        toast.error("Describe what the script should do first.");
+        toast.error(tx("Describe what the script should do first."));
         return;
       }
       const label = INTERPRETER_LABELS[opts.interpreter] ?? opts.interpreter;
@@ -56,7 +58,7 @@ export function useGenerateScript(repoPath: string) {
       if (buffer === null) return;
       opts.onBody(stripFences(buffer));
     },
-    [repoPath, run],
+    [repoPath, run, tx],
   );
 
   return { generate, cancel, generating };

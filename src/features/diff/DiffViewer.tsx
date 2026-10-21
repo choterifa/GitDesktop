@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -117,7 +118,6 @@ import {
   hunkHeaderExtendData,
   hunkHost,
   hunkRange,
-  hunkRangeText,
   hunkStart,
 } from "./diff-rows";
 import { ImagePanes } from "./ImageDiff";
@@ -131,7 +131,6 @@ import { SPLIT_MIN_CONTAINER_PX } from "./split-threshold";
 import {
   hunkWritesAllowed,
   type StagingSide,
-  UNDECODABLE_NOTE_COPY,
 } from "./undecodable-note";
 import {
   useFocusOnControlsSwap,
@@ -140,6 +139,7 @@ import {
 
 /** Working-tree diff for the file selected in the changes panel. */
 export function DiffViewer({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("diff");
   const selectedFile = useUiStore((s) => s.selectedFile);
   // Shared cache with the changes list — used only to tell "clean tree" apart
   // from "files exist but none picked yet" so the empty pane reads honestly.
@@ -219,6 +219,8 @@ export function DiffViewer({ repoPath }: { repoPath: string }) {
         message={restingDiffMessage(
           status.isPending,
           status.data?.entries.length ?? 0,
+          t("empty.noChanges"),
+          t("empty.selectFile"),
         )}
       />
     );
@@ -361,19 +363,6 @@ function FileSlot({
 
 type HunkActionKind = "stage" | "unstage" | "discard";
 
-// A hunk click refused because the live diff moved past the text it was shown
-// from: the house refusal shape, per kind.
-const STALE_HUNK_ACTION: Record<HunkActionKind, string> = {
-  stage: "The diff just updated — nothing was staged.",
-  unstage: "The diff just updated — nothing was unstaged.",
-  discard: "The diff just updated — nothing was discarded.",
-};
-
-/** Why the hunk and line-selection controls (Clear included) are held: a write
- *  from this pane is in flight or its reads haven't answered yet, or the
- *  displayed diff still trails the text it was given. */
-const UPDATING_DIFF_REASON = "Updating the diff…";
-
 /** The hunk button a write was fired from, so focus can follow the hunks once
  *  the refreshed diff is on screen. */
 interface HunkFocus {
@@ -456,6 +445,7 @@ function WorkingTreeDiff({
   /** Where focus lands when a hunk action leaves no hunks to move it to. */
   focusSink: RefObject<HTMLElement | null>;
 }) {
+  const { t } = useTranslation("diff");
   const status = useRepoStatus(repoPath);
   // `untracked` must follow LIVE status, not the click-time snapshot: once some
   // lines of a new file are staged it becomes a tracked `AM` file, and the
@@ -721,7 +711,9 @@ function WorkingTreeDiff({
   // Shortcut hints on the selection action: `aria-keyshortcuts` keeps the chord
   // off the accessible name, the title makes it discoverable. Both omitted when
   // the action is unbound.
-  const selectionActionLabel = file.staged ? "Unstage" : "Stage";
+  const selectionActionLabel = file.staged
+    ? t("staging.unstage")
+    : t("staging.stage");
   const selectionTitle =
     selectionBinding === null
       ? undefined
@@ -735,7 +727,7 @@ function WorkingTreeDiff({
   const selectionCountText =
     selection === null
       ? ""
-      : `${selection.length} ${selection.length === 1 ? "line" : "lines"} selected`;
+      : t("staging.selection", { count: selection.length });
 
   // Every write from this pane: refused while another is held, then held from
   // the press until the reads it invalidated answer again, with data or an
@@ -749,7 +741,7 @@ function WorkingTreeDiff({
     const live = liveDiffRef.current;
     if (!hunkWritesAllowed(live)) {
       if (live?.undecodable === true)
-        toast.info(UNDECODABLE_NOTE_COPY[stagingSide]);
+        toast.info(t(`undecodable.${stagingSide}`));
       return;
     }
     writingRef.current = true;
@@ -822,15 +814,15 @@ function WorkingTreeDiff({
     if (writingRef.current) return;
     // A hunk from a stale display would patch lines the user never saw.
     if (forText !== (diff.data?.text ?? "")) {
-      toast.info(STALE_HUNK_ACTION[kind]);
+      toast.info(t(`staging.stale${kind[0].toUpperCase()}${kind.slice(1)}`));
       return;
     }
     const live = liveDiffRef.current;
     if (!hunkWritesAllowed(live)) {
       toast.info(
         live?.undecodable === true
-          ? UNDECODABLE_NOTE_COPY[stagingSide]
-          : STALE_HUNK_ACTION[kind],
+          ? t(`undecodable.${stagingSide}`)
+          : t(`staging.stale${kind[0].toUpperCase()}${kind.slice(1)}`),
       );
       return;
     }
@@ -895,14 +887,14 @@ function WorkingTreeDiff({
                   variant="secondary"
                   size="xs"
                   disabled={busy}
-                  reason={UPDATING_DIFF_REASON}
+                  reason={t("staging.updating")}
                   title={selectionTitle}
                   aria-keyshortcuts={selectionKeyshortcuts}
                   onClick={() =>
                     applySelection({ cached: true, reverse: true })
                   }
                 >
-                  Unstage
+                  {t("staging.unstage")}
                 </DisabledReasonButton>
               ) : (
                 <>
@@ -910,24 +902,24 @@ function WorkingTreeDiff({
                     variant="secondary"
                     size="xs"
                     disabled={busy}
-                    reason={UPDATING_DIFF_REASON}
+                    reason={t("staging.updating")}
                     title={selectionTitle}
                     aria-keyshortcuts={selectionKeyshortcuts}
                     onClick={() =>
                       applySelection({ cached: true, reverse: false })
                     }
                   >
-                    Stage
+                    {t("staging.stage")}
                   </DisabledReasonButton>
                   <DisabledReasonButton
                     variant="ghost"
                     size="xs"
                     className="text-destructive"
                     disabled={busy}
-                    reason={UPDATING_DIFF_REASON}
+                    reason={t("staging.updating")}
                     onClick={() =>
                       setDiscard({
-                        label: `${selection.length} selected ${selection.length === 1 ? "line" : "lines"}`,
+                        label: t("staging.selectionLabel", { count: selection.length }),
                         newFile: untracked,
                         forText: diff.data?.text ?? "",
                         run: untracked
@@ -943,7 +935,7 @@ function WorkingTreeDiff({
                       })
                     }
                   >
-                    Discard…
+                    {t("staging.discard")}
                   </DisabledReasonButton>
                 </>
               )}
@@ -951,10 +943,10 @@ function WorkingTreeDiff({
                 variant="ghost"
                 size="xs"
                 disabled={busy}
-                reason={UPDATING_DIFF_REASON}
+                reason={t("staging.updating")}
                 onClick={clearSelection}
               >
-                Clear
+                {t("staging.clear")}
               </DisabledReasonButton>
             </>
           ) : (
@@ -1043,19 +1035,20 @@ function WorkingTreeDiff({
                     }}
                     className="shrink-0 font-medium whitespace-nowrap underline underline-offset-2 hover:no-underline"
                   >
-                    Don't show again
+                    {t("staging.dontShowAgain")}
                   </button>
                 }
               >
-                Drag across the line numbers to{" "}
-                {file.staged ? "unstage" : "stage"} just those lines, added and
-                removed alike. Hold Shift while dragging to take one side of a
-                change, or {ADDITIVE_MODIFIER} to add to the selection.
+                {t("staging.dragHint", {
+                  action: t(file.staged ? "staging.unstage" : "staging.stage").toLowerCase(),
+                  modifier: ADDITIVE_MODIFIER,
+                })}
                 {selectionBinding !== null && (
                   <>
-                    {" "}
-                    Press {formatBinding(selectionBinding)} to{" "}
-                    {file.staged ? "unstage" : "stage"} the selection.
+                    {" "}{t("staging.pressHint", {
+                      binding: formatBinding(selectionBinding),
+                      action: t(file.staged ? "staging.unstage" : "staging.stage").toLowerCase(),
+                    })}
                   </>
                 )}
               </InfoNote>
@@ -1094,21 +1087,18 @@ function WorkingTreeDiff({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogTitle>{t("staging.discardTitle")}</DialogTitle>
             <DialogDescription>
               {shownDiscard?.newFile ? (
-                <>
-                  Removes{" "}
-                  <span className="font-mono">{shownDiscard?.label}</span> from{" "}
-                  {file.path}. This cannot be undone.
-                </>
+                t("staging.discardNewDescription", {
+                  label: shownDiscard?.label,
+                  path: file.path,
+                })
               ) : (
-                <>
-                  Reverts{" "}
-                  <span className="font-mono">{shownDiscard?.label}</span> in{" "}
-                  {file.path} to the last committed version. This cannot be
-                  undone.
-                </>
+                t("staging.discardDescription", {
+                  label: shownDiscard?.label,
+                  path: file.path,
+                })
               )}
             </DialogDescription>
           </DialogHeader>
@@ -1120,12 +1110,12 @@ function WorkingTreeDiff({
               onKeyDown={swallowRepeatedActivation}
               onClick={() => setDiscard(null)}
             >
-              Cancel
+              {t("staging.cancel")}
             </Button>
             <DisabledReasonButton
               variant="destructive"
               disabled={busy}
-              reason={UPDATING_DIFF_REASON}
+              reason={t("staging.updating")}
               onKeyDown={swallowRepeatedActivation}
               onClick={() => {
                 setConfirmClosing(true);
@@ -1133,7 +1123,7 @@ function WorkingTreeDiff({
                 setDiscard(null);
               }}
             >
-              Discard
+              {t("staging.discardAction")}
             </DisabledReasonButton>
           </DialogFooter>
         </DialogContent>
@@ -1467,6 +1457,16 @@ function HunkActionButtons({
   busy,
   onHunkAction,
 }: HunkActionProps) {
+  const { t } = useTranslation("diff");
+  const ranges = hunkRange(hunk);
+  const [start, count] =
+    ranges.newLines > 0
+      ? [ranges.newStart, ranges.newLines]
+      : [ranges.oldStart, ranges.oldLines];
+  const rangeDescription =
+    count === 1
+      ? t("hunk.line", { start })
+      : t("hunk.lines", { start, end: start + count - 1 });
   const rangeId = useId();
   const fire = (kind: HunkActionKind) => (e: ReactMouseEvent<HTMLElement>) => {
     // The second click of a double-click is ignored: the hold releases within
@@ -1487,31 +1487,31 @@ function HunkActionButtons({
       {/* `hidden`, not sr-only: the description still resolves for both
           buttons, and browse mode doesn't read the range a third time. */}
       <span id={rangeId} hidden>
-        {hunkRangeText(hunk)}
+        {rangeDescription}
       </span>
       <DisabledReasonButton
         variant="secondary"
         size="xs"
         disabled={busy}
-        reason={UPDATING_DIFF_REASON}
+        reason={t("staging.updating")}
         aria-describedby={rangeId}
         data-hunk-primary={index}
         onKeyDown={swallowRepeatedActivation}
         onClick={fire(staged ? "unstage" : "stage")}
       >
-        {staged ? "Unstage" : "Stage"} hunk
+        {staged ? t("staging.unstageHunk") : t("staging.stageHunk")}
       </DisabledReasonButton>
       <DisabledReasonButton
         variant="ghost"
         size="xs"
         className="text-destructive"
         disabled={busy}
-        reason={UPDATING_DIFF_REASON}
+        reason={t("staging.updating")}
         aria-describedby={rangeId}
         onKeyDown={swallowRepeatedActivation}
         onClick={fire("discard")}
       >
-        Discard…
+        {t("staging.discard")}
       </DisabledReasonButton>
     </>
   );
@@ -1602,6 +1602,7 @@ function StagingDiffView({
    *  pending: the action left no hunks, or the file left the pane. */
   focusSink: RefObject<HTMLElement | null>;
 }) {
+  const { t } = useTranslation("diff");
   const containerRef = useRef<HTMLDivElement>(null);
   const activeRepo = useUiStore((s) => s.repoPath);
   const { syntaxMap, customLanguages } = useEffectiveSyntax(activeRepo);
@@ -2113,7 +2114,7 @@ function StagingDiffView({
   // guard on `!diffFile`, so they no-op while pending and re-bind on the single
   // build.
   if (contentPending || holdForGrammar) return null;
-  if (!diffFile) return <DiffPlaceholder message="No changes to show" />;
+  if (!diffFile) return <DiffPlaceholder message={t("empty.noDiff")} />;
   // A line-1 hunk has nothing above it to host its buttons — the pane-top bar
   // instead. Predicted from the hunk so it paints with the first rows; a measure
   // of this diffFile then wins.
@@ -2144,7 +2145,7 @@ function StagingDiffView({
               setExpanded(false);
             }}
           >
-            Collapse expanded context
+            {t("staging.collapseContext")}
           </Button>
         </div>
       )}
@@ -2198,8 +2199,7 @@ function StagingDiffView({
       {shortened > 0 && (
         <div className="flex items-center justify-center gap-3 border-t bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <span>
-            {shortened.toLocaleString()} long{" "}
-            {shortened === 1 ? "line" : "lines"} shortened for performance
+              {t("generated.shortened", { count: shortened })}
           </span>
         </div>
       )}

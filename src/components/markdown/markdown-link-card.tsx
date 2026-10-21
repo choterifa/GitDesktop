@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ForgeProvider, providerLabel } from "@/lib/git/types";
 import { linkPreviewOptions } from "@/lib/link-preview";
@@ -84,39 +85,35 @@ function LinkCardSkeleton() {
 /** The fixed reasons a link won't open. The two shapes that name a destination
  *  (a foreign scheme, an off-repo host) compute their reason below, since the
  *  value is part of the sentence. */
-const INERT_REASON: Record<
-  Exclude<InertVariant, "scheme" | "external">,
-  string
-> = {
-  empty: "This link has no address.",
-  fragment: "Points to a section of this page.",
-  notRepoPath: "Doesn't point to a file in this repository.",
-  repoNoForge: "GitDesktop can't open repository files from this view.",
-};
-
 /** The off-repo host a `//host/path` addresses, for the external reason. The
  *  placeholder base only lends a protocol so the parser has an origin to hang
  *  the authority on; a shape it can't parse falls back to the host-less line. */
-function inertExternalReason(href: string): string {
+function inertExternalReason(href: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   try {
     const host = stripBidi(new URL(href, "https://x.invalid/").host);
-    if (host) return `Points to ${host}, outside this repository.`;
+    if (host) return t("markdownLinkCard.externalHost", { host });
   } catch {
     // Fall through to the host-less line.
   }
-  return "Points outside this repository.";
+  return t("markdownLinkCard.external");
 }
 
 /** The one line a card shows for why its link won't open. The two shapes that
  *  name a destination read it out of the href; the rest are fixed copy. */
-function inertReason(variant: InertVariant, href: string): string {
+function inertReason(variant: InertVariant, href: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   switch (variant) {
     case "scheme":
-      return `GitDesktop doesn't open ${href.slice(0, href.indexOf(":"))}: links.`;
+      return t("markdownLinkCard.unsupportedScheme", { scheme: href.slice(0, href.indexOf(":")) });
     case "external":
-      return inertExternalReason(href);
-    default:
-      return INERT_REASON[variant];
+      return inertExternalReason(href, t);
+    case "empty":
+      return t("markdownLinkCard.emptyLink");
+    case "fragment":
+      return t("markdownLinkCard.pageSection");
+    case "notRepoPath":
+      return t("markdownLinkCard.notRepositoryFile");
+    case "repoNoForge":
+      return t("markdownLinkCard.noForgeForFile");
   }
 }
 
@@ -135,7 +132,8 @@ export function MarkdownInertLinkCard({
   variant: InertVariant;
   href: string;
 }) {
-  const reason = inertReason(variant, href);
+  const { t } = useTranslation("components");
+  const reason = inertReason(variant, href, t);
   return (
     // ph-no-capture: the href comes from a third-party body — keep it out of
     // session replay, the same as the sibling cards.
@@ -160,13 +158,14 @@ export function MarkdownRepoFileCard({
   href: string;
   provider: ForgeProvider;
 }) {
+  const { t } = useTranslation("components");
   return (
     // ph-no-capture: the path comes from a third-party body — keep it out of
     // session replay, the same as the external card's content.
     <div className="ph-no-capture flex flex-col gap-1.5">
       <p className="line-clamp-3 break-all font-medium">{stripBidi(href)}</p>
       <p className="text-muted-foreground">
-        {`Opens on ${providerLabel(provider)}`}
+        {t("markdownLinkCard.opensOnProvider", { provider: providerLabel(provider) })}
       </p>
     </div>
   );

@@ -1,0 +1,115 @@
+{
+  "actions": {
+    "cancel": "Cancelar",
+    "saveChanges": "Guardar cambios",
+    "discard": "Descartar",
+    "general": "Revisión de código con IA",
+    "security": "Auditoría de seguridad con IA"
+  },
+  "states": {
+    "saving": "Guardando…",
+    "noChanges": "No hay cambios que guardar",
+    "unsavedChanges": "Tienes cambios sin guardar"
+  },
+  "lifecycles": {
+    "commit": "Al crear un commit",
+    "pr-open": "Al abrir un pull request",
+    "pr-sync": "Al recibir commits nuevos en un PR revisado"
+  },
+  "lifecycleHelp": {
+    "commit": "Se ejecuta después de crear un commit en una rama que cumple las condiciones.",
+    "prOpen": "Se ejecuta una vez al abrir un pull request.",
+    "prSync": "Vuelve a revisar un pull request cuando recibe commits nuevos; solo si ya se revisó con ese modo."
+  },
+  "repo": {
+    "title": "Automatizaciones del repositorio",
+    "description": "Esto es lo que se ejecuta automáticamente en este repositorio. Cada opción parte de los valores globales de Configuración → Automatizaciones; puedes cambiarla aquí para personalizar solo este repositorio.",
+    "saved": "Se guardaron las automatizaciones del repositorio",
+    "noOverrides": "No hay cambios locales que restablecer",
+    "resetTitle": "Quitar todos los cambios locales y heredar los valores globales",
+    "reset": "Restablecer valores globales",
+    "loadFailed": "No se pudieron cargar las automatizaciones del repositorio",
+    "loading": "Cargando automatizaciones del repositorio…",
+    "overridden": "Personalizado"
+  },
+  "conditions": {
+    "removePattern": "Quitar patrón",
+    "addPattern": "Agregar patrón",
+    "title": "Condiciones",
+    "onlyBranches": "Solo estas ramas (opcional)",
+    "exceptBranches": "Excepto estas ramas",
+    "matchAgainst": "Comparar con",
+    "tryBranch": "Probar una rama",
+    "runs": "se ejecuta",
+    "skippedExcludedBy": "se omite; la excluye",
+    "skippedNoInclude": "se omite; no coincide con ninguna inclusión",
+    "matchSource": "Rama de origen",
+    "matchTarget": "Rama de destino",
+    "matchEither": "Cualquiera de las ramas",
+    "summaryOnly": "solo {{patterns}}",
+    "summaryExcept": "excepto {{patterns}}"
+  },
+  "section": {
+    "title": "Automatizaciones",
+    "description": "Ejecuta una acción de IA automáticamente cuando ocurre algo. Estos valores predeterminados se aplican a todos los repositorios; puedes personalizarlos desde el menú ⋯ de cada repositorio. Las revisiones usan el modelo configurado en la sección de IA. Los resultados de PR se publican como comentario; los de commits se abren desde su notificación. En el historial, se aplica la opción que elegiste en Notificar sobre los resultados de automatización (Configuración → Notificaciones).",
+    "reviewDrafts": "Revisar los PR en borrador al crearlos",
+    "draftReviewsOff": "Desactivado: la revisión automática se ejecuta cuando el borrador se marca como listo para revisión."
+  },
+  "result": {
+    "securityTitle": "Auditoría de seguridad con IA",
+    "reviewTitle": "Revisión con IA",
+    "timedOutPartial": "Se agotó el tiempo; se muestra el resultado parcial",
+    "stoppedEarly": "Se detuvo antes de terminar"
+  },
+  "history": {
+    "title": "Historial de automatizaciones",
+    "description": "Consulta qué ejecutaron y omitieron las automatizaciones de este repositorio, y por qué.",
+    "reasons": {
+      "postedComment": "Se publicó como comentario",
+      "reviewSaved": "Se guardó la revisión",
+      "delivered": "Se entregó el resultado",
+      "running": "En ejecución; puedes seguirla en Actividad",
+      "unsettledCommit": "No terminó; quizá siga en ejecución o la app se cerró durante el proceso",
+      "unsettledOther": "No terminó; la app se cerró durante el proceso o la ejecución pertenece a otra instancia",
+      "skipped": "Omitido: {{reason}}",
+      "branchSkip": "las condiciones de la rama no coincidieron",
+      "needsFirstReview": "falta una primera revisión con este modo",
+      "headCovered": "esta versión ya se había revisado",
+      "headDismissed": "se descartó la revisión de esta versión",
+      "alreadyReviewed": "ya se había revisado",
+      "draftSkipped": "el PR es borrador y las revisiones de borradores están desactivadas",
+      "tooOld": "se abrió hace más de 14 días",
+      "emptyDiff": "no hay cambios que revisar",
+      "cancelled": "Se canceló",
+      "claimHeld": "Se transfirió; otra revisión está procesando esta versión",
+      "eligibilityErrorDetail": "No se pudo leer el historial de revisiones: {{detail}}",
+      "eligibilityError": "No se pudo leer el historial de revisiones; se consideró que ya estaba revisado",
+      "failedDetail": "Falló: {{detail}}",
+      "failed": "Falló",
+      "timedOut": "Se agotó el tiempo; se conservó el resultado parcial",
+      "paused": "Se ocultaron las funciones de IA; se pausaron las automatizaciones",
+      "resumed": "Se mostraron las funciones de IA; se reanudaron las automatizaciones",
+      "unknown": "Estado desconocido"
+    },
+    "count": {
+      "seen": "{{text}} ({{count}} veces)",
+      "skippedCommits": "Se omitieron {{count}} commits: {{reason}}",
+      "commits": "{{text}} ({{count}} commits)"
+    },
+    "markerResumed": "Se reanudaron las automatizaciones",
+    "markerPaused": "Se pausaron las automatizaciones",
+    "viewResultLabel": "Ver resultado — {{action}}{{title}}",
+    "coldStartBanner": "Las automatizaciones están desactivadas en el modo de prueba de inicio en frío.",
+    "pausedBanner": "Las automatizaciones están pausadas mientras las funciones de IA estén ocultas.",
+    "off": "desactivado",
+    "noAutomationEnabled": "No hay automatizaciones activadas para este repositorio",
+    "newestDecisionRecorded": " — la decisión más reciente se registró ",
+    "emptyRecorded": "Todavía no se registraron decisiones.",
+    "emptyNotSetUp": "No hay automatizaciones configuradas para este repositorio.",
+    "emptyDescription": "Las decisiones aparecerán aquí cuando se creen commits y se revisen pull requests.",
+    "setUp": "Configurar automatizaciones",
+    "recordedDecisions": "Decisiones registradas de automatización",
+    "viewResult": "Ver resultado",
+    "wontRetry": "No se volverá a intentar esta versión hasta que hagas push o reinicies la app."
+  }
+}

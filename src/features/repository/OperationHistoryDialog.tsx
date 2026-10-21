@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import type { ComponentType } from "react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RelativeTime } from "@/components/relative-time";
 import {
   Dialog,
@@ -33,11 +34,26 @@ type IconType = ComponentType<{ className?: string }>;
 /** Op key → friendly name + icon. Unknown keys fall through to a generic
  *  commit icon and the raw key, so a future backend value can't crash the row. */
 const OP_META: Record<string, { name: string; Icon: IconType }> = {
-  merge_local_pr: { name: "Local PR merge", Icon: GitMergeIcon },
-  cherry_pick_onto: { name: "Cherry-pick", Icon: GitCommitIcon },
-  rewrite_commits: { name: "Edit history", Icon: PencilSimpleIcon },
-  rebase_edit: { name: "Interactive rebase", Icon: GitBranchIcon },
-  pull_rebase_drop: { name: "Pull — dropped commits", Icon: ScissorsIcon },
+  merge_local_pr: {
+    name: "dialogs.history.ops.mergeLocalPr",
+    Icon: GitMergeIcon,
+  },
+  cherry_pick_onto: {
+    name: "dialogs.history.ops.cherryPick",
+    Icon: GitCommitIcon,
+  },
+  rewrite_commits: {
+    name: "dialogs.history.ops.editHistory",
+    Icon: PencilSimpleIcon,
+  },
+  rebase_edit: {
+    name: "dialogs.history.ops.interactiveRebase",
+    Icon: GitBranchIcon,
+  },
+  pull_rebase_drop: {
+    name: "dialogs.history.ops.pullDropped",
+    Icon: ScissorsIcon,
+  },
 };
 
 /** Status → glyph + word + tone. Meaning is carried by the shape AND the word,
@@ -46,23 +62,35 @@ const STATUS_META: Record<
   string,
   { label: string; Icon: IconType; tone: string }
 > = {
-  pending: { label: "Pending", Icon: ClockIcon, tone: "text-warning" },
-  paused: { label: "Paused", Icon: PauseCircleIcon, tone: "text-warning" },
-  done: { label: "Done", Icon: CheckCircleIcon, tone: "text-success" },
+  pending: {
+    label: "dialogs.history.status.pending",
+    Icon: ClockIcon,
+    tone: "text-warning",
+  },
+  paused: {
+    label: "dialogs.history.status.paused",
+    Icon: PauseCircleIcon,
+    tone: "text-warning",
+  },
+  done: {
+    label: "dialogs.history.status.done",
+    Icon: CheckCircleIcon,
+    tone: "text-success",
+  },
   failed: {
-    label: "Failed",
+    label: "dialogs.history.status.failed",
     Icon: WarningCircleIcon,
     tone: "text-destructive",
   },
   dismissed: {
-    label: "Dismissed",
+    label: "dialogs.history.status.dismissed",
     Icon: ProhibitIcon,
     tone: "text-muted-foreground",
   },
   // A paused op (cherry-pick or rebase pull) finished or abandoned in a terminal:
   // over, but the journal never saw how it ended, so it reads as neither Done nor Failed.
   concluded: {
-    label: "Ended outside the app",
+    label: "dialogs.history.status.endedOutside",
     Icon: ArrowSquareOutIcon,
     tone: "text-muted-foreground",
   },
@@ -102,6 +130,7 @@ export function OperationHistoryDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const history = useOplogHistory(repoPath, open);
+  const { t } = useTranslation("repositoryOperations");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const list = history.data ?? [];
@@ -125,10 +154,9 @@ export function OperationHistoryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[70vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Operation history</DialogTitle>
+          <DialogTitle>{t("dialogs.history.title")}</DialogTitle>
           <DialogDescription>
-            Risky operations GitDesktop performed in this repo, and the state
-            each one started from — so you can trace or recover them.
+            {t("dialogs.history.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -138,10 +166,7 @@ export function OperationHistoryDialog({
           <div className="min-h-0 flex-1" />
         ) : list.length === 0 ? (
           <p className="flex-1 px-2 py-8 text-center text-xs text-muted-foreground">
-            No operations recorded yet. GitDesktop journals risky operations
-            here: local PR merges, cherry-picks, history edits, interactive
-            rebases, and a rebase pull that drops commits. Each is recorded with
-            the state it started from, so you can trace or recover it.
+            {t("dialogs.history.empty")}
           </p>
         ) : (
           <ScrollArea className="min-h-0 flex-1 border">
@@ -173,13 +198,14 @@ function OpRow({
 }) {
   const { name, Icon } = opMeta(entry.op);
   const status = statusMeta(entry.status);
+  const { t } = useTranslation("repositoryOperations");
   const sha7 = entry.originalSha ? entry.originalSha.slice(0, 7) : "";
   const tipSha7 = entry.preOpTip ? entry.preOpTip.slice(0, 7) : "";
   // A detached start is recorded as the string "HEAD"; show it as "detached".
   const refLabel =
     entry.originalRef && entry.originalRef !== "HEAD"
       ? entry.originalRef
-      : "detached";
+      : t("dialogs.history.detached");
   const anchor = `${refLabel}${sha7 ? ` @ ${sha7}` : ""}`;
 
   return (
@@ -195,7 +221,9 @@ function OpRow({
       <div className="flex items-center gap-2">
         <Icon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          <span className="text-muted-foreground">{name}</span>
+          <span className="text-muted-foreground">
+            {name.startsWith("dialogs.history.") ? t(name) : name}
+          </span>
           {" · "}
           <span title={entry.label}>{entry.label}</span>
         </span>
@@ -206,14 +234,16 @@ function OpRow({
           )}
         >
           <status.Icon className="size-3 shrink-0" />
-          {status.label}
+          {status.label.startsWith("dialogs.history.")
+            ? t(status.label)
+            : status.label}
         </span>
       </div>
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
         <RelativeTime date={entry.startedAt} />
         {entry.finishedAt && parseableDate(entry.finishedAt) && (
           <>
-            {" · finished "}
+            {` · ${t("dialogs.history.finished")} `}
             <RelativeTime date={entry.finishedAt} />
           </>
         )}
@@ -227,7 +257,7 @@ function OpRow({
         }
       >
         {anchor}
-        {tipSha7 ? ` → tip ${tipSha7}` : ""}
+        {tipSha7 ? ` → ${t("dialogs.history.tip")} ${tipSha7}` : ""}
       </p>
       {entry.status === "failed" && entry.error ? (
         <p

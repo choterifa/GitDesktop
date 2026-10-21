@@ -34,6 +34,7 @@ import {
   type SwapFocusRef,
   useConfirmSwapFocus,
 } from "./parts";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 /** Bitbucket's webhook events, curated to the ones people wire, in display
  *  order. */
@@ -50,10 +51,13 @@ const BB_EVENTS: { id: string; label: string }[] = [
   { id: "repo:commit_comment_created", label: "Commit comment" },
 ];
 
-function eventsSummary(events: string[]): string {
-  if (events.length === 0) return "No events";
+function eventsSummary(events: string[], tx: (source: string) => string): string {
+  if (events.length === 0) return tx("No events");
   const labels = events.map(
-    (e) => BB_EVENTS.find((c) => c.id === e)?.label ?? e,
+    (e) => {
+      const label = BB_EVENTS.find((c) => c.id === e)?.label;
+      return label ? tx(label) : e;
+    },
   );
   if (labels.length <= 3) return labels.join(", ");
   return `${labels.slice(0, 3).join(", ")} +${labels.length - 3}`;
@@ -68,6 +72,7 @@ export function BitbucketWebhooksSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const hooks = useBbHooks(repoPath, open);
   const deleteHook = useBbDeleteHook(repoPath);
   const online = useOnline();
@@ -82,7 +87,7 @@ export function BitbucketWebhooksSection({
   async function handleDelete(uuid: string) {
     try {
       await deleteHook.mutateAsync(uuid);
-      toast.success("Webhook deleted");
+      toast.success(tx("Webhook deleted"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -111,7 +116,7 @@ export function BitbucketWebhooksSection({
     <div data-confirm-section className="min-w-0 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Webhooks Bitbucket fires for this repository's events.
+          {tx("Webhooks Bitbucket fires for this repository's events.")}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -120,7 +125,7 @@ export function BitbucketWebhooksSection({
           onClick={() => setEditing("new")}
         >
           <PlusIcon data-icon="inline-start" />
-          Add webhook
+          {tx("Add webhook")}
         </Button>
       </div>
 
@@ -128,11 +133,11 @@ export function BitbucketWebhooksSection({
         query={hooks}
         rowCount={hooks.data?.length ?? 0}
         noun="webhooks"
-        loadFailed="Couldn't load webhooks."
-        emptyLabel="No webhooks yet."
+        loadFailed={tx("Couldn't load webhooks.")}
+        emptyLabel={tx("No webhooks yet.")}
         skeletonClassName="h-14 w-full"
-        errorTitle="Couldn't load webhooks."
-        errorHint="If this is a permissions error, managing webhooks needs admin on this repository."
+        errorTitle={tx("Couldn't load webhooks.")}
+        errorHint={tx("If this is a permissions error, managing webhooks needs admin on this repository.")}
       >
         {hooks.data?.map((h) => (
           <div
@@ -147,20 +152,20 @@ export function BitbucketWebhooksSection({
                 </p>
                 <p className="mt-0.5 text-muted-foreground">
                   {h.description ? `${h.description} · ` : ""}
-                  {eventsSummary(h.events)}
+                  {eventsSummary(h.events, tx)}
                 </p>
               </div>
               {!h.active && (
                 <StatusDetailChip
                   variant="secondary"
-                  label="inactive"
-                  detail="Bitbucket isn't sending events to this webhook. Edit it and turn on Active to resume deliveries."
+                  label={tx("inactive")}
+                  detail={tx("Bitbucket isn't sending events to this webhook. Edit it and turn on Active to resume deliveries.")}
                 />
               )}
               {confirming === h.uuid ? (
                 <InlineConfirm
-                  prompt="Delete?"
-                  actLabel="Delete"
+                  prompt={tx("Delete?")}
+                  actLabel={tx("Delete")}
                   pending={deleteHook.isPending}
                   heldReason={online ? undefined : OFFLINE_WRITE_REASON}
                   swapFocusRef={swapFocus(h.uuid)}
@@ -173,7 +178,7 @@ export function BitbucketWebhooksSection({
                     ref={swapFocus(rowFormSwapKey("edit", h.uuid))}
                     size="sm"
                     variant="ghost"
-                    title="Edit"
+                    title={tx("Edit")}
                     onClick={() => setEditing(h)}
                   >
                     <PencilSimpleIcon />
@@ -183,8 +188,8 @@ export function BitbucketWebhooksSection({
                     size="sm"
                     variant="ghost"
                     className="text-muted-foreground hover:text-destructive"
-                    title="Delete"
-                    aria-label={`Delete webhook ${h.url}`}
+                    title={tx("Delete")}
+                    aria-label={tx("Delete webhook {{url}}", { url: h.url })}
                     onClick={() => setConfirming(h.uuid)}
                   >
                     <TrashIcon />
@@ -211,6 +216,7 @@ function HookForm({
   swapFocusRef: SwapFocusRef;
   onDone: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const create = useBbCreateHook(repoPath);
   const update = useBbUpdateHook(repoPath);
   const [url, setUrl] = useState(hook?.url ?? "");
@@ -229,9 +235,9 @@ function HookForm({
   const offlineReason = online ? undefined : OFFLINE_WRITE_REASON;
   const warning =
     events.length === 0
-      ? "Select at least one event."
+      ? tx("Select at least one event.")
       : !urlValid
-        ? "The payload URL must start with http:// or https://."
+        ? tx("The payload URL must start with http:// or https://.")
         : null;
 
   function toggleEvent(id: string, on: boolean) {
@@ -251,7 +257,7 @@ function HookForm({
     try {
       if (hook) await update.mutateAsync({ uuid: hook.uuid, input });
       else await create.mutateAsync(input);
-      toast.success(hook ? "Webhook updated" : "Webhook created");
+      toast.success(tx(hook ? "Webhook updated" : "Webhook created"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -262,11 +268,11 @@ function HookForm({
     <div className="min-w-0 space-y-3">
       <Button ref={swapFocusRef} size="sm" variant="ghost" onClick={onDone}>
         <CaretLeftIcon data-icon="inline-start" />
-        Back to webhooks
+        {tx("Back to webhooks")}
       </Button>
       <div className="space-y-3 rounded-md border p-3">
         <div className="space-y-1.5">
-          <Label htmlFor="bb-hook-url">Payload URL</Label>
+          <Label htmlFor="bb-hook-url">{tx("Payload URL")}</Label>
           <Input
             id="bb-hook-url"
             value={url}
@@ -278,18 +284,18 @@ function HookForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="bb-hook-description">Description</Label>
+          <Label htmlFor="bb-hook-description">{tx("Description")}</Label>
           <Input
             id="bb-hook-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What this webhook is for"
+            placeholder={tx("What this webhook is for")}
             autoComplete="off"
           />
         </div>
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="bb-hook-active" className="text-xs">
-            Active
+            {tx("Active")}
           </Label>
           <Switch
             id="bb-hook-active"
@@ -299,7 +305,7 @@ function HookForm({
         </div>
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="bb-hook-skip-cert" className="text-xs">
-            Skip certificate verification
+            {tx("Skip certificate verification")}
           </Label>
           <Switch
             id="bb-hook-skip-cert"
@@ -309,13 +315,11 @@ function HookForm({
         </div>
         {skipCertVerification && (
           <p className="text-[11px] text-warning">
-            TLS certificate verification will be skipped for deliveries —
-            payloads could be intercepted. Only enable for a trusted endpoint
-            you control.
+            {tx("TLS certificate verification will be skipped for deliveries — payloads could be intercepted. Only enable for a trusted endpoint you control.")}
           </p>
         )}
         <div className="space-y-1.5">
-          <p className="text-xs font-medium">Trigger events</p>
+          <p className="text-xs font-medium">{tx("Trigger events")}</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
             {BB_EVENTS.map((e) => (
               <Label
@@ -326,7 +330,7 @@ function HookForm({
                   checked={events.includes(e.id)}
                   onCheckedChange={(v) => toggleEvent(e.id, v === true)}
                 />
-                {e.label}
+                {tx(e.label)}
               </Label>
             ))}
           </div>
@@ -339,7 +343,7 @@ function HookForm({
             size="sm"
             onClick={onDone}
           >
-            Cancel
+            {tx("Cancel")}
           </Button>
           <DisabledReasonButton
             ref={swapFocusRef}
@@ -353,7 +357,7 @@ function HookForm({
             onClick={save}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {hook ? "Save changes" : "Create webhook"}
+            {tx(hook ? "Save changes" : "Create webhook")}
           </DisabledReasonButton>
         </div>
       </div>

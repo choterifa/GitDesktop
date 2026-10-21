@@ -50,7 +50,6 @@ import type { PrStateFilter } from "@/lib/git/api";
 import { displayLogin } from "@/lib/git/bot-login";
 import {
   forgeFeatureReady,
-  forgeProbeReason,
   forgeProbeState,
   keepPreviousDataForKeyAxes,
   pendingWriteMatching,
@@ -95,6 +94,7 @@ import { cn } from "@/lib/utils";
 import { CreatePrDialog } from "./CreatePrDialog";
 import { LocalPrContextMenu } from "./LocalPrContextMenu";
 import { PendingPrRow } from "./PendingPrRow";
+import { usePullsText } from "./use-pulls-text";
 import { useReconcileLocalPrs } from "./useReconcileLocalPrs";
 
 /** The review-state subsections, in the order a triage pass wants them. */
@@ -153,6 +153,7 @@ function reviewBucket(
 }
 
 export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
+  const tx = usePullsText();
   const gh = useForgeStatus(repoPath);
   const provider = gh.data?.provider;
   // Merge request reads work for GitHub and GitLab; the noun + section header
@@ -168,7 +169,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   const upstreamSlug = useRemoteSlug(repoPath, "upstream", lens === "upstream");
   const providerName = providerLabel(provider);
   const remoteLabel =
-    lens === "upstream" ? (upstreamSlug ?? "Upstream") : providerName;
+    lens === "upstream" ? (upstreamSlug ?? tx("Upstream")) : providerName;
   const remoteNoun = isGitLab ? "merge requests" : "pull requests";
   const ghReady = forgeFeatureReady(gh.data, "pullRequests");
   // The provider's own capabilities, read separately from `forgeFeatureReady` so a
@@ -182,6 +183,13 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   const canFilterLabel = forgeFeatureReady(gh.data, "mrLabels");
   const canGroupByReview = forgeFeatureReady(gh.data, "reviewGrouping");
   const probe = forgeProbeState(gh);
+  const probeReason = (action: string) =>
+    probe === "checking"
+      ? tx("Checking this repository's host…")
+      : tx(
+          "GitDesktop couldn't reach this repository's host, so you can't {{action}} right now. Check your network connection.",
+          { action: tx(action) },
+        );
   const scopeProbeReason = useScopeProbeReason(repoPath);
   // "closed" matches the Closed tab: closed and merged alike.
   const [stateFilter, setStateFilter] = useState<PrStateFilter>("open");
@@ -364,15 +372,23 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
       case canCreateGhPr:
         return null;
       case probe !== null:
-        return forgeProbeReason(probe, "open a pull request");
+        return probeReason("open a pull request");
       case isGitLab && Boolean(gh.data?.installed):
-        return "Sign in to GitLab (glab auth login) to work with merge requests here.";
+        return tx(
+          "Sign in to GitLab (glab auth login) to work with merge requests here.",
+        );
       case isGitLab:
-        return "Install the GitLab CLI (glab) to work with merge requests here.";
+        return tx(
+          "Install the GitLab CLI (glab) to work with merge requests here.",
+        );
       case provider === "bitbucket":
-        return "Connect your Bitbucket account in Settings → Accounts to create pull requests here.";
+        return tx(
+          "Connect your Bitbucket account in Settings → Accounts to create pull requests here.",
+        );
       default:
-        return "Connect this repository to GitHub to open a pull request here.";
+        return tx(
+          "Connect this repository to GitHub to open a pull request here.",
+        );
     }
   })();
   const pendingCreate = useUiStore((s) => s.pendingCreate);
@@ -683,8 +699,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
           );
           return {
             key: group.kind,
-            label: group.label,
-            title: group.title,
+            label: tx(group.label),
+            title: group.title ? tx(group.title) : undefined,
             count: items.length,
             collapsed: isReviewGroupCollapsed(group.kind),
             onToggle: () => toggleReviewGroup(group.kind),
@@ -702,14 +718,20 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
     isFetching: reviewState.isFetching,
     truncated: groupingAsked && reviewPage?.truncated === true,
   });
-  const groupingNote = ungrouped ? UNGROUPED_NOTE[ungrouped] : undefined;
+  const groupingNote = ungrouped
+    ? ungrouped === "offline"
+      ? tx("You're offline — {{subject}} will load once you're back online.", {
+          subject: tx("the review grouping"),
+        })
+      : tx(UNGROUPED_NOTE[ungrouped])
+    : undefined;
   // Two independent notes over one channel: SCOPE (which rows these are) before
   // ARRANGEMENT (how they're ordered), because the first changes what the second
   // describes. Deliberately not folded into UNGROUPED_NOTE — that Record is about
   // the review grouping, and this is about the filter that fetched the page.
   const remoteNote =
     [
-      listFilter.teamScopeDropped ? TEAM_SCOPE_DROPPED_NOTE : undefined,
+      listFilter.teamScopeDropped ? tx(TEAM_SCOPE_DROPPED_NOTE) : undefined,
       groupingNote,
     ]
       .filter(Boolean)
@@ -947,30 +969,50 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   // connected yet. Never a provider claim while `implemented` is still unknown.
   const mineReason = (() => {
     if (canFilterMine) return null;
-    if (probe !== null)
-      return forgeProbeReason(probe, "filter by assignee or reviewer");
+    if (probe !== null) return probeReason("filter by assignee or reviewer");
     if (implemented && !implemented.listFilterMine)
-      return `${providerName} pull requests have no assignees or review requests to filter by`;
-    return `Connect this repository to ${providerName} to filter by assignee or reviewer`;
+      return tx(
+        "{{provider}} pull requests have no assignees or review requests to filter by",
+        {
+          provider: providerName,
+        },
+      );
+    return tx(
+      "Connect this repository to {{provider}} to filter by assignee or reviewer",
+      {
+        provider: providerName,
+      },
+    );
   })();
   const teamsReason = (() => {
     if (canFilterTeam) return null;
     if (implemented && !implemented.listFilterTeam)
-      return `${providerName} has no team review requests`;
+      return tx("{{provider}} has no team review requests", {
+        provider: providerName,
+      });
     // Falls through to the group's reason (not connected) rather than repeating it.
     return null;
   })();
   const reviewReason = (() => {
     if (canGroupByReview) return null;
-    if (probe !== null) return forgeProbeReason(probe, "group by your review");
+    if (probe !== null) return probeReason("group by your review");
     if (implemented && !implemented.reviewGrouping)
-      return `${providerName} doesn't report your last review on this list`;
-    return `Connect this repository to ${providerName} to group by your review`;
+      return tx("{{provider}} doesn't report your last review on this list", {
+        provider: providerName,
+      });
+    return tx(
+      "Connect this repository to {{provider}} to group by your review",
+      {
+        provider: providerName,
+      },
+    );
   })();
   const teamsNote = (() => {
-    if (listFilter.teamsError) return "Couldn't load your teams.";
+    if (listFilter.teamsError) return tx("Couldn't load your teams.");
     if (listFilter.missingTeamScope)
-      return "Your GitHub token lacks read:org — run gh auth refresh -s read:org";
+      return tx(
+        "Your GitHub token lacks read:org — run gh auth refresh -s read:org",
+      );
     return null;
   })();
   // Same shape as mineReason above, and the order matters: the provider claim is
@@ -981,10 +1023,14 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
   // silently empty the local section under a zero badge.
   const authorReason = (() => {
     if (canFilterAuthor) return null;
-    if (probe !== null) return forgeProbeReason(probe, "filter by author");
+    if (probe !== null) return probeReason("filter by author");
     if (implemented && !implemented.listFilterAuthor)
-      return `${providerName} can't filter pull requests by author here`;
-    return `Connect this repository to ${providerName} to filter by author`;
+      return tx("{{provider}} can't filter pull requests by author here", {
+        provider: providerName,
+      });
+    return tx("Connect this repository to {{provider}} to filter by author", {
+      provider: providerName,
+    });
   })();
   const axisCap = isGitLab ? gitlabAxisCap(providerName) : undefined;
 
@@ -1012,12 +1058,12 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
         lensControl={<RepoLensSwitcher repoPath={repoPath} />}
         newMenu={{
           ghLabel: isGitLab
-            ? "Merge request on GitLab…"
-            : `Pull request on ${providerName}…`,
+            ? tx("Merge request on GitLab…")
+            : tx("Pull request on {{provider}}…", { provider: providerName }),
           ghDisabled: !canCreateGhPr,
           ghReason: ghCreateReason ?? undefined,
           onGh: () => setGhCreateOpen(true),
-          localLabel: "Local pull request…",
+          localLabel: tx("Local pull request…"),
           onLocal: () => openLocalPrCreate(),
         }}
         filterSlot={
@@ -1034,18 +1080,18 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
             axisCap={axisCap}
             disabledReason={listFilter.prefsReason}
             mine={{
-              label: "Mine",
+              label: tx("Mine"),
               disabledReason: mineReason,
               rows: [
                 {
                   key: "assigned",
-                  label: "Assigned to me",
+                  label: tx("Assigned to me"),
                   checked: listFilter.assignedToMe,
                   onToggle: listFilter.setAssignedToMe,
                 },
                 {
                   key: "review-requested",
-                  label: "Review requested: me",
+                  label: tx("Review requested: me"),
                   checked: listFilter.reviewRequestedMe,
                   onToggle: listFilter.setReviewRequestedMe,
                 },
@@ -1065,12 +1111,12 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
               },
             }}
             review={{
-              label: "My review",
+              label: tx("My review"),
               disabledReason: reviewReason,
               rows: [
                 {
                   key: "group-by-review",
-                  label: "Group by my review",
+                  label: tx("Group by my review"),
                   checked: listFilter.groupByReview,
                   onToggle: listFilter.setGroupByReview,
                 },
@@ -1086,8 +1132,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
           <Button
             variant="outline"
             size="icon-sm"
-            aria-label="Refresh pull requests"
-            title="Refresh pull requests"
+            aria-label={tx("Refresh pull requests")}
+            title={tx("Refresh pull requests")}
             aria-busy={prList.isFetching}
             onClick={refreshPrList}
           >
@@ -1118,7 +1164,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 </span>
                 {pr.status !== "open" && (
                   <Badge variant="secondary" className="capitalize">
-                    {pr.status}
+                    {tx(pr.status)}
                   </Badge>
                 )}
               </p>
@@ -1127,7 +1173,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 onMouseEnter={clipTitleFromText}
               >
                 {created && <RelativeTime date={pr.createdAt} />}
-                {pr.archived && (created ? " · archived" : "archived")}
+                {pr.archived &&
+                  (created ? ` · ${tx("archived")}` : tx("archived"))}
                 {!created && !pr.archived && <span aria-hidden="true">—</span>}
               </p>
               <p
@@ -1158,7 +1205,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
         remoteError={prList.isError}
         remoteErrorSlot={
           <div className="space-y-2 px-3 py-4 text-xs text-muted-foreground">
-            <p>Couldn't load {remoteNoun}.</p>
+            <p>{tx("Couldn't load {{noun}}.", { noun: tx(remoteNoun) })}</p>
             {/* The filter refusals this panel can provoke — a fan-out too wide for
                 the provider, a rejected author/label/team term, an advanced search
                 the host doesn't offer — are PERMANENT, and each already carries the
@@ -1177,7 +1224,7 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 className="cursor-pointer"
                 onClick={refreshPrList}
               >
-                Retry
+                {tx("Retry")}
               </Button>
             )}
           </div>
@@ -1242,18 +1289,18 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
               <span className="min-w-0 truncate" title={pr.title}>
                 {pr.title}
               </span>
-              {pr.isDraft && <Badge variant="secondary">Draft</Badge>}
+              {pr.isDraft && <Badge variant="secondary">{tx("Draft")}</Badge>}
               {pr.state !== "OPEN" && (
                 <Badge variant="secondary" className="capitalize">
-                  {pr.state.toLowerCase()}
+                  {tx(pr.state.toLowerCase())}
                 </Badge>
               )}
               {ciMap?.get(pr.number) === "passing" && (
                 <span
                   className="ml-auto shrink-0 text-success"
                   role="img"
-                  title="Checks passing"
-                  aria-label="Checks passing"
+                  title={tx("Checks passing")}
+                  aria-label={tx("Checks passing")}
                 >
                   <CheckCircleIcon className="size-3" />
                 </span>
@@ -1262,8 +1309,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 <span
                   className="ml-auto shrink-0 text-destructive"
                   role="img"
-                  title="Checks failing"
-                  aria-label="Checks failing"
+                  title={tx("Checks failing")}
+                  aria-label={tx("Checks failing")}
                 >
                   <XCircleIcon className="size-3" />
                 </span>
@@ -1272,8 +1319,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 <span
                   className="ml-auto shrink-0 text-warning"
                   role="img"
-                  title="Checks pending"
-                  aria-label="Checks pending"
+                  title={tx("Checks pending")}
+                  aria-label={tx("Checks pending")}
                 >
                   <ClockIcon className="size-3" />
                 </span>
@@ -1284,8 +1331,8 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                 <span
                   className="ml-auto shrink-0 text-muted-foreground"
                   role="img"
-                  title="Checks cancelled"
-                  aria-label="Checks cancelled"
+                  title={tx("Checks cancelled")}
+                  aria-label={tx("Checks cancelled")}
                 >
                   <ProhibitIcon className="size-3" />
                 </span>
@@ -1304,12 +1351,12 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                   {" · "}
                   <span
                     role="img"
-                    title="Has conflicts with the base branch"
-                    aria-label="Has conflicts with the base branch"
+                    title={tx("Has conflicts with the base branch")}
+                    aria-label={tx("Has conflicts with the base branch")}
                     className="inline-flex items-center gap-1 align-middle text-warning"
                   >
                     <WarningIcon className="size-3 shrink-0" />
-                    Conflicts
+                    {tx("Conflicts")}
                   </span>
                 </>
               )}
@@ -1319,8 +1366,14 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
                   <span
                     className="inline-flex items-center gap-1 align-middle"
                     role="img"
-                    title={`Stack position ${pr.stack.position} of ${pr.stack.size}`}
-                    aria-label={`Stack position ${pr.stack.position} of ${pr.stack.size}`}
+                    title={tx("Stack position {{position}} of {{size}}", {
+                      position: pr.stack.position,
+                      size: pr.stack.size,
+                    })}
+                    aria-label={tx("Stack position {{position}} of {{size}}", {
+                      position: pr.stack.position,
+                      size: pr.stack.size,
+                    })}
                   >
                     <StackSimpleIcon className="size-3 shrink-0 text-muted-foreground" />
                     {pr.stack.position}/{pr.stack.size}
@@ -1362,21 +1415,26 @@ export function PullRequestsPanel({ repoPath }: { repoPath: string }) {
             selectedLocalPr.id === confirmDeleteId
           }
           onCancel={() => setConfirmDeleteId(null)}
-          title="Delete this local pull request?"
+          title={tx("Delete this local pull request?")}
           body={
-            shownSelectedLocalPr ? (
-              <>
-                Permanently deletes "{shownSelectedLocalPr.title}"
-                {shownSelectedLocalPr.comments.length > 0
-                  ? ` and its ${shownSelectedLocalPr.comments.length} comment${
-                      shownSelectedLocalPr.comments.length === 1 ? "" : "s"
-                    }`
-                  : ""}
-                . The branches are not affected. This cannot be undone.
-              </>
-            ) : null
+            shownSelectedLocalPr
+              ? shownSelectedLocalPr.comments.length > 0
+                ? tx(
+                    shownSelectedLocalPr.comments.length === 1
+                      ? 'Permanently deletes "{{title}}" and its {{count}} comment. The branches are not affected. This cannot be undone.'
+                      : 'Permanently deletes "{{title}}" and its {{count}} comments. The branches are not affected. This cannot be undone.',
+                    {
+                      title: shownSelectedLocalPr.title,
+                      count: shownSelectedLocalPr.comments.length,
+                    },
+                  )
+                : tx(
+                    'Permanently deletes "{{title}}". The branches are not affected. This cannot be undone.',
+                    { title: shownSelectedLocalPr.title },
+                  )
+              : null
           }
-          confirmLabel="Delete"
+          confirmLabel={tx("Delete")}
           confirmVariant="destructive"
           pending={deleting}
           onConfirm={() => {

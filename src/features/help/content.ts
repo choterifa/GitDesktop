@@ -17,6 +17,8 @@
  */
 export interface GuideSection {
   id: string;
+  /** Translation catalog used by this section's article body. */
+  namespace: string;
   /** Left-nav label. */
   label: string;
   /** AI-only section: hidden when "Hide AI features" is on. */
@@ -28,6 +30,7 @@ export interface GuideSection {
 export const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: "getting-started",
+    namespace: "help-core",
     label: "Getting started",
     body: `# Welcome to GitDesktop
 
@@ -108,6 +111,7 @@ only when AI features are enabled{{/ai}}.
   },
   {
     id: "repositories",
+    namespace: "help-core",
     label: "Repositories",
     body: `# Repositories
 
@@ -195,6 +199,7 @@ the current coordinates.`,
   },
   {
     id: "explore",
+    namespace: "help-core",
     label: "Explore repositories",
     body: `# Explore repositories
 
@@ -253,6 +258,7 @@ From here:
   },
   {
     id: "my-work",
+    namespace: "help-core",
     label: "My work",
     body: `# My work
 
@@ -349,6 +355,7 @@ CLI or token, the screen points you at that setup instead of the error behind it
   },
   {
     id: "repo-settings",
+    namespace: "help-core",
     label: "Repository settings",
     body: `# Repository settings
 
@@ -470,6 +477,7 @@ menu item appears only when you have it, greyed out while your access is being c
   },
   {
     id: "changes",
+    namespace: "help-core",
     label: "Changes, diffs & commits",
     body: `# Changes, diffs & commits
 
@@ -598,13 +606,19 @@ Write a **summary** (there's a 72-character budget indicator) and an optional
   },
   {
     id: "history",
+    namespace: "help-core",
     label: "History & git operations",
     body: `# History & git operations
 
-The **History** tab ({{kbd:tab-history}}) is the commit log for the current branch — each
-entry shows the author's avatar (from GitHub or Gravatar, or their initials). Click
-a commit to see its message, author, and full diff; **Shift + ↑ / ↓** extends the
-selection to compare a range.
+The **History** tab ({{kbd:tab-history}}) opens the main pane to a paged commit graph
+across HEAD, local branches, remote-tracking branches, and tags. Branch and tag labels
+are informational; selecting a commit opens its message, author, and diff without
+checking out a ref. Focus a graph row and use **↑ / ↓**, then **Enter** or **Space**, to
+open that commit. Use **Refresh** to rebuild the graph after branches or tags change
+outside GitDesktop while older pages are loading. The sidebar shows the current
+branch's paged, filterable commit log;
+each row includes the author's avatar (from GitHub or Gravatar, or their initials),
+and **Shift + ↑ / ↓** extends a range selection there.
 
 ## Commit actions
 
@@ -678,6 +692,7 @@ tracked file and blames the one you choose as it is now.
   },
   {
     id: "branches",
+    namespace: "help-core",
     label: "Branches & compare",
     body: `# Branches & compare
 
@@ -940,6 +955,7 @@ Worktrees that AI agent sessions use internally are hidden here.{{/ai}}`,
   },
   {
     id: "syncing",
+    namespace: "help-core",
     label: "Syncing & conflicts",
     body: `# Fetch, pull, push & conflicts
 
@@ -1114,6 +1130,7 @@ editor.{{/ai}}`,
   },
   {
     id: "pull-requests",
+    namespace: "help-pulls",
     label: "Pull requests",
     body: `# Pull requests
 
@@ -1846,6 +1863,7 @@ than your signed-in \`glab\` account.{{/ai}}`,
   },
   {
     id: "issues",
+    namespace: "help-issues",
     label: "Issues",
     body: `# Issues
 
@@ -2050,6 +2068,7 @@ that issue (see *Agent sessions*).{{/ai}}`,
   },
   {
     id: "projects",
+    namespace: "help-projects",
     label: "Project boards",
     body: `# Project boards
 
@@ -2572,6 +2591,7 @@ and posting, editing or deleting a status update) needs the full
   },
   {
     id: "discussions",
+    namespace: "help",
     label: "Discussions",
     body: `# Discussions
 
@@ -2602,6 +2622,7 @@ part in GitHub Discussions for the repo. (Discussions must be enabled on the rep
   },
   {
     id: "releases",
+    namespace: "help",
     label: "Releases & tags",
     body: `# Releases & tags
 
@@ -2635,6 +2656,7 @@ don't appear.`,
   },
   {
     id: "actions",
+    namespace: "help",
     label: "GitHub Actions",
     body: `# GitHub Actions
 
@@ -2705,6 +2727,7 @@ successes and failures, only the failures, or only the successes
   },
   {
     id: "findings",
+    namespace: "help-advanced",
     label: "Findings",
     body: `# Findings
 
@@ -2830,6 +2853,7 @@ The tab fetches when you open it — use the refresh button for the current stat
   },
   {
     id: "bitbucket",
+    namespace: "help-advanced",
     label: "Bitbucket repositories",
     body: `# Bitbucket repositories
 
@@ -2914,6 +2938,7 @@ missing scopes — update it in **Settings → Accounts**.`,
   },
   {
     id: "insights",
+    namespace: "help-advanced",
     label: "Insights",
     body: `# Insights
 
@@ -2944,6 +2969,7 @@ Bitbucket).
   },
   {
     id: "code-todos",
+    namespace: "help-advanced",
     label: "Code TODOs",
     body: `# Code TODOs
 
@@ -2983,6 +3009,7 @@ hand-authored to-dos you track in the app; see the *Issues* section.)`,
   },
   {
     id: "agent",
+    namespace: "help-advanced",
     label: "Agent sessions",
     ai: true,
     body: `# Agent sessions
@@ -3246,6 +3273,7 @@ across restarts, split into **Active** and **Kept** tabs with search.
   },
   {
     id: "ai",
+    namespace: "help-advanced",
     label: "AI & automations",
     ai: true,
     body: `# AI & automations
@@ -3423,6 +3451,7 @@ the result posts as a comment on that pull request.`,
   },
   {
     id: "hooks",
+    namespace: "help-advanced",
     label: "Git hooks",
     body: `# Git hooks
 
@@ -3440,6 +3469,7 @@ the small programs Git runs at points like *before commit* or *before push*.
   },
   {
     id: "tasks",
+    namespace: "help-advanced",
     label: "Tasks",
     body: `# Tasks
 
@@ -3494,6 +3524,7 @@ tab menu, or from the command palette ({{kbd:command-palette}}).
   },
   {
     id: "keyboard",
+    namespace: "help-core",
     label: "Keyboard & navigation",
     body: `# Keyboard & navigation
 
@@ -3548,6 +3579,7 @@ where there's an equivalent.`,
   },
   {
     id: "settings",
+    namespace: "help-core",
     label: "Settings & updates",
     body: `# Settings & updates
 

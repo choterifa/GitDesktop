@@ -4,6 +4,7 @@ import {
   TreeStructureIcon,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RelativeTime } from "@/components/relative-time";
 import {
   Combobox,
@@ -53,6 +54,7 @@ export function CompareBranchCombobox({
   value: string | null;
   onValueChange: (name: string) => void;
 }) {
+  const { t } = useTranslation("compare");
   // Popup state drives the N-per-branch git calls below: divergence + worktrees
   // fetch only while open (mirrors BranchSwitcher's `open`-gated queries).
   const [open, setOpen] = useState(false);
@@ -120,7 +122,7 @@ export function CompareBranchCombobox({
       onOpenChange={setOpen}
     >
       <ComboboxTrigger
-        aria-label="Compare with branch"
+        aria-label={t("branchPicker.ariaLabel")}
         className="flex w-full items-center justify-between gap-1.5 rounded-none border border-input bg-transparent py-2 pr-2 pl-2.5 text-xs whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 data-placeholder:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50"
       >
         {/* Clamp the selected branch name (the vendored SelectTrigger's
@@ -131,8 +133,8 @@ export function CompareBranchCombobox({
         </span>
       </ComboboxTrigger>
       <ComboboxContent>
-        <ComboboxInput showTrigger={false} placeholder="Filter branches…" />
-        <ComboboxEmpty>No branches match</ComboboxEmpty>
+        <ComboboxInput showTrigger={false} placeholder={t("branchPicker.filterPlaceholder")} />
+        <ComboboxEmpty>{t("branchPicker.noMatches")}</ComboboxEmpty>
         <ComboboxList>
           {(name: string) => (
             <BranchRow
@@ -173,6 +175,7 @@ function BranchRow({
   /** The other checkout holding this branch, when any. */
   worktree: { path: string; isMain: boolean } | undefined;
 }) {
+  const { t } = useTranslation("compare");
   // Names the holding checkout the way every branch row does. The record's
   // `title` arm is deliberately not used: its "this row opens it" clause is true
   // in the branch dropdown, while this row selects a compare base.
@@ -183,7 +186,7 @@ function BranchRow({
         {name}
         {name === defaultName && (
           <span className="ml-1.5 text-[10px] text-muted-foreground">
-            default
+            {t("branchPicker.default")}
           </span>
         )}
       </span>
@@ -202,7 +205,7 @@ function BranchRow({
       {div && (div.ahead > 0 || div.behind > 0) && (
         <span
           className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground tabular-nums"
-          title={`${div.ahead} ahead, ${div.behind} behind ${currentName}`}
+          title={t("branchPicker.divergence", { ahead: div.ahead, behind: div.behind, branch: currentName })}
         >
           {div.ahead > 0 && (
             <span className="flex items-center gap-0.5">

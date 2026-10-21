@@ -1,0 +1,67 @@
+{
+  "kind": {
+    "git": "Git error",
+    "conflict": "Merge conflict",
+    "pullRebaseWouldDrop": "Pull blocked",
+    "busy": "Operation in progress",
+    "branchHeld": "Branch in use",
+    "pushUpstreamNameMismatch": "Push blocked",
+    "notARepo": "Not a Git repository",
+    "gitNotFound": "Git not found",
+    "ghNotFound": "GitHub CLI not found",
+    "gh": "GitHub error",
+    "issuesDisabled": "Issues disabled",
+    "glabNotFound": "GitLab CLI not found",
+    "glab": "GitLab error",
+    "bitbucketNotConfigured": "Bitbucket not configured",
+    "bitbucket": "Bitbucket error",
+    "jira": "Jira error",
+    "keyring": "Credential storage error",
+    "invalidArgument": "Invalid input",
+    "command": "Command failed",
+    "io": "I/O error",
+    "timeout": "Timed out"
+  },
+  "action": {
+    "details": "Details",
+    "copy": "Copy",
+    "view": "View"
+  },
+  "dialog": {
+    "close": "Close",
+    "copied": "Copied",
+    "copy": "Copy"
+  },
+  "unexpected": "Unexpected error",
+  "ignore": {
+    "alreadyOne": "Entry already in {{file}}",
+    "alreadyMany": "All {{count}} entries already in {{file}}",
+    "addedSome": "Added {{added}} of {{total}} entries to {{file}}",
+    "addedAllOne": "Added 1 entry to {{file}}",
+    "addedAll": "Added {{count}} entries to {{file}}"
+  },
+  "conflict": {
+    "merge": "Merge paused — resolve the conflicts, then commit.",
+    "rebase": "Rebase paused — resolve the conflicts, then continue.",
+    "cherry-pick": "Cherry-pick paused — resolve the conflicts, then continue.",
+    "revert": "Revert paused — resolve the conflicts, then continue.",
+    "stash-pop": "Stash pop hit conflicts — resolve them; your stash was kept.",
+    "stash-apply": "Stash apply hit conflicts — resolve them; your stash was kept.",
+    "stash-restore": "Restore hit conflicts — resolve them; the recovered changes are in your working tree.",
+    "paused": "{{operation}} paused — resolve the conflicts, then {{finish}}.",
+    "unknown": "Operation paused — resolve the conflicts, then continue."
+  },
+  "summary": {
+    "forcePushStale": "Force push blocked — the remote moved since your last fetch. Fetch and review the new commits, then bring them into your branch before pushing.",
+    "forcePushRemoteUpdated": "Force push blocked — the remote has commits your branch hasn't incorporated. Pull them in, then push again.",
+    "remoteReadOnly": "The remote reports this repository as read-only (usually a mirror or an archived repository), so different credentials won't change the answer. If it mirrors another repository, push there instead.",
+    "remoteCredentialsMissing": "No credentials are stored for this remote, and GitDesktop never lets Git prompt for them. Add them to your Git credential helper, then try again.",
+    "remoteAuthFailed": "The remote rejected the credentials it was given. Update them in your Git credential helper, then try again.",
+    "remoteForbidden": "The remote recognizes the account but it lacks permission for this operation on this repository. Ask an owner for access, or check that the credentials in use belong to the account you expect.",
+    "remoteSshKeyRefused": "The remote refused the SSH connection because no key it accepts was offered. Add or load an SSH key with access to this remote, then try again.",
+    "windowsLongPath": "Paths in this repository are longer than Windows allows by default. GitDesktop's own Git commands handle them; other tools need Windows long paths and git config --global core.longpaths true.",
+    "secretPushBlocked": "GitHub blocked this push because it detected a likely secret, so the commits were not added to the repository. Remove the secret from the commits and push again, or if it is a false positive, open the unblock link GitHub printed in the details.",
+    "networkUnreachable": "Couldn't reach {{host}} — check your network connection.",
+    "pullDecisionStale": "The branch moved — pull again."
+  }
+}

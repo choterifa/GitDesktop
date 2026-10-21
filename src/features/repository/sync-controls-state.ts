@@ -76,6 +76,8 @@ export interface SyncControlsInput {
   /** What a `busy` hold says; {@link SYNC_BUSY_REASON} when absent. A caller
    *  held by another surface's write names that write instead. */
   busyReason?: string;
+  /** The localized reason for an empty Pull options menu. */
+  pullOptionsUnpublishedReason?: string;
   /** The offline hold's reason, undefined while online. */
   offlineHold: string | undefined;
   /** The rewrite probe's measured verdicts (all false/0 until it resolves). */
@@ -331,7 +333,10 @@ export function deriveSyncControls(input: SyncControlsInput) {
     if (detached || unborn) return { disabled, reason: pullDescription };
     return {
       disabled,
-      reason: empty ? PULL_OPTIONS_UNPUBLISHED_REASON : undefined,
+      reason: empty
+        ? (input.pullOptionsUnpublishedReason ??
+          PULL_OPTIONS_UNPUBLISHED_REASON)
+        : undefined,
     };
   })();
 

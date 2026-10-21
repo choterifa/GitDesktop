@@ -34,6 +34,7 @@ import {
   NODE_VERSIONS,
 } from "@/lib/settings/api";
 import { toastError } from "@/lib/toast";
+import { useSettingsText } from "./use-settings-text";
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -86,6 +87,7 @@ export function AgentSandboxField({
   /** The open repo, for the per-repo custom-image row (null = no repo open). */
   repoPath: string | null;
 }) {
+  const tx = useSettingsText();
   const enabled = value === "container";
   const status = useContainerStatus({ nodeVersion, providers, enabled });
   const queryClient = useQueryClient();
@@ -95,7 +97,7 @@ export function AgentSandboxField({
     setBuilding(true);
     try {
       await prepareContainerSandbox(nodeVersion, providers, force);
-      toast.success(force ? "Agent image rebuilt" : "Agent image built");
+      toast.success(tx(force ? "Agent image rebuilt" : "Agent image built"));
       await queryClient.invalidateQueries({
         queryKey: ["agentContainerStatus"],
       });
@@ -123,20 +125,20 @@ export function AgentSandboxField({
             onChange(c === true ? "container" : "worktree")
           }
         />
-        Run agent sessions in an isolated container
+        {tx("Run agent sessions in an isolated container")}
       </label>
       <p className="text-xs text-muted-foreground">
-        Sessions normally run inside a throwaway git worktree only. Turn this on
-        to also run each session inside an ephemeral Docker/Podman container, so
-        the agent's file writes are confined to the worktree by the kernel — the
-        strongest isolation. Applies to sessions started afterward; needs Docker
-        or Podman installed, and each agent added to the image below.
+        {tx(
+          "Sessions normally run inside a throwaway git worktree only. Turn this on to also run each session inside an ephemeral Docker/Podman container, so the agent's file writes are confined to the worktree by the kernel — the strongest isolation. Applies to sessions started afterward; needs Docker or Podman installed, and each agent added to the image below.",
+        )}
       </p>
       {enabled && (
         <div className="space-y-2 pt-1">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
             <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">Node version</span>
+              <span className="text-muted-foreground">
+                {tx("Node version")}
+              </span>
               <Select
                 items={NODE_VERSION_ITEMS}
                 value={nodeVersion}
@@ -144,7 +146,7 @@ export function AgentSandboxField({
               >
                 <SelectTrigger
                   size="sm"
-                  aria-label="Node version"
+                  aria-label={tx("Node version")}
                   className="w-auto"
                 >
                   <SelectValue />
@@ -159,7 +161,7 @@ export function AgentSandboxField({
               </Select>
             </label>
             <div className="flex items-center gap-3">
-              <span className="text-muted-foreground">Agents</span>
+              <span className="text-muted-foreground">{tx("Agents")}</span>
               {IMAGE_AGENT_IDS.map((id) => {
                 const on = providers.includes(id);
                 return (
@@ -208,6 +210,7 @@ function StatusLine({
   building: boolean;
   onBuild: (force: boolean) => void;
 }) {
+  const tx = useSettingsText();
   const buildBtn = (label: string, force: boolean) => (
     <Button
       type="button"
@@ -220,7 +223,7 @@ function StatusLine({
       {building ? (
         <>
           <Spinner className="size-3" />
-          {force ? "Rebuilding…" : "Building…"}
+          {tx(force ? "Rebuilding…" : "Building…")}
         </>
       ) : (
         label
@@ -229,47 +232,53 @@ function StatusLine({
   );
 
   if (loading) {
-    return <Row tone="muted">Checking for Docker / Podman…</Row>;
+    return <Row tone="muted">{tx("Checking for Docker / Podman…")}</Row>;
   }
   if (!status || !status.runtime) {
     return (
       <Row tone="warn">
-        No Docker or Podman found. Sessions still run on the host
-        (worktree-confined — Codex via its own OS sandbox); container isolation
-        needs Docker or Podman installed.
+        {tx(
+          "No Docker or Podman found. Sessions still run on the host (worktree-confined — Codex via its own OS sandbox); container isolation needs Docker or Podman installed.",
+        )}
       </Row>
     );
   }
   if (!status.ready) {
     return (
       <Row tone="warn">
-        {cap(status.runtime)} is installed but its engine isn't running. Start
-        it, then reopen Settings.
+        {tx(
+          "{{runtime}} is installed but its engine isn't running. Start it, then reopen Settings.",
+          { runtime: cap(status.runtime) },
+        )}
       </Row>
     );
   }
   if (!status.imagePresent) {
     return (
       <Row tone="muted">
-        {cap(status.runtime)} ready — build the agent image once.
-        {buildBtn("Build image", false)}
+        {tx("{{runtime}} ready — build the agent image once.", {
+          runtime: cap(status.runtime),
+        })}
+        {buildBtn(tx("Build image"), false)}
       </Row>
     );
   }
   if (!status.imageMatches) {
     return (
       <Row tone="warn">
-        The built image doesn't match this Node version / agent selection —
-        rebuild to apply.
-        {buildBtn("Rebuild", true)}
+        {tx(
+          "The built image doesn't match this Node version / agent selection — rebuild to apply.",
+        )}
+        {buildBtn(tx("Rebuild"), true)}
       </Row>
     );
   }
   return (
     <Row tone="ok">
-      {cap(status.runtime)} ready, image built — new sessions run in a
-      container.
-      {buildBtn("Rebuild to update", true)}
+      {tx("{{runtime}} ready, image built — new sessions run in a container.", {
+        runtime: cap(status.runtime),
+      })}
+      {buildBtn(tx("Rebuild to update"), true)}
     </Row>
   );
 }
@@ -311,6 +320,7 @@ function ActionButton({
   disabled?: boolean;
   onClick: () => void;
 }) {
+  const tx = useSettingsText();
   return (
     <Button
       type="button"
@@ -323,7 +333,7 @@ function ActionButton({
       {loading ? (
         <>
           <Spinner className="size-3" />
-          {busyLabel ?? "Working…"}
+          {busyLabel ?? tx("Working…")}
         </>
       ) : (
         label
@@ -347,6 +357,7 @@ function CustomImageSection({
    *  can't run until it exists. Scaffolding/reviewing stays available regardless. */
   basePresent: boolean;
 }) {
+  const tx = useSettingsText();
   const queryClient = useQueryClient();
   const status = useQuery({
     queryKey: ["agentCustomImage", repoPath],
@@ -368,8 +379,10 @@ function CustomImageSection({
       const created = await scaffoldCustomDockerfile(repoPath);
       toast.success(
         created
-          ? "Added .gitdesktop/agent.Dockerfile — edit it to add tools, then build the image"
-          : ".gitdesktop/agent.Dockerfile already exists",
+          ? tx(
+              "Added .gitdesktop/agent.Dockerfile — edit it to add tools, then build the image",
+            )
+          : tx(".gitdesktop/agent.Dockerfile already exists"),
       );
       await refresh();
     } catch (e) {
@@ -385,7 +398,7 @@ function CustomImageSection({
       // Pass the reviewed contents so the backend refuses to build if the file changed on
       // disk since the dialog opened (only ever build what the user actually saw).
       await buildCustomImage(repoPath, status.data?.dockerfile ?? "", force);
-      toast.success(force ? "Custom image rebuilt" : "Custom image built");
+      toast.success(tx(force ? "Custom image rebuilt" : "Custom image built"));
       setReviewOpen(false);
       await refresh();
     } catch (e) {
@@ -401,11 +414,12 @@ function CustomImageSection({
   if (data.state === "none") {
     return (
       <Row tone="muted">
-        This repo uses the base image. Add a custom Dockerfile to layer extra
-        tools (e.g. Playwright) into its container sessions.
+        {tx(
+          "This repo uses the base image. Add a custom Dockerfile to layer extra tools (e.g. Playwright) into its container sessions.",
+        )}
         <ActionButton
-          label="Add custom tools…"
-          busyLabel="Adding…"
+          label={tx("Add custom tools…")}
+          busyLabel={tx("Adding…")}
           loading={busy === "scaffold"}
           disabled={busy !== null}
           onClick={scaffold}
@@ -422,17 +436,19 @@ function CustomImageSection({
     <>
       <Row tone={built ? "ok" : invalid ? "warn" : "muted"}>
         {invalid
-          ? "This repo's .gitdesktop/agent.Dockerfile can't be used as-is — open it to see why."
+          ? tx(
+              "This repo's .gitdesktop/agent.Dockerfile can't be used as-is — open it to see why.",
+            )
           : built
-            ? "Container sessions for this repo run in its custom image."
-            : "This repo has a custom Dockerfile that isn't built yet."}
+            ? tx("Container sessions for this repo run in its custom image.")
+            : tx("This repo has a custom Dockerfile that isn't built yet.")}
         <ActionButton
           label={
             invalid
-              ? "View Dockerfile"
+              ? tx("View Dockerfile")
               : built
-                ? "View / Rebuild…"
-                : "Review & build…"
+                ? tx("View / Rebuild…")
+                : tx("Review & build…")
           }
           disabled={busy !== null}
           onClick={() => setReviewOpen(true)}
@@ -478,16 +494,20 @@ function ReviewDialog({
   building: boolean;
   onBuild: () => void;
 }) {
+  const tx = useSettingsText();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {built ? "Rebuild custom agent image" : "Build custom agent image"}
+            {tx(
+              built ? "Rebuild custom agent image" : "Build custom agent image",
+            )}
           </DialogTitle>
           <DialogDescription>
-            This builds a per-repo image from .gitdesktop/agent.Dockerfile and
-            runs the commands in it. Only build repositories you trust.
+            {tx(
+              "This builds a per-repo image from .gitdesktop/agent.Dockerfile and runs the commands in it. Only build repositories you trust.",
+            )}
           </DialogDescription>
         </DialogHeader>
         {error && (
@@ -511,8 +531,9 @@ function ReviewDialog({
               aria-hidden
             />
             <span>
-              Build the base agent image first (the line above this one in
-              Settings), then build this custom image.
+              {tx(
+                "Build the base agent image first (the line above this one in Settings), then build this custom image.",
+              )}
             </span>
           </p>
         )}
@@ -524,7 +545,7 @@ function ReviewDialog({
             disabled={building}
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {tx("Cancel")}
           </Button>
           {canBuild && (
             <Button
@@ -536,12 +557,12 @@ function ReviewDialog({
               {building ? (
                 <>
                   <Spinner className="size-3" />
-                  {built ? "Rebuilding…" : "Building…"}
+                  {tx(built ? "Rebuilding…" : "Building…")}
                 </>
               ) : built ? (
-                "Rebuild (no cache)"
+                tx("Rebuild (no cache)")
               ) : (
-                "Build image"
+                tx("Build image")
               )}
             </Button>
           )}

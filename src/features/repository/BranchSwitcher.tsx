@@ -15,6 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
@@ -49,12 +50,9 @@ import {
   rowTrackingMatches,
 } from "@/lib/git/push-tracking";
 import {
-  BRANCH_PUSH_ACTIVE_MESSAGE,
   type BranchPushState,
-  branchPublishLabel,
   branchPushHoldItemReason,
   branchPushHoldReason,
-  branchPushLabel,
   branchRewriteStatusOptions,
   forgeFeatureReady,
   nextPushLatch,
@@ -97,6 +95,7 @@ import {
   useUpdateBranchFrom,
   useUserWorktrees,
 } from "@/lib/git/queries";
+import { pushWriteCopy, syncControlCopy } from "@/lib/git/queries/sync-copy";
 import { isSessionBranchName } from "@/lib/git/ref-name";
 import type {
   Branch,
@@ -105,11 +104,9 @@ import type {
   RemoteBranch,
 } from "@/lib/git/types";
 import { listUserWorktrees, type UserWorktree } from "@/lib/git/worktree";
-import { secondaryClickLabel } from "@/lib/hotkeys/binding";
 import { dispatchAction, useHotkeyAction } from "@/lib/hotkeys/hotkeys";
 import { listKeyboardNav } from "@/lib/list-keyboard-nav";
 import {
-  OFFLINE_ITEM_REASON,
   pendingItemReason,
   refuseWhileOffline,
   useOfflineHold,
@@ -142,7 +139,6 @@ import {
   promotionBlocksCheckout,
   useWorktreeRemovalStore,
   useWorktreeRemovals,
-  WORKTREE_PROMOTING_MESSAGE,
 } from "@/lib/stores/worktree-removal";
 import { isAppError } from "@/lib/tauri/invoke";
 import { errorToastAction, toastError } from "@/lib/toast";
@@ -163,11 +159,7 @@ import {
   worktreeCheckStateFrom,
 } from "./CleanupBranchesDialog";
 import { CreateBranchDialog } from "./CreateBranchDialog";
-import {
-  baseName,
-  PROMOTION_BLOCKS_CHECKOUT,
-  rowCheckoutCopy,
-} from "./checkout-copy";
+import { baseName, rowCheckoutCopy } from "./checkout-copy";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { ForkPrPublishGuard } from "./ForkPrPublishGuard";
 import { OperationHistoryDialog } from "./OperationHistoryDialog";
@@ -176,10 +168,6 @@ import { RebaseOntoDialog } from "./RebaseOntoDialog";
 import { RenameBranchDialog } from "./RenameBranchDialog";
 import { StashesDialog } from "./StashesDialog";
 import { SwitchWithChangesDialog } from "./SwitchWithChangesDialog";
-import {
-  STATUS_PENDING_REASON,
-  STATUS_READ_FAILED_REASON,
-} from "./sync-controls-state";
 import { repoOpenWatermark, useOpenWorktree } from "./useOpenRepoByPath";
 import {
   reportAutostashOutcome,
@@ -191,11 +179,6 @@ import {
   refuseWhileLeaving,
   worktreeItemLabel,
 } from "./WorktreesDialog";
-
-/** Sentence-initial form of the platform's secondary-click word — for
- *  status-icon hints where the phrase leads a sentence. */
-const secondaryClickCapitalized =
-  secondaryClickLabel.charAt(0).toUpperCase() + secondaryClickLabel.slice(1);
 
 /** How many closed PRs the branch surfaces scan. Merged state lives only in the
  *  closed list, and gh's default 30 covers too little history for the cleanup
@@ -229,13 +212,6 @@ interface PublishDetect {
 
 /** Sentence-initial state words for the badge's own hint — the audit chip's
  *  labels lead with "PR", which reads wrong mid-sentence here. */
-const PR_STATE_LABEL: Record<PrAuditState, string> = {
-  open: "Open",
-  draft: "Draft",
-  merged: "Merged",
-  closed: "Closed",
-};
-
 /** `branches` (already sorted) reordered by a snapshot of names: snapshot names in
  *  snapshot order, then branches the snapshot lacks in their sorted order. Names
  *  gone from `branches` drop out; a null snapshot keeps the sorted order. */
@@ -294,6 +270,7 @@ function MenuRow({
 }
 
 export function BranchSwitcher({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("repository");
   const status = useRepoStatus(repoPath);
   const branches = useBranches(repoPath);
   const defaultBranch = useDefaultBranch(repoPath);
@@ -316,7 +293,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // Push, publish and delete-on-remote hold offline rather than park: a parked
   // one lands on the remote whenever the connection returns.
   const offlineHold = useOfflineHold();
-  const offlineSuffix = offlineHold ? ` (${OFFLINE_ITEM_REASON})` : "";
+  const offlineSuffix = offlineHold
+    ? ` (${syncControlCopy("offlineItemReason")})`
+    : "";
   const remotes = useRemotes(repoPath);
   const setBranchArchived = useSetBranchArchived(repoPath);
   const openWorktree = useOpenWorktree();
@@ -445,7 +424,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     currentNameRef.current = currentName;
   }, [currentName]);
   const currentLabel = head?.detached
-    ? `detached @ ${head.oid?.slice(0, 7) ?? "?"}`
+    ? t("branchSwitcher.detachedAt", {
+        hash: head.oid?.slice(0, 7) ?? "?",
+      })
     : (currentName ?? "…");
   // Agent-session branches (`gd/session/*`) are app-internal — never list or act
   // on them in the switcher. Critically, a *kept* session's worktree is removed
@@ -925,7 +906,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   async function setArchived(name: string, archived: boolean) {
     try {
       await setBranchArchived.mutateAsync({ name, archived });
-      toast.success(archived ? `Archived ${name}` : `Unarchived ${name}`);
+      toast.success(
+        archived
+          ? t("branchSwitcher.archived", { branch: name })
+          : t("branchSwitcher.unarchived", { branch: name }),
+      );
     } catch (e) {
       onError(e);
     }
@@ -934,7 +919,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   async function doUnlockWorktree(path: string) {
     try {
       await unlockWorktree.mutateAsync(path);
-      toast.success("Worktree unlocked");
+      toast.success(t("branchSwitcher.worktreeUnlocked"));
     } catch (e) {
       onError(e);
     }
@@ -949,7 +934,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   ) {
     // Read at fire time: the promote's claim never re-renders anything.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     try {
@@ -1075,7 +1060,13 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // the one where the map was empty, so the row carried no chip and the whole
       // app just changed folders with no prior signal. Say so after the fact.
       if (navigated && resolvedHere)
-        toast.success(rowCheckoutCopy(resolvedHere.isMain).opened(wtPath));
+        toast.success(
+          resolvedHere.isMain
+            ? t("branchSwitcher.mainWorkspaceOpened")
+            : t("branchSwitcher.worktreeOpened", {
+                worktree: baseName(wtPath),
+              }),
+        );
       return;
     }
     // with work in progress, let the user choose to bring or stash it
@@ -1097,7 +1088,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     }
     // Ahead of closing the dialog, so a refusal keeps it; `runCheckout` re-checks.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     const target = switchTarget;
@@ -1125,9 +1116,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           )
             return;
           if (!touched) setReapplyOnSwitch(true);
-          setSwitchHint(
-            "Bringing changes didn't work — git would overwrite them. Stash and switch instead.",
-          );
+          setSwitchHint(t("branchSwitcher.bringChangesFailed"));
           setSwitchTarget(target);
           return;
         }
@@ -1146,7 +1135,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     }
     // Ahead of every state write, so a refusal keeps the dialog and its choices.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     const target = switchTarget;
@@ -1172,13 +1161,19 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       reportAutostashOutcome(
         outcome,
         {
-          operation: "Switch",
-          reapplied: `Stashed, switched to ${target.name}, and reapplied your changes.`,
-          stashedOnly: `Stashed changes and switched to ${target.name} — "Pop latest stash" restores them`,
-          plain: `Switched to ${target.name}.`,
+          operation: t("branchSwitcher.switchOperation"),
+          reapplied: t("branchSwitcher.switchedReapplied", {
+            branch: target.name,
+          }),
+          stashedOnly: t("branchSwitcher.switchedStashedOnly", {
+            branch: target.name,
+          }),
+          plain: t("branchSwitcher.switched", { branch: target.name }),
           // Names the branch the switch failed to reach — more useful than the
           // generic didn't-finish line.
-          stashKept: `Couldn't switch to ${target.name} — your changes are safely stashed; pop them when you're ready.`,
+          stashKept: t("branchSwitcher.switchFailedStashKept", {
+            branch: target.name,
+          }),
         },
         {
           repoPath,
@@ -1221,7 +1216,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // are still loading, so it would pass vacuously — refuse instead of deleting
     // a branch a settled rule protects.
     if (rulesSettling) {
-      toast.error("Branch rules are still loading — try again in a moment");
+      toast.error(t("branchSwitcher.branchRulesLoading"));
       closeDelete();
       return;
     }
@@ -1229,7 +1224,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // branches, but guard here too in case a rule changed under an open dialog.
     if (isDeletionBlocked(rulesConfig, deleteTarget)) {
       toast.error(
-        `${deleteTarget} is protected from deletion by a branch rule`,
+        t("branchSwitcher.branchProtected", { branch: deleteTarget }),
       );
       closeDelete();
       return;
@@ -1238,7 +1233,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // Between freeing its branch and checking it out, a promote leaves that
       // branch in no checkout, so git would let it be deleted from under it.
       if (promotionBlocksCheckout(repoPath)) {
-        toast.info(PROMOTION_BLOCKS_CHECKOUT);
+        toast.info(t("branchSwitcher.promotionBlocksCheckout"));
         return;
       }
       // git refuses to delete the checked-out branch: move off it first — onto a
@@ -1277,16 +1272,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           ? defaultName
           : otherBranches.find((b) => free(b.name))?.name;
         if (!fallback) {
-          toast.error(
-            "Can't switch off this branch — every other branch is checked out in a worktree.",
-          );
+          toast.error(t("branchSwitcher.cannotSwitchOffBranch"));
           clearTarget();
           return;
         }
         // Below the occupancy await, so a promote that started meanwhile counts;
         // nothing has been written yet, so the delete is refused whole.
         if (promotionBlocksCheckout(repoPath)) {
-          toast.info(PROMOTION_BLOCKS_CHECKOUT);
+          toast.info(t("branchSwitcher.promotionBlocksCheckout"));
           return;
         }
         await checkout.mutateAsync(fallback);
@@ -1301,7 +1294,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           return;
       }
       await deleteBranch.mutateAsync(deleteTarget);
-      toast.success(`Deleted ${deleteTarget}`);
+      toast.success(
+        t("branchSwitcher.branchDeleted", { branch: deleteTarget }),
+      );
     } catch (e) {
       onError(e);
     } finally {
@@ -1325,7 +1320,12 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
         remote: target.remote,
         name: target.name,
       });
-      toast.success(`Deleted ${target.name} on ${target.remote}`);
+      toast.success(
+        t("branchSwitcher.remoteBranchDeleted", {
+          branch: target.name,
+          remote: target.remote,
+        }),
+      );
     } catch (e) {
       onError(e);
     } finally {
@@ -1343,7 +1343,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       )
         return;
       await discardAll.mutateAsync(undefined);
-      toast.success("All changes discarded");
+      toast.success(t("changes.allDiscarded"));
     } catch (e) {
       onError(e);
     } finally {
@@ -1358,7 +1358,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // A new stash buries the recorded backup, so its offer can only refuse.
       useStashReapplyMarker.getState().clearFor(stashAllIn);
       await stashAll.mutateAsync(undefined);
-      toast.success("Changes stashed");
+      toast.success(t("changes.stashed"));
     } catch (e) {
       onError(e);
     } finally {
@@ -1373,7 +1373,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // A conflict here must not read as the recorded reapply's.
       useStashReapplyMarker.getState().clearFor(stashPopIn);
       await stashPop.mutateAsync(undefined);
-      toast.success("Stash restored");
+      toast.success(t("branchSwitcher.stashRestored"));
     } catch (e) {
       onError(e);
     } finally {
@@ -1396,8 +1396,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     return recovery.handleError(e, {
       operationLabel: "merge",
       detail: branch,
-      reappliedMessage: `Merged ${branch} and reapplied your changes.`,
-      plainMessage: `Merged ${branch}`,
+      reappliedMessage: t("branchSwitcher.mergedReapplied", { branch }),
+      plainMessage: t("branchSwitcher.merged", { branch }),
       run: { op: "merge", ref: branch },
     });
   }
@@ -1410,8 +1410,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       operationLabel: "rebase",
       detail: branch,
       detailPreposition: "onto",
-      reappliedMessage: `Rebased onto ${branch} and reapplied your changes.`,
-      plainMessage: `Rebased onto ${branch}`,
+      reappliedMessage: t("branchSwitcher.rebasedReapplied", { branch }),
+      plainMessage: t("branchSwitcher.rebasedOnto", { branch }),
       run: { op: "rebase", ref: branch },
     });
   }
@@ -1434,17 +1434,20 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       if (refused) return;
     }
     setPicker(null);
-    const nothing =
-      mode === "rebase" ? "nothing was rebased" : "nothing was merged";
+    const nothing = t(
+      mode === "rebase"
+        ? "branchSwitcher.nothingWasRebased"
+        : "branchSwitcher.nothingWasMerged",
+    );
     if (!pickedIn || refuseIfSwitched(pickedIn, nothing)) return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     if (mode === "rebase") {
       try {
         await rebaseBranch.mutateAsync(branch);
-        toast.success(`Rebased onto ${branch}`);
+        toast.success(t("branchSwitcher.rebasedOnto", { branch }));
       } catch (e) {
         if (beginRebaseRecovery(e, branch)) return;
         onError(e);
@@ -1462,8 +1465,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
         await mergeBranch.mutateAsync({ branch, squash, noFf, strategy });
         toast.success(
           squash
-            ? `Squashed ${branch} — changes are staged, review and commit`
-            : `Merged ${branch}`,
+            ? t("branchSwitcher.squashed", { branch })
+            : t("branchSwitcher.merged", { branch }),
         );
       } catch (e) {
         if (plain && beginMergeRecovery(e, branch)) return;
@@ -1496,17 +1499,23 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // Refused before the dialog closes, as the picker's run is.
     if (pickedIn === repoPath && refuseWhileCurrentPushes()) return;
     setRebaseOntoIn(null);
-    if (!pickedIn || refuseIfSwitched(pickedIn, "nothing was rebased")) return;
+    if (
+      !pickedIn ||
+      refuseIfSwitched(pickedIn, t("branchSwitcher.nothingWasRebased"))
+    )
+      return;
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     const request = {
       operationLabel: "rebase",
       detail: newBase,
       detailPreposition: "onto",
-      reappliedMessage: `Rebased onto ${newBase} and reapplied your changes.`,
-      plainMessage: `Rebased onto ${newBase}`,
+      reappliedMessage: t("branchSwitcher.rebasedReapplied", {
+        branch: newBase,
+      }),
+      plainMessage: t("branchSwitcher.rebasedOnto", { branch: newBase }),
       run: { op: "rebaseOnto", newBase, oldBase },
     } as const;
     if (hasTrackedChanges) {
@@ -1515,7 +1524,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     }
     try {
       await rebaseOnto.mutateAsync({ newBase, oldBase });
-      toast.success(`Rebased onto ${newBase}`);
+      toast.success(t("branchSwitcher.rebasedOnto", { branch: newBase }));
     } catch (e) {
       // `hasTrackedChanges` is a query-state read that can trail the tree: a
       // file saved between the check and the run still deserves the offer, so
@@ -1534,8 +1543,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     return recovery.handleError(e, {
       operationLabel: "update",
       detail: base,
-      reappliedMessage: `Updated from ${base} and reapplied your changes.`,
-      plainMessage: `Updated ${branch} from ${base}`,
+      reappliedMessage: t("branchSwitcher.updatedReapplied", { base }),
+      plainMessage: t("branchSwitcher.updatedFrom", { branch, base }),
       run: { op: "merge", ref: base },
     });
   }
@@ -1608,7 +1617,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // rules are still loading, so it would pass vacuously — refuse instead of
     // inverting a flow a settled rule names as promotion.
     if (rulesSettling) {
-      toast.error("Branch rules are still loading — try again in a moment");
+      toast.error(t("branchSwitcher.branchRulesLoading"));
       return;
     }
     // The doors into this are already disabled for promotion branches, but a
@@ -1616,12 +1625,15 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // hotkey path passes through.
     if (isPromotionBranch(rulesConfig, target)) {
       toast.error(
-        `${target} is a promotion branch — it takes changes through promotions, not updates from ${base}`,
+        t("branchSwitcher.promotionBranchUpdateBlocked", {
+          branch: target,
+          base,
+        }),
       );
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     if (refuseUpdateWhileHolderLeaving(target)) return;
@@ -1632,8 +1644,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       });
       toast.success(
         outcome.outcome === "up-to-date"
-          ? `${target} is already up to date with ${base}`
-          : `Updated ${target} from ${base}`,
+          ? t("branchSwitcher.alreadyUpToDate", {
+              branch: target,
+              base,
+            })
+          : t("branchSwitcher.updatedFrom", { branch: target, base }),
       );
     } catch (e) {
       if (toastBranchHeld(e)) return;
@@ -1647,7 +1662,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // fire time, for a menu or shortcut pressed from before the push started.
   function refuseUpdateWhilePushing(target: string): boolean {
     if (branchPushing(target)) {
-      toast.info(BRANCH_PUSH_ACTIVE_MESSAGE);
+      toast.info(t("branchSwitcher.pushAlreadyRunning"));
       return true;
     }
     return target === currentName && pushAlreadyActive();
@@ -1660,7 +1675,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     if (refuseUpdateWhilePushing(target)) return;
     if (target === currentName) setOpen(false);
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     if (refuseUpdateWhileHolderLeaving(target)) return;
@@ -1671,8 +1686,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       });
       toast.success(
         outcome.outcome === "up-to-date"
-          ? `${target} is already up to date with ${base}`
-          : `Updated ${target} from ${base}`,
+          ? t("branchSwitcher.alreadyUpToDate", {
+              branch: target,
+              base,
+            })
+          : t("branchSwitcher.updatedFrom", { branch: target, base }),
       );
     } catch (e) {
       if (toastBranchHeld(e)) return;
@@ -1697,18 +1715,28 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     if (!base) return;
     setOpen(false);
     const treeNote = branch.isCurrent
-      ? ` Your files are rewritten to match, so commit or stash any uncommitted changes first.`
+      ? ` ${t("branchSwitcher.resetWorkingTreeWarning")}`
       : "";
     const n = branch.upstreamAhead;
-    const alreadyThere =
+    const alreadyThere = t(
       n === 1
-        ? `The only commit on ${branch.name} is already on ${base} under a different id`
-        : `All ${n} commits on ${branch.name} are already on ${base} under different ids`;
+        ? "branchSwitcher.onlyCommitAlreadyAtBase"
+        : "branchSwitcher.commitsAlreadyAtBase",
+      { count: n, branch: branch.name, base },
+    );
     const resetIn = repoPath;
     const ok = await useConfirm.getState().ask({
-      title: `Reset ${branch.name} to ${base}?`,
-      body: `${alreadyThere}, so no unique work is lost. ${branch.name} moves to ${base}'s tip.${treeNote}`,
-      confirmLabel: `Reset to ${base}`,
+      title: t("branchSwitcher.resetBranchTitle", {
+        branch: branch.name,
+        base,
+      }),
+      body: t("branchSwitcher.resetBranchDescription", {
+        alreadyThere,
+        branch: branch.name,
+        base,
+        treeNote,
+      }),
+      confirmLabel: t("branchSwitcher.resetToBase", { branch: base }),
       confirmVariant: "destructive",
     });
     if (!ok) return;
@@ -1720,7 +1748,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     if (refuseIfSwitched(resetIn, "nothing was reset")) return;
     // Below the confirm: a promote can start while the prompt is open.
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(t("branchSwitcher.promotionBlocksCheckout"));
       return;
     }
     try {
@@ -1734,9 +1762,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
         // confirmed a destructive action, and silence there reads as "it
         // worked". Wording kept in step with the sync controls' twin.
         if (currentNameRef.current !== branch.name) {
-          toast.info(
-            "HEAD moved while the dialog was open — nothing was reset.",
-          );
+          toast.info(t("branchSwitcher.headMovedResetSkipped"));
           return;
         }
         await hardReset.mutateAsync({
@@ -1751,7 +1777,12 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           expectedLocalTip: localTip,
         });
       }
-      toast.success(`Reset ${branch.name} to ${base}`);
+      toast.success(
+        t("branchSwitcher.resetBranchSuccess", {
+          branch: branch.name,
+          base,
+        }),
+      );
     } catch (e) {
       onError(e);
     }
@@ -1777,7 +1808,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // own fork-PR detection, read live from its ref.
   function pushAlreadyActive(): boolean {
     if (publishDetectRef.current?.repo === repoPath) {
-      toast.info(BRANCH_PUSH_ACTIVE_MESSAGE);
+      toast.info(t("branchSwitcher.pushAlreadyRunning"));
       return true;
     }
     return refuseWhilePushRuns(queryClient, repoPath);
@@ -1809,7 +1840,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     const { live, away } = landedIn(publishIn);
     if (!live) {
       toast.info(
-        `Didn't publish ${branch.name}${away} — you switched repositories before the push started.`,
+        t("branchSwitcher.publishCancelledRepoChanged", {
+          branch: branch.name,
+          away,
+        }),
       );
       return;
     }
@@ -1833,8 +1867,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       });
       toast.success(
         publishing
-          ? `Published ${branch.name} to ${remote ?? "origin"}`
-          : `Pushed ${branch.name} to ${branch.upstream}`,
+          ? t("branchSwitcher.publishedTo", {
+              branch: branch.name,
+              remote: remote ?? "origin",
+            })
+          : t("branchSwitcher.pushedTo", {
+              branch: branch.name,
+              upstream: branch.upstream,
+            }),
       );
     } catch (e) {
       onError(e);
@@ -1917,7 +1957,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // The current branch's own push holds the rebases that would rewrite it, with
   // the pushing row's reset wording on the label.
   const currentPushSuffix = currentRowPushing
-    ? ` (${currentPushPaused ? branchPushHoldItemReason(true) : "pushing…"})`
+    ? ` (${currentPushPaused ? branchPushHoldItemReason(true) : pushWriteCopy("pushing")})`
     : "";
 
   // Every "there is none" reason below derives from a query whose empty answer
@@ -1948,28 +1988,28 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   };
   const headUnread = unread(
     status,
-    "Checking the current branch…",
-    `${STATUS_READ_FAILED_REASON}.`,
+    t("branchSwitcher.checkingCurrentBranch"),
+    t("branchSwitcher.statusReadFailed"),
   );
   const changesUnread = unread(
     status,
-    "Checking for uncommitted changes…",
-    `${STATUS_READ_FAILED_REASON}.`,
+    t("branchSwitcher.checkingChanges"),
+    t("branchSwitcher.statusReadFailed"),
   );
   const defaultBranchUnread = unread(
     defaultBranch,
-    "Checking the default branch…",
-    "Couldn't read the default branch.",
+    t("branchSwitcher.checkingDefaultBranch"),
+    t("branchSwitcher.defaultBranchReadFailed"),
   );
   const branchesUnread = unread(
     branches,
-    "Checking branches…",
-    "Couldn't read the branch list.",
+    t("branchSwitcher.checkingBranches"),
+    t("branchSwitcher.branchListReadFailed"),
   );
   const stashCountUnread = unread(
     stashCount,
-    "Checking for stashes…",
-    "Couldn't read the stashes.",
+    t("branchSwitcher.checkingStashes"),
+    t("branchSwitcher.stashesReadFailed"),
   );
 
   // Why each multi-condition menu row is held, arms in the order that row's own
@@ -1983,16 +2023,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       case headUnread !== null:
         return headUnread;
       case currentName !== null && isSessionBranchName(currentName):
-        return "Agent-session branches can't be renamed — renaming one breaks the session's Resume.";
+        return t("branchSwitcher.agentBranchRenameBlocked");
       default:
-        return "HEAD is detached — there's no current branch to rename.";
+        return t("branchSwitcher.noCurrentBranchToRename");
     }
   })();
   const deleteCurrentBlockedReason = (() => {
     if (!currentName)
-      return (
-        headUnread ?? "HEAD is detached — there's no current branch to delete."
-      );
+      return headUnread ?? t("branchSwitcher.noCurrentBranchToDelete");
     // Branch protection: the label already states it.
     if (isDeletionBlocked(rulesConfig, currentName)) return null;
     // A delete removes the ref the running push is sending.
@@ -2001,13 +2039,13 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   })();
   const updateFromDefaultBlockedReason = (() => {
     if (!defaultName)
-      return defaultBranchUnread ?? "This repository has no default branch.";
-    if (!currentName)
-      return headUnread ?? "HEAD is detached — there's no branch to update.";
-    if (defaultName === currentName) return `You're already on ${defaultName}.`;
+      return defaultBranchUnread ?? t("branchSwitcher.noDefaultBranch");
+    if (!currentName) return headUnread ?? t("branchSwitcher.noBranchToUpdate");
+    if (defaultName === currentName)
+      return t("branchSwitcher.alreadyOnBranch", { branch: defaultName });
     // An in-place update waits on the network lock a push holds.
     if (pushActive) return branchPushHoldReason(pushPaused);
-    if (busy) return "Another git operation is running.";
+    if (busy) return t("branchSwitcher.gitOperationRunning");
     // The remaining arm is the promotion rule, which the label already states.
     return null;
   })();
@@ -2017,57 +2055,57 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // only a row with no rule against it reports that the list isn't in yet.
   const mergeIntoCurrentBlockedReason = (() => {
     if (otherBranches.length === 0) {
-      if (!branchesUnread) return "There are no other branches to merge from.";
+      if (!branchesUnread) return t("branchSwitcher.noBranchesToMerge");
       if (canMergeIntoCurrent) return branchesUnread;
     }
     // A merge waits on the network lock a push holds.
     if (pushActive) return branchPushHoldReason(pushPaused);
     if (lockCurrent) return null; // the label says "(requires PR)"
     if (!canMergeIntoCurrent)
-      return `A branch rule doesn't allow merge commits on ${currentName}.`;
+      return t("branchSwitcher.mergeCommitBlocked", { branch: currentName });
     return null;
   })();
   const squashIntoCurrentBlockedReason = (() => {
     if (otherBranches.length === 0) {
-      if (!branchesUnread) return "There are no other branches to merge from.";
+      if (!branchesUnread) return t("branchSwitcher.noBranchesToMerge");
       if (canSquashIntoCurrent) return branchesUnread;
     }
     if (pushActive) return branchPushHoldReason(pushPaused);
     if (lockCurrent)
-      return `A branch rule requires a pull request to change ${currentName}.`;
+      return t("branchSwitcher.ruleRequiresPr", { branch: currentName });
     if (!canSquashIntoCurrent)
-      return `A branch rule doesn't allow squash merges on ${currentName}.`;
+      return t("branchSwitcher.squashMergeBlocked", { branch: currentName });
     return null;
   })();
   const rebaseCurrentBlockedReason = (() => {
     if (otherBranches.length === 0) {
-      if (!branchesUnread) return "There are no other branches to rebase onto.";
+      if (!branchesUnread) return t("branchSwitcher.noBranchesToRebase");
       if (!lockCurrent && !currentRowPushing) return branchesUnread;
     }
     if (lockCurrent)
-      return `A branch rule requires a pull request to change ${currentName}.`;
+      return t("branchSwitcher.ruleRequiresPr", { branch: currentName });
     return null;
   })();
   const changeBaseBlockedReason = (() => {
-    if (!currentName)
-      return headUnread ?? "HEAD is detached — there's no branch to rebase.";
+    if (!currentName) return headUnread ?? t("branchSwitcher.noBranchToRebase");
     if (otherBranches.length < 2) {
       if (!branchesUnread)
-        return "Changing the base needs at least two other branches.";
+        return t("branchSwitcher.changeBaseNeedsTwoBranches");
       // `busy` and the push join the rule arms here: each is true right now,
       // whatever the branch count turns out to be.
       if (!lockCurrent && !busy && !currentRowPushing) return branchesUnread;
     }
     if (lockCurrent)
-      return `A branch rule requires a pull request to change ${currentName}.`;
-    if (busy) return "Another git operation is running.";
+      return t("branchSwitcher.ruleRequiresPr", { branch: currentName });
+    if (busy) return t("branchSwitcher.gitOperationRunning");
     return null;
   })();
   const noChangesBlockedReason =
-    changesUnread ?? "There are no uncommitted changes.";
+    changesUnread ?? t("branchSwitcher.noUncommittedChanges");
   const popStashBlockedReason =
-    stashCountUnread ?? "There are no stashes to pop.";
-  const viewStashesBlockedReason = stashCountUnread ?? "There are no stashes.";
+    stashCountUnread ?? t("branchSwitcher.noStashesToPop");
+  const viewStashesBlockedReason =
+    stashCountUnread ?? t("branchSwitcher.noStashes");
 
   // Hotkey handlers reuse the menu's own flows, so every gate (clean tree,
   // stash count, picker availability) and confirm dialog applies equally.
@@ -2093,7 +2131,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // names its branch explicitly.
   const pushHotkeyChecking = useRef(false);
   function refuseWhileListCatchesUp(pushIn: string) {
-    toast.info("The branch list is catching up — try again in a moment.");
+    toast.info(t("branchSwitcher.branchListCatchingUp"));
     void queryClient.invalidateQueries({
       queryKey: repoKeys.branches(pushIn),
     });
@@ -2114,7 +2152,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // in-flight poll, which may have been spawned before the press.
       fresh = (await repoStatusOptions(pushIn).queryFn()).branch;
     } catch {
-      toast.info("Couldn't confirm the current branch — nothing was pushed.");
+      toast.info(t("branchSwitcher.currentBranchUnconfirmed"));
       return;
     } finally {
       pushHotkeyChecking.current = false;
@@ -2151,7 +2189,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // before the press.
       freshRows = await gitBranches(pushIn);
     } catch {
-      toast.info("Couldn't confirm the branch — nothing was pushed.");
+      toast.info(t("branchSwitcher.branchUnconfirmed"));
       return;
     } finally {
       pushHotkeyChecking.current = false;
@@ -2193,8 +2231,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // branch, which this origin-scoped shortcut never decides for the user.
       toast.info(
         fromRow
-          ? `${branch.name} tracks ${branch.upstream}, which has a different name — push it from its context menu`
-          : `${branch.name} tracks ${branch.upstream}, which has a different name — use the sync bar's Push instead`,
+          ? t("branchSwitcher.upstreamNameDiffersContextMenu", {
+              branch: branch.name,
+              upstream: branch.upstream,
+            })
+          : t("branchSwitcher.upstreamNameDiffersSyncBar", {
+              branch: branch.name,
+              upstream: branch.upstream,
+            }),
       );
     } else if (
       tracksOrigin &&
@@ -2213,28 +2257,45 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       // Genuinely diverged: commits on BOTH sides. Behind-only is not
       // divergence — it gets its own arm below.
       toast.info(
-        `${branch.name} has diverged — update it from its upstream first`,
+        t("branchSwitcher.branchDivergedUpdateFirst", {
+          branch: branch.name,
+        }),
       );
     } else if (tracksOrigin && branch.upstreamBehind > 0) {
       // Behind only: nothing local to push; the remedy is a pull, so say so.
-      toast.info(`${branch.name} is behind ${branch.upstream} — pull first`);
+      toast.info(
+        t("branchSwitcher.branchBehindPullFirst", {
+          branch: branch.name,
+          upstream: branch.upstream,
+        }),
+      );
     } else if (tracksOrigin) {
-      toast.info(`${branch.name} has nothing to push`);
+      toast.info(t("branchSwitcher.nothingToPush", { branch: branch.name }));
     } else if (branch.upstream && !branch.upstreamRemote) {
       // Tracks a LOCAL branch (`git branch --track x main`):
       // `%(upstream:remotename)` is empty → null upstreamRemote. There's
       // nothing remote-related to say — and the context menu is the same
       // authority (it offers neither Push nor Publish for these).
       toast.info(
-        `${branch.name} tracks a local branch (${branch.upstream}), not a remote`,
+        t("branchSwitcher.tracksLocalBranch", {
+          branch: branch.name,
+          upstream: branch.upstream,
+        }),
       );
     } else if (tracksOtherKnownRemote) {
       toast.info(
-        `${branch.name} tracks ${branch.upstreamRemote} — push it from its context menu`,
+        t("branchSwitcher.pushFromContextMenu", {
+          branch: branch.name,
+          remote: branch.upstreamRemote,
+        }),
       );
     } else {
       // Tracked, but the upstream's remote is no longer configured.
-      toast.info(`${branch.name} tracks a remote that's no longer configured`);
+      toast.info(
+        t("branchSwitcher.remoteNoLongerConfigured", {
+          branch: branch.name,
+        }),
+      );
     }
   }
   useHotkeyAction(
@@ -2246,14 +2307,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       if (open && activeBranch) {
         const row = branches.data?.find((b) => b.name === activeBranch);
         if (!row) {
-          toast.info("Only local branches can be pushed from here");
+          toast.info(t("branchSwitcher.onlyLocalBranchesCanPush"));
           return;
         }
         void pushListedBranchToOrigin(row);
         return;
       }
       if (!currentBranch) {
-        toast.info("No branch to push");
+        toast.info(t("branchSwitcher.noBranchToPush"));
         return;
       }
       void pushCurrentBranchToOrigin(currentBranch);
@@ -2271,7 +2332,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
   // removes the ref it is sending.
   function refuseWhileCurrentPushes(): boolean {
     if (!currentRowPushing) return false;
-    toast.info(BRANCH_PUSH_ACTIVE_MESSAGE);
+    toast.info(t("branchSwitcher.pushAlreadyRunning"));
     return true;
   }
   useHotkeyAction(
@@ -2344,10 +2405,16 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
         // keeps them.
         const remedy =
           status.localOnly === 0
-            ? `Open the branch menu and use the ${row.name} row's reset instead.`
-            : `Switch to ${row.name} and use Pull with rebase — it keeps the ${status.localOnly} commit${status.localOnly === 1 ? "" : "s"} only ${row.name} has.`;
+            ? t("branchSwitcher.resetFromBranchMenu", { branch: row.name })
+            : t("branchSwitcher.pullWithRebaseKeepsLocal", {
+                branch: row.name,
+                count: status.localOnly,
+              });
         toast.warning(
-          `${row.upstream} already carries ${row.name}'s changes under different ids — merging it in would duplicate them.`,
+          t("branchSwitcher.rewriteDuplicateWarning", {
+            upstream: row.upstream,
+            branch: row.name,
+          }),
           { description: remedy, duration: 10000 },
         );
         return;
@@ -2432,11 +2499,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       if (useUiStore.getState().repoPath !== repoPath || !noNewerOpen()) return;
       const main = wts.find((w) => w.isMain);
       if (!main) {
-        toast.error("Couldn't find the main workspace for this repository.");
+        toast.error(t("branchSwitcher.mainWorkspaceNotFound"));
         return;
       }
       if (normPath(main.path) === normPath(repoPath)) {
-        toast.info("Already in the main workspace.");
+        toast.info(t("branchSwitcher.alreadyInMainWorkspace"));
         return;
       }
       void openWorktree(main.path);
@@ -2451,24 +2518,22 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       if (useUiStore.getState().repoPath !== repoPath) return;
       const here = wts.find((w) => normPath(w.path) === normPath(repoPath));
       if (!here || here.isMain) {
-        toast.info(
-          "Open a linked worktree to promote its branch to the main workspace.",
-        );
+        toast.info(t("branchSwitcher.openLinkedWorktreeToPromote"));
         return;
       }
       if (here.isDetached || !here.branch) {
-        toast.info("This worktree has no branch to promote.");
+        toast.info(t("branchSwitcher.noBranchToPromote"));
         return;
       }
       if (here.isLocked) {
-        toast.info("This worktree is locked — unlock it before promoting.");
+        toast.info(t("branchSwitcher.unlockBeforePromoting"));
         return;
       }
       // Only a promote can have claimed the worktree you're standing in: no
       // surface offers to delete the active checkout, and a promote marks its
       // removal under the main workspace's key, never this one's.
       if (isWorktreePromoting(here.path)) {
-        toast.info(WORKTREE_PROMOTING_MESSAGE);
+        toast.info(t("branchSwitcher.worktreePromoting"));
         return;
       }
       setPromoteTarget(here);
@@ -2496,21 +2561,45 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // The push item's own hold: its parked copy says the push waits offline.
     const rowPushReason = pendingItemReason(
       rowPush?.paused ?? false,
-      "pushing…",
+      pushWriteCopy("pushing"),
+      syncControlCopy("offlineItemReason"),
     );
     // Every other item it holds: a parked push is what waits, never that item.
     const rowPushHeldReason = rowPush?.paused
       ? branchPushHoldItemReason(true)
-      : "pushing…";
+      : pushWriteCopy("pushing");
     const pushRunningReason = branchPushHoldItemReason(pushPaused);
     const rowSpinnerLabel = (() => {
       switch (true) {
         case rowUpdating:
-          return `Updating from ${rowUpdateBase}`;
+          return t("branchSwitcher.updatingFrom", {
+            branch: rowUpdateBase,
+          });
         case rowDetecting:
-          return branchPublishLabel(publishDetect?.remote ?? null);
+          return publishDetect?.remote
+            ? t("branchSwitcher.publishingTo", {
+                remote: publishDetect.remote,
+              })
+            : t("branchSwitcher.publishingBranch");
         case rowPush !== undefined:
-          return branchPushLabel(rowPush, branch);
+          if (rowPush.remote !== null && rowPush.remoteBranch !== null) {
+            return t("branchSwitcher.pushingTo", {
+              destination: `${rowPush.remote}/${rowPush.remoteBranch}`,
+            });
+          }
+          if (
+            rowPush.setUpstream ||
+            branch.upstream === null ||
+            branch.upstreamGone
+          ) {
+            return rowPush.remote
+              ? t("branchSwitcher.publishingTo", { remote: rowPush.remote })
+              : t("branchSwitcher.publishingBranch");
+          }
+          if (rowPush.branch === null) return t("branchSwitcher.pushing");
+          return t("branchSwitcher.pushingTo", {
+            destination: branch.upstream,
+          });
         default:
           return null;
       }
@@ -2519,7 +2608,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
     // branch that is somewhere in use: the one you're on, the default, and one
     // another worktree has checked out. Unarchiving is never refused — an
     // archived branch can be checked out, and this is its only way back.
-    const archiveLabel = branch.archived ? "Unarchive" : "Archive";
+    const archiveLabel = branch.archived
+      ? t("branchSwitcher.unarchive")
+      : t("branchSwitcher.archive");
     // The worktree (other than the active checkout) this branch occupies, when
     // any — the row's whole worktree menu group hangs off it, and it narrows the
     // object those items act on.
@@ -2709,7 +2800,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   {branch.name}
                   {branch.name === defaultName && (
                     <span className="ml-1.5 text-[10px] text-muted-foreground">
-                      default
+                      {t("branchSwitcher.default")}
                     </span>
                   )}
                 </span>
@@ -2728,8 +2819,13 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       tabIndex={0}
                       title={
                         isLocal
-                          ? `${PR_STATE_LABEL[pr.state]} local pull request — open in Pull Requests`
-                          : `${PR_STATE_LABEL[pr.state]} pull request ${pr.label} — open in Pull Requests`
+                          ? t("branchSwitcher.localPrHint", {
+                              status: t(`branchSwitcher.prStatus.${pr.state}`),
+                            })
+                          : t("branchSwitcher.prHint", {
+                              status: t(`branchSwitcher.prStatus.${pr.state}`),
+                              number: pr.label,
+                            })
                       }
                       className={cn(
                         "flex shrink-0 cursor-pointer items-center gap-0.5 text-[11px] tabular-nums hover:underline",
@@ -2782,7 +2878,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       branch.upstreamRemote &&
                       !remoteNames.includes(branch.upstreamRemote)
                     ) {
-                      const label = `Tracks ${branch.upstream}, but that remote is no longer configured.`;
+                      const label = t("branchSwitcher.remoteUnconfigured", {
+                        upstream: branch.upstream,
+                      });
                       return (
                         <span
                           role="img"
@@ -2804,10 +2902,21 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       }
                       const parts: string[] = [];
                       if (branch.upstreamAhead > 0)
-                        parts.push(`${branch.upstreamAhead} to push`);
+                        parts.push(
+                          t("branchSwitcher.aheadToPush", {
+                            count: branch.upstreamAhead,
+                          }),
+                        );
                       if (branch.upstreamBehind > 0)
-                        parts.push(`${branch.upstreamBehind} to pull`);
-                      const label = `${parts.join(", ")} — vs ${branch.upstream}`;
+                        parts.push(
+                          t("branchSwitcher.behindToPull", {
+                            count: branch.upstreamBehind,
+                          }),
+                        );
+                      const label = t("branchSwitcher.upstreamStatus", {
+                        status: parts.join(", "),
+                        upstream: branch.upstream,
+                      });
                       return (
                         <span
                           // No text color: inherits the row foreground (a step
@@ -2837,7 +2946,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       );
                     }
                     if (branch.upstreamGone) {
-                      const label = `Upstream ${branch.upstream} was deleted on the remote — likely merged. ${secondaryClickCapitalized} to publish again or delete.`;
+                      const label = t("branchSwitcher.upstreamDeleted", {
+                        upstream: branch.upstream,
+                        secondaryClick: t("branchSwitcher.secondaryClick"),
+                      });
                       return (
                         <span
                           role="img"
@@ -2850,7 +2962,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       );
                     }
                     // !branch.upstream
-                    const publishHint = `Local only — never published. ${secondaryClickCapitalized} to publish.`;
+                    const publishHint = t("branchSwitcher.localOnlyHint", {
+                      secondaryClick: t("branchSwitcher.secondaryClick"),
+                    });
                     return (
                       <span
                         role="img"
@@ -2868,14 +2982,25 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     const parts: string[] = [];
                     if (div.ahead > 0)
                       parts.push(
-                        `${div.ahead} commit${div.ahead === 1 ? "" : "s"} ahead of ${defaultName}`,
+                        t("branchSwitcher.commitsAhead", {
+                          count: div.ahead,
+                          branch: defaultName,
+                        }),
                       );
                     if (div.behind > 0)
                       // Behind-only must still name the base: role="img" hides the
                       // visible {defaultName} child from AT, so the label is all
                       // a reader gets. Skipped when the ahead part named it already.
                       parts.push(
-                        `${div.behind} commit${div.behind === 1 ? "" : "s"} behind${div.ahead > 0 ? "" : ` ${defaultName}`}`,
+                        t("branchSwitcher.commitsBehind", {
+                          count: div.behind,
+                          branch:
+                            div.ahead > 0
+                              ? ""
+                              : t("branchSwitcher.ofBranch", {
+                                  branch: defaultName,
+                                }),
+                        }),
                       );
                     const label = parts.join(", ");
                     return (
@@ -2936,8 +3061,15 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   }}
                 >
                   {rowPromotion
-                    ? `Update from ${defaultName} (promotion branch)`
-                    : wtLabel(`Update from ${defaultName}`, updateHeldReason)}
+                    ? t("branchSwitcher.updateFromPromotion", {
+                        branch: defaultName,
+                      })
+                    : wtLabel(
+                        t("branchSwitcher.updateFrom", {
+                          branch: defaultName,
+                        }),
+                        updateHeldReason,
+                      )}
                 </ContextMenuItem>
               )}
               {/* Pull the branch's own upstream in without switching — the star
@@ -2955,7 +3087,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   if (rowProbePending) {
                     return (
                       <ContextMenuItem disabled>
-                        Update from {base} (checking the remote…)
+                        {t("branchSwitcher.checkingRemoteUpdate", {
+                          branch: base,
+                        })}
                       </ContextMenuItem>
                     );
                   }
@@ -2984,15 +3118,19 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                           )
                         }
                       >
-                        Reset to {base}…{resetSuffix}
+                        {t("branchSwitcher.resetTo", {
+                          branch: base,
+                          suffix: resetSuffix,
+                        })}
                       </ContextMenuItem>
                     );
                   }
                   if (rowMixedRewrite) {
                     return (
                       <ContextMenuItem disabled>
-                        Update from {base} ({base} already carries these changes
-                        under different ids — a merge would duplicate them)
+                        {t("branchSwitcher.upstreamAlreadyHasChanges", {
+                          branch: base,
+                        })}
                       </ContextMenuItem>
                     );
                   }
@@ -3005,7 +3143,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                         void doUpdateFromUpstream(branch.name, base);
                       }}
                     >
-                      {wtLabel(`Update from ${base}`, updateHeldReason)}
+                      {wtLabel(
+                        t("branchSwitcher.updateFrom", { branch: base }),
+                        updateHeldReason,
+                      )}
                     </ContextMenuItem>
                   );
                 })()}
@@ -3026,8 +3167,13 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   }}
                 >
                   {branch.upstreamBehind > 0
-                    ? `Push to ${branch.upstream} (diverged)`
-                    : `Push to ${branch.upstream}${pushItemSuffix}`}
+                    ? t("branchSwitcher.pushToDiverged", {
+                        upstream: branch.upstream,
+                      })
+                    : t("branchSwitcher.pushTo", {
+                        upstream: branch.upstream,
+                        suffix: pushItemSuffix,
+                      })}
                 </ContextMenuItem>
               )}
               {/* Publish an unpushed / upstream-deleted branch: one remote → a
@@ -3044,8 +3190,13 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   }}
                 >
                   {publishRemotes[0] === "origin"
-                    ? `Publish branch${pushItemSuffix}`
-                    : `Publish to ${publishRemotes[0]}${pushItemSuffix}`}
+                    ? t("branchSwitcher.publishBranch", {
+                        suffix: pushItemSuffix,
+                      })
+                    : t("branchSwitcher.publishTo", {
+                        remote: publishRemotes[0],
+                        suffix: pushItemSuffix,
+                      })}
                 </ContextMenuItem>
               ) : (
                 publishRemotes.map((r) => (
@@ -3071,11 +3222,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
             disabled={rowUpdating || rowPushing}
             onClick={() => openRename(branch.name)}
           >
-            Rename branch…
+            {t("branchSwitcher.renameBranch")}
             {(() => {
               switch (true) {
                 case rowUpdating:
-                  return " (updating…)";
+                  return ` (${t("branchSwitcher.updating")})`;
                 case rowPushing:
                   return ` (${rowPushHeldReason})`;
                 default:
@@ -3084,9 +3235,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
             })()}
           </ContextMenuItem>
           <ContextMenuItem
-            onClick={() => copyText(branch.name, "Branch name copied")}
+            onClick={() =>
+              copyText(branch.name, t("branchSwitcher.branchNameCopied"))
+            }
           >
-            Copy branch name
+            {t("branchSwitcher.copyBranchName")}
           </ContextMenuItem>
           <ContextMenuItem
             className={MENU_HELD_ROW_CLASS}
@@ -3095,7 +3248,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           >
             {archiveBlockedReason === null
               ? archiveLabel
-              : `${archiveLabel} (${archiveBlockedReason})`}
+              : t("branchSwitcher.archiveHeld", {
+                  action: archiveLabel,
+                  reason: archiveBlockedReason,
+                })}
           </ContextMenuItem>
           <ContextMenuSeparator />
           {rowWorktree && (
@@ -3113,9 +3269,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
               </ContextMenuItem>
               {/* Copying a path acts on nothing, so a removal doesn't block it. */}
               <ContextMenuItem
-                onClick={() => copyText(rowWorktree.path, "Path copied")}
+                onClick={() =>
+                  copyText(rowWorktree.path, t("branchSwitcher.pathCopied"))
+                }
               >
-                Copy path
+                {t("branchSwitcher.copyPath")}
               </ContextMenuItem>
               <ContextMenuItem
                 // git worktree move refuses the main worktree and a locked one;
@@ -3131,7 +3289,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   setRenameWorktreeTarget(rowWorktree);
                 }}
               >
-                {wtLabel("Rename worktree…", renameWorktreeBlockedReason)}
+                {wtLabel(
+                  t("branchSwitcher.renameWorktree"),
+                  renameWorktreeBlockedReason,
+                )}
               </ContextMenuItem>
               {!rowWorktree.isMain &&
                 (rowWorktree.isLocked ? (
@@ -3152,7 +3313,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       void doUnlockWorktree(rowWorktree.path);
                     }}
                   >
-                    {wtLabel("Unlock")}
+                    {wtLabel(t("branchSwitcher.unlock"))}
                   </ContextMenuItem>
                 ) : (
                   <ContextMenuItem
@@ -3162,7 +3323,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       setLockWorktreeTarget(rowWorktree);
                     }}
                   >
-                    {wtLabel("Lock…")}
+                    {wtLabel(t("branchSwitcher.lock"))}
                   </ContextMenuItem>
                 ))}
               {/* Promote moves this worktree's branch into the main workspace,
@@ -3177,7 +3338,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setPromoteTarget(rowWorktree);
                   }}
                 >
-                  {wtLabel("Promote to main workspace…", promoteBlockedReason)}
+                  {wtLabel(
+                    t("branchSwitcher.promoteWorktree"),
+                    promoteBlockedReason,
+                  )}
                 </ContextMenuItem>
               )}
               <ContextMenuItem
@@ -3190,7 +3354,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   setRemoveWorktreeTarget(rowWorktree);
                 }}
               >
-                {wtLabel("Delete worktree…", deleteWorktreeBlockedReason)}
+                {wtLabel(
+                  t("branchSwitcher.deleteWorktree"),
+                  deleteWorktreeBlockedReason,
+                )}
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>
@@ -3206,13 +3373,17 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
             {(() => {
               switch (true) {
                 case deletionBlocked:
-                  return "Delete branch… (protected)";
+                  return t("branchSwitcher.deleteBranchProtected");
                 case inWorktree:
-                  return `Delete branch… (${rowCopy.held})`;
+                  return t("branchSwitcher.deleteBranchHeld", {
+                    reason: rowCopy.held,
+                  });
                 case rowPushing:
-                  return `Delete branch… (${rowPushHeldReason})`;
+                  return t("branchSwitcher.deleteBranchHeld", {
+                    reason: rowPushHeldReason,
+                  });
                 default:
-                  return "Delete branch…";
+                  return t("branchSwitcher.deleteBranch");
               }
             })()}
           </ContextMenuItem>
@@ -3234,7 +3405,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
             <button
               type="button"
               data-row={branch.name}
-              title={`Check out ${branch.name} — creates a local branch tracking ${branch.remote}/${branch.name}`}
+              title={t("branchSwitcher.checkoutRemoteHint", {
+                branch: branch.name,
+                remoteBranch: `${branch.remote}/${branch.name}`,
+              })}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none"
               onFocus={() => focusRow(branch.name)}
               onClick={() => void switchTo(branch.name, branch.remote)}
@@ -3258,12 +3432,14 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
           <ContextMenuItem
             onClick={() => void switchTo(branch.name, branch.remote)}
           >
-            Check out
+            {t("branchSwitcher.checkout")}
           </ContextMenuItem>
           <ContextMenuItem
-            onClick={() => copyText(branch.name, "Branch name copied")}
+            onClick={() =>
+              copyText(branch.name, t("branchSwitcher.branchNameCopied"))
+            }
           >
-            Copy branch name
+            {t("branchSwitcher.copyBranchName")}
           </ContextMenuItem>
           <ContextMenuSeparator />
           {/* The Remote section dedupes a name across remotes to one row, so
@@ -3287,11 +3463,19 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
             {(() => {
               switch (true) {
                 case deletionBlocked:
-                  return `Delete on ${branch.remote}… (protected)`;
+                  return t("branchSwitcher.deleteOnRemoteProtected", {
+                    remote: branch.remote,
+                  });
                 case pushActive:
-                  return `Delete on ${branch.remote}… (${branchPushHoldItemReason(pushPaused)})`;
+                  return t("branchSwitcher.deleteOnRemoteHeld", {
+                    remote: branch.remote,
+                    reason: branchPushHoldItemReason(pushPaused),
+                  });
                 default:
-                  return `Delete on ${branch.remote}…${offlineSuffix}`;
+                  return t("branchSwitcher.deleteOnRemote", {
+                    remote: branch.remote,
+                    suffix: offlineSuffix,
+                  });
               }
             })()}
           </ContextMenuItem>
@@ -3340,16 +3524,18 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
               reason={(() => {
                 switch (true) {
                   case amending:
-                    return "Finish or stop amending to switch branches";
+                    return t("branchSwitcher.finishAmendingToSwitch");
                   case busy:
-                    return "Another git operation is running.";
+                    return t("branchSwitcher.gitOperationRunning");
                   default:
                     return undefined;
                 }
               })()}
               // Mouse-only by nature; the sr-only text and the popover's
               // notice carry the same reason to keyboard, touch and AT.
-              title={failedRead ? STATUS_READ_FAILED_REASON : undefined}
+              title={
+                failedRead ? t("branchSwitcher.statusReadFailed") : undefined
+              }
               // overflow-hidden clips the box the shrink cascade squeezes; the
               // shrink undoes the vendored Button's own shrink-0, or nothing
               // truncates — without either, the icons spill out both sides
@@ -3388,7 +3574,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                           —
                         </span>
                         <span className="sr-only">
-                          {STATUS_READ_FAILED_REASON}
+                          {t("branchSwitcher.statusReadFailed")}
                         </span>
                       </>
                     );
@@ -3403,7 +3589,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                           aria-hidden
                           className="inline-block h-3 w-[9ch] shrink-0 animate-pulse rounded-none bg-muted"
                         />
-                        <span className="sr-only">{STATUS_PENDING_REASON}</span>
+                        <span className="sr-only">
+                          {t("branchSwitcher.checkingCurrentBranch")}
+                        </span>
                       </>
                     );
                 }
@@ -3416,7 +3604,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   variant="secondary"
                   className="ml-1 shrink-0 @max-4xl/repo-header:hidden"
                 >
-                  detached
+                  {t("branchSwitcher.detached")}
                 </Badge>
               )}
               <CaretDownIcon data-icon="inline-end" />
@@ -3454,7 +3642,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
               {failedRead && (
                 <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-[11px]">
                   <span className="min-w-0 flex-1 text-muted-foreground">
-                    {STATUS_READ_FAILED_REASON}.
+                    {t("branchSwitcher.statusReadFailed")}.
                   </span>
                 </div>
               )}
@@ -3462,11 +3650,11 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                 <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-[11px]">
                   <TreeStructureIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 text-muted-foreground">
-                    In worktree{" "}
+                    {t("branchSwitcher.inWorktree")}{" "}
                     <span className="font-medium text-foreground">
                       {currentWorktreeName}
                     </span>{" "}
-                    — a checkout lands here
+                    — {t("branchSwitcher.checkoutLandsHere")}
                   </span>
                   {mainWorktree && (
                     <button
@@ -3477,7 +3665,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                         void openWorktree(mainWorktree.path);
                       }}
                     >
-                      Open main workspace
+                      {t("branchSwitcher.openMainWorkspace")}
                     </button>
                   )}
                 </div>
@@ -3486,7 +3674,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                 <Input
                   value={branchFilter}
                   onChange={(e) => setBranchFilter(e.target.value)}
-                  placeholder="Filter branches"
+                  placeholder={t("branchSwitcher.filterBranches")}
                   className="h-7"
                   autoComplete="off"
                 />
@@ -3497,8 +3685,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   remoteOnly.length === 0 && (
                     <p className="px-3 py-4 text-center text-xs text-muted-foreground">
                       {branchFilter.trim()
-                        ? `No branches match "${branchFilter.trim()}"`
-                        : "No branches"}
+                        ? t("branchSwitcher.noBranchesMatch", {
+                            filter: branchFilter.trim(),
+                          })
+                        : t("branchSwitcher.noBranches")}
                     </p>
                   )}
                 {visibleBranches.map(renderBranchRow)}
@@ -3515,7 +3705,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                         }`}
                         weight="bold"
                       />
-                      Archived ({archivedBranches.length})
+                      {t("branchSwitcher.archivedCount", {
+                        count: archivedBranches.length,
+                      })}
                     </button>
                     {showArchived && archivedBranches.map(renderBranchRow)}
                   </>
@@ -3526,7 +3718,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                       type="button"
                       className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                       onClick={() => setShowRemote((v) => !v)}
-                      title="Branches on your remotes you haven't checked out yet"
+                      title={t("branchSwitcher.remoteBranchesHint")}
                     >
                       <CaretDownIcon
                         className={`size-3 transition-transform ${
@@ -3534,14 +3726,18 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                         }`}
                         weight="bold"
                       />
-                      Remote ({remoteOnly.length})
+                      {t("branchSwitcher.remoteCount", {
+                        count: remoteOnly.length,
+                      })}
                     </button>
                     {showRemote && remoteOnly.map(renderRemoteRow)}
                   </>
                 )}
               </div>
               <div className="border-t py-1">
-                <MenuRow onClick={openCreate}>New branch…</MenuRow>
+                <MenuRow onClick={openCreate}>
+                  {t("branchSwitcher.newBranch")}
+                </MenuRow>
                 <MenuRow
                   disabled={
                     currentRowPushing ||
@@ -3555,7 +3751,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     openRename(currentName);
                   }}
                 >
-                  Rename current branch…
+                  {t("branchSwitcher.renameCurrent")}
                 </MenuRow>
                 <MenuRow
                   disabled={
@@ -3571,8 +3767,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   }}
                 >
                   {currentName && isDeletionBlocked(rulesConfig, currentName)
-                    ? "Delete current branch… (protected)"
-                    : "Delete current branch…"}
+                    ? t("branchSwitcher.deleteCurrentProtected")
+                    : t("branchSwitcher.deleteCurrent")}
                 </MenuRow>
                 <MenuRow
                   disabled={pushActive}
@@ -3582,7 +3778,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setCleanupOpen(true);
                   }}
                 >
-                  Clean up branches…
+                  {t("branchSwitcher.cleanUpBranches")}
                 </MenuRow>
                 {/* Dispatched, not owned: RepositoryMenu holds the one
                     WorktreesDialog instance and the one "worktrees" handler, so
@@ -3596,10 +3792,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   onClick={() => {
                     setOpen(false);
                     if (!dispatchAction("worktrees"))
-                      toast.error("Couldn't open the worktree manager.");
+                      toast.error(t("branchSwitcher.openWorktreeManagerError"));
                   }}
                 >
-                  Worktrees
+                  {t("branchSwitcher.worktrees")}
                   {linkedWorktreeCount > 0 ? ` (${linkedWorktreeCount})` : ""}…
                 </MenuRow>
               </div>
@@ -3612,7 +3808,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setDiscardAllIn(repoPath);
                   }}
                 >
-                  Discard all changes…
+                  {t("branchSwitcher.discardAllChanges")}
                 </MenuRow>
                 <MenuRow
                   disabled={!hasChanges}
@@ -3622,7 +3818,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setStashAllIn(repoPath);
                   }}
                 >
-                  Stash all changes…
+                  {t("branchSwitcher.stashAllChanges")}
                 </MenuRow>
                 <MenuRow
                   disabled={stashes === 0}
@@ -3632,7 +3828,10 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setStashPopIn(repoPath);
                   }}
                 >
-                  Pop latest stash{stashes > 0 ? ` (${stashes})` : ""}…
+                  {t("branchSwitcher.popLatestStash", {
+                    count: stashes,
+                    suffix: stashes > 0 ? ` (${stashes})` : "",
+                  })}
                 </MenuRow>
                 <MenuRow
                   disabled={stashes === 0}
@@ -3643,7 +3842,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setStashesOpen(true);
                   }}
                 >
-                  View stashes{stashes > 0 ? ` (${stashes})` : ""}…
+                  {t("branchSwitcher.viewStashes", {
+                    suffix: stashes > 0 ? ` (${stashes})` : "",
+                  })}
                 </MenuRow>
                 {/* Not gated on stash count — orphaned work commonly exists
                     with zero live stashes. */}
@@ -3654,7 +3855,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setStashesOpen(true);
                   }}
                 >
-                  Recover lost work…
+                  {t("branchSwitcher.recoverLostWork")}
                 </MenuRow>
                 <MenuRow
                   onClick={() => {
@@ -3662,7 +3863,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     setOpHistoryOpen(true);
                   }}
                 >
-                  Operation history…
+                  {t("branchSwitcher.operationHistory")}
                 </MenuRow>
               </div>
               <div className="border-t py-1">
@@ -3680,8 +3881,12 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                     if (currentName) void doUpdateFromDefault(currentName);
                   }}
                 >
-                  Update from {defaultName ?? "default branch"}
-                  {currentPromotion ? " (promotion branch)" : ""}
+                  {t("branchSwitcher.updateFrom", {
+                    branch: defaultName ?? t("branchSwitcher.defaultBranch"),
+                  })}
+                  {currentPromotion
+                    ? ` (${t("branchSwitcher.promotionBranch")})`
+                    : ""}
                 </MenuRow>
                 <MenuRow
                   disabled={
@@ -3693,8 +3898,8 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   onClick={() => openPicker("merge")}
                 >
                   {lockCurrent
-                    ? "Merge into current branch… (requires PR)"
-                    : "Merge into current branch…"}
+                    ? t("branchSwitcher.mergeIntoCurrentRequiresPr")
+                    : t("branchSwitcher.mergeIntoCurrent")}
                 </MenuRow>
                 <MenuRow
                   disabled={
@@ -3705,7 +3910,7 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   reason={squashIntoCurrentBlockedReason}
                   onClick={() => openPicker("squash")}
                 >
-                  Squash and merge into current branch…
+                  {t("branchSwitcher.squashMergeIntoCurrent")}
                 </MenuRow>
                 <MenuRow
                   disabled={
@@ -3716,7 +3921,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   reason={rebaseCurrentBlockedReason}
                   onClick={() => openPicker("rebase")}
                 >
-                  Rebase current branch…{currentPushSuffix}
+                  {t("branchSwitcher.rebaseCurrent", {
+                    suffix: currentPushSuffix,
+                  })}
                 </MenuRow>
                 <MenuRow
                   disabled={
@@ -3729,7 +3936,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
                   reason={changeBaseBlockedReason}
                   onClick={openRebaseOnto}
                 >
-                  Change base…{currentPushSuffix}
+                  {t("branchSwitcher.changeBase", {
+                    suffix: currentPushSuffix,
+                  })}
                 </MenuRow>
               </div>
             </Popover.Popup>
@@ -3810,16 +4019,15 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       <ConfirmDialog
         open={deleteTarget !== null}
         onCancel={closeDelete}
-        title="Delete branch?"
-        body={
-          <>
-            Deletes {shownDeleteTarget} locally, including commits that exist
-            only on it.
-            {shownDeleteTarget === currentName &&
-              " You'll be switched to another branch first."}
-          </>
-        }
-        confirmLabel="Delete"
+        title={t("branchSwitcher.deleteBranchTitle")}
+        body={t("branchSwitcher.deleteBranchDescription", {
+          branch: shownDeleteTarget,
+          switchFirst:
+            shownDeleteTarget === currentName
+              ? t("branchSwitcher.deleteCurrentSwitchNote")
+              : "",
+        })}
+        confirmLabel={t("branchSwitcher.delete")}
         confirmVariant="destructive"
         pending={deleteBranch.isPending || checkout.isPending}
         onConfirm={doDelete}
@@ -3830,24 +4038,22 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
         onCancel={() => setRemoteDeleteTarget(null)}
         title={
           shownRemoteDeleteTarget
-            ? `Delete branch on ${shownRemoteDeleteTarget.remote}?`
-            : "Delete branch on remote?"
+            ? t("branchSwitcher.deleteRemoteBranchTitle", {
+                remote: shownRemoteDeleteTarget.remote,
+              })
+            : t("branchSwitcher.deleteBranchOnRemoteTitle")
         }
         body={
           shownRemoteDeleteTarget ? (
             <>
-              Deletes{" "}
-              <span className="font-mono">{shownRemoteDeleteTarget.name}</span>{" "}
-              from{" "}
-              <span className="font-mono">
-                {shownRemoteDeleteTarget.remote}
-              </span>{" "}
-              for everyone using that remote. This is a server-side delete and
-              can't be undone from the app.
+              {t("branchSwitcher.deleteRemoteBranchDescription", {
+                branch: shownRemoteDeleteTarget.name,
+                remote: shownRemoteDeleteTarget.remote,
+              })}
             </>
           ) : null
         }
-        confirmLabel="Delete"
+        confirmLabel={t("branchSwitcher.delete")}
         confirmVariant="destructive"
         pending={deleteRemoteBranch.isPending}
         // A remote delete is a push: it waits out a running one, as an offline
@@ -3879,9 +4085,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       <ConfirmDialog
         open={discardAllIn !== null}
         onCancel={() => setDiscardAllIn(null)}
-        title="Discard all changes?"
-        body="All uncommitted changes are discarded: tracked files reset to the last commit, untracked files move to the recycle bin."
-        confirmLabel="Discard all"
+        title={t("changes.discardAllTitle")}
+        body={t("changes.discardAllDescription", { reservedNote: "" })}
+        confirmLabel={t("changes.discardAll")}
         confirmVariant="destructive"
         pending={discardAll.isPending}
         onConfirm={doDiscardAll}
@@ -3890,11 +4096,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       <ConfirmDialog
         open={stashAllIn !== null}
         onCancel={() => setStashAllIn(null)}
-        title="Stash all changes?"
-        body={
-          'Sets your working tree back to the last commit and saves all uncommitted changes — including untracked files — to the stash. "Pop latest stash" restores them.'
-        }
-        confirmLabel="Stash changes"
+        title={t("changes.stashAllTitle")}
+        body={t("changes.stashAllDescription")}
+        confirmLabel={t("changes.stashAll")}
         pending={stashAll.isPending}
         onConfirm={doStashAll}
       />
@@ -3902,9 +4106,9 @@ export function BranchSwitcher({ repoPath }: { repoPath: string }) {
       <ConfirmDialog
         open={stashPopIn !== null}
         onCancel={() => setStashPopIn(null)}
-        title="Pop latest stash?"
-        body="Applies the most recent stash to your working tree and removes it from the stash list. If applying conflicts, the stash is kept."
-        confirmLabel="Pop stash"
+        title={t("branchSwitcher.popLatestStashTitle")}
+        body={t("branchSwitcher.popLatestStashDescription")}
+        confirmLabel={t("branchSwitcher.popStash")}
         pending={stashPop.isPending}
         onConfirm={doStashPop}
       />

@@ -10,6 +10,7 @@ import {
 import { useJiraIssues } from "@/lib/jira/queries";
 import type { JiraLink } from "@/lib/jira/store";
 import type { JiraIssueInfo } from "@/lib/jira/types";
+import { usePullsText } from "./use-pulls-text";
 
 /** Open/closed glyph for a Jira issue, so status isn't conveyed by text alone.
  *  `done` maps to the closed/merged treatment (matching the native `StateIcon`
@@ -41,6 +42,7 @@ export function JiraIssuePicker({
   pending: boolean;
   onPick: (key: string) => void;
 }) {
+  const tx = usePullsText();
   const issues = useJiraIssues(repoPath, link, "all");
   const candidates = (issues.data ?? []).filter((i) => !exclude.has(i.key));
   return (
@@ -54,11 +56,11 @@ export function JiraIssuePicker({
       <ComboboxInput
         autoFocus
         className="w-full"
-        placeholder="Search issues by key or summary"
+        placeholder={tx("Search issues by key or summary")}
         disabled={pending}
       />
       <ComboboxContent>
-        <ComboboxEmpty>No matching issues.</ComboboxEmpty>
+        <ComboboxEmpty>{tx("No matching issues.")}</ComboboxEmpty>
         <ComboboxList>
           {(item: JiraIssueInfo) => (
             <ComboboxItem key={item.key} value={item}>

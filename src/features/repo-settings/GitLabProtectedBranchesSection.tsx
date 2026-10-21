@@ -39,6 +39,7 @@ import {
   type SwapFocusRef,
   useConfirmSwapFocus,
 } from "./parts";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 /** GitLab's protectable access levels, for both the "allowed to push" and
  *  "allowed to merge" allow lists. Free tier exposes these three roles; the
@@ -59,16 +60,12 @@ const LEVEL_LABELS: Record<number, string> = {
 
 /** Base UI's <Select> resolves value → label from an `items` map; without it a
  *  closed select falls back to the raw value ("40"). */
-const ACCESS_LEVEL_ITEMS: Record<string, string> = Object.fromEntries(
-  ACCESS_LEVELS.map((o) => [o.value, o.label]),
-);
-
 /** Join an allow list into a readable label, using our role names for known
  *  levels and the API description for the rest. */
 function levelSummary(entries: GitLabAccessLevelEntry[]): string {
-  if (entries.length === 0) return "No one";
+  if (entries.length === 0) return tr("No one");
   return entries
-    .map((e) => LEVEL_LABELS[e.accessLevel] ?? e.description)
+    .map((e) => tr(LEVEL_LABELS[e.accessLevel] ?? e.description))
     .join(", ");
 }
 
@@ -104,7 +101,7 @@ export function GitLabProtectedBranchesSection({
   async function handleUnprotect(name: string) {
     try {
       await unprotect.mutateAsync(name);
-      toast.success(`Unprotected ${name}`);
+      toast.success(tr("Unprotected {{name}}", { name }));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -126,8 +123,9 @@ export function GitLabProtectedBranchesSection({
     <div data-confirm-section className="min-w-0 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Branches and wildcards protected from force pushes and unauthorized
-          changes.
+          {tr(
+            "Branches and wildcards protected from force pushes and unauthorized\r\n          changes.",
+          )}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -136,19 +134,21 @@ export function GitLabProtectedBranchesSection({
           onClick={() => setEditing(true)}
         >
           <PlusIcon data-icon="inline-start" />
-          Protect branch
+          {tr("Protect branch")}
         </Button>
       </div>
 
       <RemoteListSection
         query={branches}
         rowCount={branches.data?.length ?? 0}
-        noun="protected branches"
-        loadFailed="Couldn't load protected branches."
-        emptyLabel="No protected branches."
+        noun={tr("protected branches")}
+        loadFailed={tr("Couldn't load protected branches.")}
+        emptyLabel={tr("No protected branches.")}
         skeletonClassName="h-14 w-full"
-        errorTitle="Couldn't load protected branches."
-        errorHint="If this is a permissions error, managing protected branches needs the Maintainer role."
+        errorTitle={tr("Couldn't load protected branches.")}
+        errorHint={tr(
+          "If this is a permissions error, managing protected branches needs the Maintainer role.",
+        )}
       >
         {branches.data?.map((b) => (
           <ProtectedBranchRow
@@ -221,14 +221,14 @@ function ProtectedBranchRow({
         {branch.inherited && (
           <StatusDetailChip
             variant="secondary"
-            label="Inherited"
+            label={tr("Inherited")}
             detail={inheritedHint}
           />
         )}
         {confirming ? (
           <InlineConfirm
-            prompt="Unprotect?"
-            actLabel="Unprotect"
+            prompt={tr("Unprotect?")}
+            actLabel={tr("Unprotect")}
             pending={unprotecting}
             heldReason={online ? undefined : OFFLINE_WRITE_REASON}
             swapFocusRef={swapFocusRef}
@@ -243,9 +243,9 @@ function ProtectedBranchRow({
             className="text-muted-foreground"
             disabled
             reason={inheritedHint}
-            aria-label={`Unprotect ${branch.name}`}
+            aria-label={tr("Unprotect {{name}}", { name: branch.name })}
           >
-            Unprotect
+            {tr("Unprotect")}
           </DisabledReasonButton>
         ) : (
           <Button
@@ -254,14 +254,14 @@ function ProtectedBranchRow({
             variant="ghost"
             className="text-muted-foreground hover:text-destructive"
             onClick={onConfirm}
-            aria-label={`Unprotect ${branch.name}`}
+            aria-label={tr("Unprotect {{name}}", { name: branch.name })}
           >
-            Unprotect
+            {tr("Unprotect")}
           </Button>
         )}
       </div>
       <p className="text-muted-foreground">
-        Push: {levelSummary(branch.pushLevels)} · Merge:{" "}
+        {tr("Push:")} {levelSummary(branch.pushLevels)} {tr("· Merge:")}{" "}
         {levelSummary(branch.mergeLevels)}
       </p>
       {/* The title carries the hold reason over the Label too. The Label names
@@ -285,8 +285,11 @@ function ProtectedBranchRow({
             forcePushHeld !== undefined && "text-muted-foreground",
           )}
         >
-          Allow force push
-          <span className="sr-only"> for {branch.name}</span>
+          {tr("Allow force push")}
+          <span className="sr-only">
+            {" "}
+            {tr("for")} {branch.name}
+          </span>
         </Label>
       </span>
     </div>
@@ -331,7 +334,7 @@ function ProtectBranchForm({
         mergeAccessLevel: Number(mergeLevel),
         allowForcePush,
       });
-      toast.success(`Protected ${trimmed}`);
+      toast.success(tr("Protected {{name}}", { name: trimmed }));
       onDone();
     } catch (e) {
       toastError(e);
@@ -342,30 +345,33 @@ function ProtectBranchForm({
     <div className="min-w-0 space-y-3">
       <Button ref={swapFocusRef} size="sm" variant="ghost" onClick={onDone}>
         <CaretLeftIcon data-icon="inline-start" />
-        Back to protected branches
+        {tr("Back to protected branches")}
       </Button>
       <div className="space-y-3 rounded-md border p-3">
         <div className="space-y-1.5">
-          <Label htmlFor="gl-protect-name">Branch name</Label>
+          <Label htmlFor="gl-protect-name">{tr("Branch name")}</Label>
           <Input
             id="gl-protect-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="main or release/*"
+            placeholder={tr("main or release/*")}
             autoComplete="off"
             spellCheck={false}
             className="font-mono"
           />
           <p className="text-[11px] text-muted-foreground">
-            A wildcard like <span className="font-mono">release/*</span>{" "}
-            protects every matching branch.
+            {tr("A wildcard like")}{" "}
+            <span className="font-mono">{tr("release/*")}</span>{" "}
+            {tr("protects every matching branch.")}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="gl-protect-push">Allowed to push</Label>
+            <Label htmlFor="gl-protect-push">{tr("Allowed to push")}</Label>
             <Select
-              items={ACCESS_LEVEL_ITEMS}
+              items={Object.fromEntries(
+                ACCESS_LEVELS.map((o) => [o.value, tr(o.label)]),
+              )}
               value={pushLevel}
               onValueChange={(v) => {
                 if (v) setPushLevel(v);
@@ -377,16 +383,18 @@ function ProtectBranchForm({
               <SelectContent>
                 {ACCESS_LEVELS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
-                    {o.label}
+                    {tr(o.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="gl-protect-merge">Allowed to merge</Label>
+            <Label htmlFor="gl-protect-merge">{tr("Allowed to merge")}</Label>
             <Select
-              items={ACCESS_LEVEL_ITEMS}
+              items={Object.fromEntries(
+                ACCESS_LEVELS.map((o) => [o.value, tr(o.label)]),
+              )}
               value={mergeLevel}
               onValueChange={(v) => {
                 if (v) setMergeLevel(v);
@@ -398,7 +406,7 @@ function ProtectBranchForm({
               <SelectContent>
                 {ACCESS_LEVELS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
-                    {o.label}
+                    {tr(o.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -407,7 +415,7 @@ function ProtectBranchForm({
         </div>
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="gl-protect-force" className="text-xs">
-            Allow force push
+            {tr("Allow force push")}
           </Label>
           <Switch
             id="gl-protect-force"
@@ -423,7 +431,7 @@ function ProtectBranchForm({
             size="sm"
             onClick={onDone}
           >
-            Cancel
+            {tr("Cancel")}
           </Button>
           <DisabledReasonButton
             ref={swapFocusRef}
@@ -437,7 +445,7 @@ function ProtectBranchForm({
             onClick={submit}
           >
             {protectBranch.isPending && <Spinner data-icon="inline-start" />}
-            Protect
+            {tr("Protect")}
           </DisabledReasonButton>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 import {
   ArrowClockwiseIcon,
   CaretLeftIcon,
@@ -61,9 +62,12 @@ const GL_EVENTS: { id: string; label: string }[] = [
 ];
 
 function eventsSummary(events: string[]): string {
-  if (events.length === 0) return "No events";
+  if (events.length === 0) return tr("No events");
   const labels = events.map(
-    (e) => GL_EVENTS.find((c) => c.id === e)?.label ?? e,
+    (e) => {
+      const label = GL_EVENTS.find((c) => c.id === e)?.label;
+      return label ? tr(label) : e;
+    },
   );
   if (labels.length <= 3) return labels.join(", ");
   return `${labels.slice(0, 3).join(", ")} +${labels.length - 3}`;
@@ -94,7 +98,7 @@ export function GitLabWebhooksSection({
   async function handleDelete(hookId: string) {
     try {
       await deleteHook.mutateAsync(hookId);
-      toast.success("Webhook deleted");
+      toast.success(tr("Webhook deleted"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -119,7 +123,7 @@ export function GitLabWebhooksSection({
   async function handleTest(hookId: string) {
     try {
       await testHook.mutateAsync({ hookId, trigger: "push_events" });
-      toast.success("Test event sent");
+      toast.success(tr("Test event sent"));
     } catch (e) {
       toastError(e);
     }
@@ -166,7 +170,7 @@ export function GitLabWebhooksSection({
     <div data-confirm-section className="min-w-0 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Webhooks GitLab fires for this project's events.
+          {tr("Webhooks GitLab fires for this project's events.")}
         </p>
         <Button
           ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -175,19 +179,19 @@ export function GitLabWebhooksSection({
           onClick={() => setEditing("new")}
         >
           <PlusIcon data-icon="inline-start" />
-          Add webhook
+          {tr("Add webhook")}
         </Button>
       </div>
 
       <RemoteListSection
         query={hooks}
         rowCount={hooks.data?.length ?? 0}
-        noun="webhooks"
-        loadFailed="Couldn't load webhooks."
-        emptyLabel="No webhooks yet."
+        noun={tr("webhooks")}
+        loadFailed={tr("Couldn't load webhooks.")}
+        emptyLabel={tr("No webhooks yet.")}
         skeletonClassName="h-14 w-full"
-        errorTitle="Couldn't load webhooks."
-        errorHint="If this is a permissions error, managing webhooks needs the Maintainer role."
+        errorTitle={tr("Couldn't load webhooks.")}
+        errorHint={tr("If this is a permissions error, managing webhooks needs the Maintainer role.")}
       >
         {hooks.data?.map((h) => (
           <div
@@ -204,7 +208,7 @@ export function GitLabWebhooksSection({
                   {eventsSummary(h.events)}
                   {parseableDate(h.createdAt) && (
                     <>
-                      {" · added "}
+                      {` · ${tr("added")} `}
                       <RelativeTime date={h.createdAt} />
                     </>
                   )}
@@ -213,14 +217,14 @@ export function GitLabWebhooksSection({
               {h.alertStatus !== "executable" && (
                 <StatusDetailChip
                   variant="destructive"
-                  label="disabled"
-                  detail="GitLab disabled this hook after repeated failures — check the deliveries, then save it again to re-enable."
+                  label={tr("disabled")}
+                  detail={tr("GitLab disabled this hook after repeated failures — check the deliveries, then save it again to re-enable.")}
                 />
               )}
               {confirming === h.id ? (
                 <InlineConfirm
-                  prompt="Delete?"
-                  actLabel="Delete"
+                  prompt={tr("Delete?")}
+                  actLabel={tr("Delete")}
                   pending={deleteHook.isPending}
                   heldReason={online ? undefined : OFFLINE_WRITE_REASON}
                   swapFocusRef={swapFocus(h.id)}
@@ -232,7 +236,7 @@ export function GitLabWebhooksSection({
                   <DisabledReasonButton
                     size="sm"
                     variant="ghost"
-                    title="Send a test push event"
+                    title={tr("Send a test push event")}
                     disabled={testHeld(h.id) !== undefined}
                     reason={testHeld(h.id)}
                     onClick={() => handleTest(h.id)}
@@ -243,7 +247,7 @@ export function GitLabWebhooksSection({
                     ref={swapFocus(rowFormSwapKey("deliveries", h.id))}
                     size="sm"
                     variant="ghost"
-                    title="Recent deliveries"
+                    title={tr("Recent deliveries")}
                     onClick={() => setViewingEvents(h)}
                   >
                     <ClockCounterClockwiseIcon />
@@ -252,7 +256,7 @@ export function GitLabWebhooksSection({
                     ref={swapFocus(rowFormSwapKey("edit", h.id))}
                     size="sm"
                     variant="ghost"
-                    title="Edit"
+                    title={tr("Edit")}
                     onClick={() => setEditing(h)}
                   >
                     <PencilSimpleIcon />
@@ -262,8 +266,8 @@ export function GitLabWebhooksSection({
                     size="sm"
                     variant="ghost"
                     className="text-muted-foreground hover:text-destructive"
-                    title="Delete"
-                    aria-label={`Delete webhook ${h.url}`}
+                    title={tr("Delete")}
+                    aria-label={tr("Delete webhook {{url}}", { url: h.url })}
                     onClick={() => setConfirming(h.id)}
                   >
                     <TrashIcon />
@@ -307,10 +311,10 @@ function HookForm({
     url.trim().startsWith("https://") || url.trim().startsWith("http://");
   const warning = !url.trim()
     ? null
-    : !urlValid
-      ? "The payload URL must start with http:// or https://."
+      : !urlValid
+      ? tr("The payload URL must start with http:// or https://.")
       : events.length === 0
-        ? "Select at least one event."
+        ? tr("Select at least one event.")
         : null;
   const saveHeldReason = (() => {
     switch (true) {
@@ -319,7 +323,7 @@ function HookForm({
       case pending:
         return ACT_PENDING_REASON;
       case !url.trim():
-        return "Enter a valid http(s) URL";
+        return tr("Enter a valid http(s) URL");
       case warning !== null:
         return warning;
       default:
@@ -342,7 +346,7 @@ function HookForm({
     try {
       if (hook) await update.mutateAsync({ hookId: hook.id, input });
       else await create.mutateAsync(input);
-      toast.success(hook ? "Webhook updated" : "Webhook created");
+      toast.success(tr(hook ? "Webhook updated" : "Webhook created"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -353,11 +357,11 @@ function HookForm({
     <div className="min-w-0 space-y-3">
       <Button ref={swapFocusRef} size="sm" variant="ghost" onClick={onDone}>
         <CaretLeftIcon data-icon="inline-start" />
-        Back to webhooks
+        {tr("Back to webhooks")}
       </Button>
       <div className="space-y-3 rounded-md border p-3">
         <div className="space-y-1.5">
-          <Label htmlFor="gl-hook-url">Payload URL</Label>
+          <Label htmlFor="gl-hook-url">{tr("Payload URL")}</Label>
           <Input
             id="gl-hook-url"
             value={url}
@@ -369,23 +373,22 @@ function HookForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="gl-hook-token">Secret token</Label>
+          <Label htmlFor="gl-hook-token">{tr("Secret token")}</Label>
           <Input
             id="gl-hook-token"
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder={hook ? "(unchanged)" : "(optional)"}
+            placeholder={tr(hook ? "(unchanged)" : "(optional)")}
             autoComplete="off"
           />
           <p className="text-[11px] text-muted-foreground">
-            Sent as the X-Gitlab-Token header so the endpoint can verify the
-            sender.
+            {tr("Sent as the X-Gitlab-Token header so the endpoint can verify the\r\n            sender.")}
           </p>
         </div>
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="gl-hook-ssl" className="text-xs">
-            Verify the endpoint's SSL certificate
+            {tr("Verify the endpoint's SSL certificate")}
           </Label>
           <Switch
             id="gl-hook-ssl"
@@ -394,7 +397,7 @@ function HookForm({
           />
         </div>
         <div className="space-y-1.5">
-          <p className="text-xs font-medium">Trigger events</p>
+          <p className="text-xs font-medium">{tr("Trigger events")}</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
             {GL_EVENTS.map((e) => (
               <Label
@@ -405,7 +408,7 @@ function HookForm({
                   checked={events.includes(e.id)}
                   onCheckedChange={(v) => toggleEvent(e.id, v === true)}
                 />
-                {e.label}
+                {tr(e.label)}
               </Label>
             ))}
           </div>
@@ -418,7 +421,7 @@ function HookForm({
             size="sm"
             onClick={onDone}
           >
-            Cancel
+            {tr("Cancel")}
           </Button>
           <DisabledReasonButton
             ref={swapFocusRef}
@@ -428,7 +431,7 @@ function HookForm({
             onClick={save}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {hook ? "Save changes" : "Create webhook"}
+            {tr(hook ? "Save changes" : "Create webhook")}
           </DisabledReasonButton>
         </div>
       </div>
@@ -471,7 +474,7 @@ function HookDeliveries({
   async function handleResend(eventId: string) {
     try {
       await resend.mutateAsync(eventId);
-      toast.success("Delivery re-sent");
+      toast.success(tr("Delivery re-sent"));
     } catch (e) {
       toastError(e);
     }
@@ -482,7 +485,7 @@ function HookDeliveries({
       <div className="flex items-center justify-between gap-2">
         <Button ref={swapFocusRef} size="sm" variant="ghost" onClick={onBack}>
           <CaretLeftIcon data-icon="inline-start" />
-          Back to webhooks
+          {tr("Back to webhooks")}
         </Button>
         <p
           className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
@@ -495,11 +498,11 @@ function HookDeliveries({
       <RemoteListSection
         query={events}
         rowCount={events.data?.length ?? 0}
-        noun="deliveries"
-        loadFailed="Couldn't load the delivery log."
-        emptyLabel="No deliveries recorded yet — send a test event."
+        noun={tr("deliveries")}
+        loadFailed={tr("Couldn't load the delivery log.")}
+        emptyLabel={tr("No deliveries recorded yet — send a test event.")}
         skeletonClassName="h-10 w-full"
-        errorTitle="Couldn't load the delivery log."
+        errorTitle={tr("Couldn't load the delivery log.")}
       >
         {events.data?.map((d) => (
           <DeliveryRow
@@ -561,7 +564,7 @@ function DeliveryRow({
         <DisabledReasonButton
           size="sm"
           variant="ghost"
-          title="Re-send this delivery"
+          title={tr("Re-send this delivery")}
           disabled={resendHeld !== undefined}
           reason={resendHeld}
           onClick={onResend}
@@ -572,10 +575,10 @@ function DeliveryRow({
       {expanded && (
         <div className="space-y-2 border-t p-2">
           <DeliveryPayload
-            label="Request payload"
+            label={tr("Request payload")}
             body={delivery.requestPayload}
           />
-          <DeliveryPayload label="Response" body={delivery.responsePayload} />
+          <DeliveryPayload label={tr("Response")} body={delivery.responsePayload} />
         </div>
       )}
     </div>

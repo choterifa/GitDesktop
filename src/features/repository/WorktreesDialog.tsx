@@ -13,6 +13,7 @@ import {
   WrenchIcon,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { PathText } from "@/components/path-text";
@@ -132,6 +133,7 @@ function WorktreeList({
   onAdd: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const worktrees = useUserWorktrees(repoPath, open);
   const openWorktree = useOpenWorktree();
   const unlock = useUnlockUserWorktree(repoPath);
@@ -165,7 +167,13 @@ function WorktreeList({
     // Its folder is on its way out. Not just the removal entry: a promote's
     // claim opens before markRemoval and releases only after the entry has
     // settled, so the entry alone misses both ends.
-    if (refuseWhileLeaving(w.path, removingPaths.has(w.path))) return;
+    if (
+      refuseWhileLeaving(w.path, removingPaths.has(w.path), {
+        removing: t("worktrees.removalNotice"),
+        promoting: t("worktrees.promotingNotice"),
+      })
+    )
+      return;
     await openWorktree(w.path);
     onClose();
   }
@@ -175,7 +183,7 @@ function WorktreeList({
   async function handleUnlock(w: UserWorktree) {
     try {
       await unlock.mutateAsync(w.path);
-      toast.success("Worktree unlocked");
+      toast.success(t("worktrees.unlocked"));
     } catch (e) {
       toastError(e);
     }
@@ -184,7 +192,7 @@ function WorktreeList({
   async function handleRepair() {
     try {
       await repair.mutateAsync(undefined);
-      toast.success("Worktree links repaired");
+      toast.success(t("worktrees.linksRepaired"));
     } catch (e) {
       toastError(e);
     }
@@ -193,12 +201,8 @@ function WorktreeList({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Worktrees</DialogTitle>
-        <DialogDescription>
-          Each worktree checks out a different branch into its own folder, so
-          you can work on several at once without stashing or switching. Opening
-          one makes it the active repository.
-        </DialogDescription>
+        <DialogTitle>{t("worktrees.title")}</DialogTitle>
+        <DialogDescription>{t("worktrees.description")}</DialogDescription>
       </DialogHeader>
 
       {/* min-w-0: DialogContent is a grid; without it this grid item grows to
@@ -206,7 +210,7 @@ function WorktreeList({
       <div className="min-w-0 border">
         <div
           role="listbox"
-          aria-label="Worktrees"
+          aria-label={t("worktrees.title")}
           onKeyDown={onKeyDown}
           className="max-h-80 overflow-y-auto"
         >
@@ -235,8 +239,7 @@ function WorktreeList({
         </div>
         {!worktrees.isPending && linkedCount === 0 && (
           <p className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-            No additional worktrees yet. Add one to work on another branch in
-            its own folder.
+            {t("worktrees.empty")}
           </p>
         )}
       </div>
@@ -248,7 +251,7 @@ function WorktreeList({
             size="sm"
             className="text-muted-foreground sm:mr-auto"
             disabled={repair.isPending}
-            title="Re-link worktrees after moving or renaming the repository folder"
+            title={t("worktrees.repairTitle")}
             onClick={handleRepair}
           >
             {repair.isPending ? (
@@ -256,15 +259,15 @@ function WorktreeList({
             ) : (
               <WrenchIcon data-icon="inline-start" />
             )}
-            Repair links
+            {t("worktrees.repairLinks")}
           </Button>
         )}
         <Button variant="outline" onClick={onClose}>
-          Close
+          {t("worktrees.close")}
         </Button>
         <Button onClick={onAdd}>
           <PlusIcon data-icon="inline-start" />
-          Add worktree
+          {t("worktrees.add")}
         </Button>
       </DialogFooter>
 
@@ -325,6 +328,7 @@ function WorktreeRow({
   onDelete: () => void;
   onPromote: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const {
     path,
     branch,
@@ -336,8 +340,12 @@ function WorktreeRow({
   } = worktree;
 
   const itemLabel = (label: string, otherReason?: string) =>
-    worktreeItemLabel(label, isRemoving, otherReason);
-  const openTitle = isCurrent ? "Current worktree" : "Open this worktree";
+    isRemoving
+      ? `${label} (${t("worktrees.removalInProgressLower")})`
+      : worktreeItemLabel(label, false, otherReason);
+  const openTitle = isCurrent
+    ? t("worktrees.current")
+    : t("worktrees.openThis");
   const lockDetail = isLocked ? lockReason.trim() : "";
 
   return (
@@ -367,7 +375,7 @@ function WorktreeRow({
           "flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left",
           (isCurrent || isRemoving) && "cursor-default",
         )}
-        title={isRemoving ? "Removal in progress" : openTitle}
+        title={isRemoving ? t("worktrees.removalInProgress") : openTitle}
       >
         <GitBranchIcon
           weight={isCurrent ? "fill" : "regular"}
@@ -379,7 +387,7 @@ function WorktreeRow({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate font-mono text-xs font-medium">
-              {isDetached ? "detached HEAD" : branch || "—"}
+              {isDetached ? t("worktrees.detachedHead") : branch || "—"}
             </span>
             <RowTags
               isMain={isMain}
@@ -396,7 +404,7 @@ function WorktreeRow({
         </span>
         {lastActivityMs != null && validEpochMs(lastActivityMs) && (
           <span className="shrink-0 text-[11px] text-muted-foreground">
-            Active{" "}
+            {t("worktrees.active")}{" "}
             <RelativeTime date={new Date(lastActivityMs).toISOString()} />
           </span>
         )}
@@ -411,7 +419,7 @@ function WorktreeRow({
             variant="outline"
             className="shrink-0 text-warning"
             icon={<LockSimpleIcon data-icon="inline-start" />}
-            label="Locked"
+            label={t("worktrees.locked")}
             detail={lockDetail}
           />
         ) : (
@@ -421,7 +429,7 @@ function WorktreeRow({
             className="shrink-0 text-warning"
           >
             <LockSimpleIcon data-icon="inline-start" />
-            Locked
+            {t("worktrees.locked")}
           </Badge>
         ))}
 
@@ -432,7 +440,7 @@ function WorktreeRow({
               variant="ghost"
               size="icon-sm"
               className="mr-1 shrink-0"
-              aria-label={`Actions for ${branch || path}`}
+              aria-label={t("worktrees.actionsFor", { name: branch || path })}
             />
           }
         >
@@ -441,12 +449,16 @@ function WorktreeRow({
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem disabled={isCurrent || isRemoving} onClick={onOpen}>
             <FolderOpenIcon />
-            {itemLabel(isCurrent ? "Current worktree" : "Open worktree")}
+            {itemLabel(
+              isCurrent ? t("worktrees.current") : t("worktrees.open"),
+            )}
           </DropdownMenuItem>
           {/* Copying a path acts on nothing, so a removal doesn't block it. */}
-          <DropdownMenuItem onClick={() => copyText(path, "Path copied")}>
+          <DropdownMenuItem
+            onClick={() => copyText(path, t("worktrees.pathCopied"))}
+          >
             <CopyIcon />
-            Copy path
+            {t("worktrees.copyPath")}
           </DropdownMenuItem>
           <DropdownMenuItem
             // git can't move the main worktree or a locked one, and moving the
@@ -456,18 +468,21 @@ function WorktreeRow({
             onClick={onRename}
           >
             <PencilSimpleIcon />
-            {itemLabel("Rename…", isLocked ? "locked" : undefined)}
+            {itemLabel(
+              t("worktrees.renameEllipsis"),
+              isLocked ? t("worktrees.lockedLower") : undefined,
+            )}
           </DropdownMenuItem>
           {!isMain &&
             (isLocked ? (
               <DropdownMenuItem disabled={isRemoving} onClick={onUnlock}>
                 <LockSimpleOpenIcon />
-                {itemLabel("Unlock")}
+                {itemLabel(t("worktrees.unlock"))}
               </DropdownMenuItem>
             ) : (
               <DropdownMenuItem disabled={isRemoving} onClick={onLock}>
                 <LockSimpleIcon />
-                {itemLabel("Lock…")}
+                {itemLabel(t("worktrees.lockEllipsis"))}
               </DropdownMenuItem>
             ))}
           {/* Promote moves this worktree's branch into the main workspace: it
@@ -480,8 +495,8 @@ function WorktreeRow({
             >
               <ArrowLineUpIcon />
               {itemLabel(
-                "Promote to main workspace…",
-                isLocked ? "locked" : undefined,
+                t("worktrees.promoteEllipsis"),
+                isLocked ? t("worktrees.lockedLower") : undefined,
               )}
             </DropdownMenuItem>
           )}
@@ -493,7 +508,7 @@ function WorktreeRow({
             onClick={onDelete}
           >
             <TrashIcon />
-            {itemLabel("Delete worktree…")}
+            {itemLabel(t("worktrees.deleteEllipsis"))}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -514,6 +529,7 @@ function RowTags({
   isLocked: boolean;
   isRemoving: boolean;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   return (
     <>
       {/* First and in words: it's why every action on this row is off, and the
@@ -521,26 +537,26 @@ function RowTags({
       {isRemoving && (
         <Badge variant="outline" className="shrink-0">
           <Spinner aria-hidden data-icon="inline-start" />
-          Removing…
+          {t("worktrees.removing")}
         </Badge>
       )}
       {isMain && (
         <Badge variant="secondary" className="shrink-0">
-          Main
+          {t("worktrees.main")}
         </Badge>
       )}
       {isCurrent && (
         <Badge variant="outline" className="shrink-0 text-primary">
-          Current
+          {t("worktrees.currentTag")}
         </Badge>
       )}
       {isDetached && (
         <Badge variant="outline" className="shrink-0">
-          Detached
+          {t("worktrees.detached")}
         </Badge>
       )}
       {/* The visible lock sits at the row's right edge, outside the option. */}
-      {isLocked && <span className="sr-only">Locked</span>}
+      {isLocked && <span className="sr-only">{t("worktrees.locked")}</span>}
     </>
   );
 }
@@ -565,13 +581,17 @@ export function worktreeItemLabel(
  *  never asked for the removal, so the wording states the state rather than the
  *  store's "already" (a duplicate attempt, correct only where the store refuses
  *  one). */
-export function refuseWhileLeaving(path: string, removing: boolean): boolean {
+export function refuseWhileLeaving(
+  path: string,
+  removing: boolean,
+  messages?: { removing: string; promoting: string },
+): boolean {
   if (removing) {
-    toast.info("This worktree is being removed.");
+    toast.info(messages?.removing ?? "This worktree is being removed.");
     return true;
   }
   if (isWorktreePromoting(path)) {
-    toast.info(WORKTREE_PROMOTING_MESSAGE);
+    toast.info(messages?.promoting ?? WORKTREE_PROMOTING_MESSAGE);
     return true;
   }
   return false;
@@ -588,6 +608,7 @@ export function RenameWorktreeDialog({
   worktree: UserWorktree | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const move = useMoveUserWorktree(repoPath);
   const removing = useIsRemovingWorktree(repoPath, worktree?.path);
   const { parent, name: currentName } = splitPath(worktree?.path ?? "");
@@ -604,10 +625,16 @@ export function RenameWorktreeDialog({
   // per-call mutation callbacks don't survive that — the outcome would be lost.
   async function handleRename() {
     if (!worktree || !trimmed || unchanged || invalid) return;
-    if (refuseWhileLeaving(worktree.path, removing)) return;
+    if (
+      refuseWhileLeaving(worktree.path, removing, {
+        removing: t("worktrees.removalNotice"),
+        promoting: t("worktrees.promotingNotice"),
+      })
+    )
+      return;
     try {
       await move.mutateAsync({ from: worktree.path, to: newPath });
-      toast.success(`Renamed to ${trimmed}`);
+      toast.success(t("worktrees.renamed", { name: trimmed }));
       onClose();
     } catch (e) {
       toastError(e);
@@ -626,10 +653,9 @@ export function RenameWorktreeDialog({
     >
       <DialogContent showCloseButton={!move.isPending}>
         <DialogHeader>
-          <DialogTitle>Rename worktree</DialogTitle>
+          <DialogTitle>{t("worktrees.renameTitle")}</DialogTitle>
           <DialogDescription>
-            Renames the worktree folder in place. Its branch and commits are
-            unchanged.
+            {t("worktrees.renameDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -641,7 +667,7 @@ export function RenameWorktreeDialog({
           }}
         >
           <label htmlFor="wt-rename" className="text-muted-foreground">
-            Folder name
+            {t("worktrees.folderName")}
           </label>
           <Input
             id="wt-rename"
@@ -655,7 +681,7 @@ export function RenameWorktreeDialog({
           />
           {invalid ? (
             <span className="col-start-2 mt-1 block truncate font-mono text-[11px] text-muted-foreground">
-              Use a folder name, not a path.
+              {t("worktrees.folderNameError")}
             </span>
           ) : (
             <PathText
@@ -668,7 +694,7 @@ export function RenameWorktreeDialog({
         {/* A disabled button can't carry a tooltip; the reason goes on screen. */}
         {removing && (
           <p className="text-xs text-muted-foreground">
-            This worktree is being removed, so it can't be renamed.
+            {t("worktrees.cannotRenameRemoving")}
           </p>
         )}
 
@@ -677,11 +703,11 @@ export function RenameWorktreeDialog({
             variant="outline"
             onClick={onClose}
             disabled={move.isPending}
-            reason="The rename is still running."
+            reason={t("worktrees.renameRunning")}
           >
             {/* Nothing here can call the removal off, so "Cancel" would promise
                 more than closing this dialog does. */}
-            {removing ? "Close" : "Cancel"}
+            {removing ? t("worktrees.close") : t("worktrees.cancel")}
           </DisabledReasonButton>
           <Button
             disabled={
@@ -690,7 +716,7 @@ export function RenameWorktreeDialog({
             onClick={handleRename}
           >
             {move.isPending && <Spinner data-icon="inline-start" />}
-            Rename
+            {t("worktrees.rename")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -709,19 +735,26 @@ export function LockWorktreeDialog({
   worktree: UserWorktree | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const lock = useLockUserWorktree(repoPath);
   const removing = useIsRemovingWorktree(repoPath, worktree?.path);
   const [reason, setReason] = useState("");
 
   async function handleLock() {
     if (!worktree) return;
-    if (refuseWhileLeaving(worktree.path, removing)) return;
+    if (
+      refuseWhileLeaving(worktree.path, removing, {
+        removing: t("worktrees.removalNotice"),
+        promoting: t("worktrees.promotingNotice"),
+      })
+    )
+      return;
     try {
       await lock.mutateAsync({
         path: worktree.path,
         reason: reason.trim() || undefined,
       });
-      toast.success("Worktree locked");
+      toast.success(t("worktrees.lockedSuccess"));
       onClose();
     } catch (e) {
       toastError(e);
@@ -740,11 +773,9 @@ export function LockWorktreeDialog({
     >
       <DialogContent showCloseButton={!lock.isPending}>
         <DialogHeader>
-          <DialogTitle>Lock worktree</DialogTitle>
+          <DialogTitle>{t("worktrees.lockTitle")}</DialogTitle>
           <DialogDescription>
-            Locking stops this worktree from being pruned or renamed, and
-            deleting it asks for a forced confirmation — useful for one on a
-            removable or network drive. Add an optional note for why.
+            {t("worktrees.lockDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -756,7 +787,7 @@ export function LockWorktreeDialog({
           }}
         >
           <label htmlFor="wt-lock-reason" className="text-muted-foreground">
-            Reason
+            {t("worktrees.reason")}
           </label>
           <Input
             id="wt-lock-reason"
@@ -764,7 +795,7 @@ export function LockWorktreeDialog({
             autoComplete="off"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Optional — e.g. on a USB drive"
+            placeholder={t("worktrees.lockPlaceholder")}
             className="h-7"
           />
         </form>
@@ -772,7 +803,7 @@ export function LockWorktreeDialog({
         {/* A disabled button can't carry a tooltip; the reason goes on screen. */}
         {removing && (
           <p className="text-xs text-muted-foreground">
-            This worktree is being removed, so it can't be locked.
+            {t("worktrees.cannotLockRemoving")}
           </p>
         )}
 
@@ -781,15 +812,15 @@ export function LockWorktreeDialog({
             variant="outline"
             onClick={onClose}
             disabled={lock.isPending}
-            reason="The lock is still running."
+            reason={t("worktrees.lockRunning")}
           >
             {/* Nothing here can call the removal off, so "Cancel" would promise
                 more than closing this dialog does. */}
-            {removing ? "Close" : "Cancel"}
+            {removing ? t("worktrees.close") : t("worktrees.cancel")}
           </DisabledReasonButton>
           <Button onClick={handleLock} disabled={lock.isPending || removing}>
             {lock.isPending && <Spinner data-icon="inline-start" />}
-            Lock
+            {t("worktrees.lock")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -807,6 +838,7 @@ function CreateWorktree({
   onCancel: () => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation("repositoryOperations");
   const worktrees = useUserWorktrees(repoPath);
   const branchesQuery = useBranches(repoPath);
   const status = useRepoStatus(repoPath);
@@ -851,8 +883,8 @@ function CreateWorktree({
   const missing =
     !branch || !effectivePath
       ? source === "new"
-        ? "Enter a branch name and folder to continue."
-        : "Pick a branch and folder to continue."
+        ? t("worktrees.enterBranchAndFolder")
+        : t("worktrees.pickBranchAndFolder")
       : "";
 
   async function handleCreate() {
@@ -863,7 +895,7 @@ function CreateWorktree({
         newBranch: source === "new",
         baseRef: source === "new" ? base : undefined,
       });
-      toast.success(`Worktree created on ${branch}`);
+      toast.success(t("worktrees.created", { branch }));
       onCreated();
     } catch (e) {
       toastError(e);
@@ -878,16 +910,13 @@ function CreateWorktree({
             variant="ghost"
             size="icon-sm"
             onClick={onCancel}
-            aria-label="Back to worktrees"
+            aria-label={t("worktrees.back")}
           >
             <CaretLeftIcon />
           </Button>
-          <DialogTitle>New worktree</DialogTitle>
+          <DialogTitle>{t("worktrees.newTitle")}</DialogTitle>
         </div>
-        <DialogDescription>
-          Check out a branch into a new folder. The branch can't already be
-          checked out in another worktree.
-        </DialogDescription>
+        <DialogDescription>{t("worktrees.newDescription")}</DialogDescription>
       </DialogHeader>
 
       <div className="space-y-3">
@@ -898,18 +927,18 @@ function CreateWorktree({
         >
           <label className="flex cursor-pointer items-center gap-1.5">
             <Radio value="new" />
-            New branch
+            {t("worktrees.newBranch")}
           </label>
           <label className="flex cursor-pointer items-center gap-1.5">
             <Radio value="existing" />
-            Existing branch
+            {t("worktrees.existingBranch")}
           </label>
         </RadioGroup>
 
         {source === "new" ? (
           <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-xs">
             <label htmlFor="wt-new-branch" className="text-muted-foreground">
-              Branch name
+              {t("worktrees.branchName")}
             </label>
             <Input
               id="wt-new-branch"
@@ -922,7 +951,7 @@ function CreateWorktree({
               className="h-7 font-mono"
             />
             <label htmlFor="wt-base" className="text-muted-foreground">
-              Based on
+              {t("worktrees.basedOn")}
             </label>
             <Select value={base} onValueChange={(v) => v && setBase(v)}>
               <SelectTrigger id="wt-base" size="sm" className="font-mono">
@@ -950,7 +979,7 @@ function CreateWorktree({
             </label>
             {available.length === 0 ? (
               <p className="text-muted-foreground">
-                Every branch is already checked out in a worktree.
+                {t("worktrees.allBranchesCheckedOut")}
               </p>
             ) : (
               <Select
@@ -959,7 +988,7 @@ function CreateWorktree({
               >
                 <SelectTrigger id="wt-existing" size="sm" className="font-mono">
                   <SelectValue
-                    placeholder="Select a branch"
+                    placeholder={t("worktrees.selectBranch")}
                     onMouseEnter={clipTitleFromText}
                   />
                 </SelectTrigger>
@@ -977,7 +1006,7 @@ function CreateWorktree({
 
         <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 text-xs">
           <label htmlFor="wt-path" className="text-muted-foreground">
-            Folder
+            {t("worktrees.folder")}
           </label>
           <Input
             id="wt-path"
@@ -988,7 +1017,7 @@ function CreateWorktree({
               setPath(e.target.value);
               setPathEdited(true);
             }}
-            placeholder="Path for the new worktree"
+            placeholder={t("worktrees.newWorktreePath")}
             className="h-7 font-mono"
           />
         </div>
@@ -1001,14 +1030,14 @@ function CreateWorktree({
           </span>
         )}
         <Button variant="outline" onClick={onCancel} disabled={add.isPending}>
-          Cancel
+          {t("worktrees.cancel")}
         </Button>
         <Button
           disabled={Boolean(missing) || add.isPending}
           onClick={handleCreate}
         >
           {add.isPending && <Spinner data-icon="inline-start" />}
-          Create worktree
+          {t("worktrees.create")}
         </Button>
       </DialogFooter>
     </>

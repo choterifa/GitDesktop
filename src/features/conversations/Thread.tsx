@@ -21,6 +21,7 @@ import type { MinimizeReason } from "@/lib/git/api";
 import { displayLogin } from "@/lib/git/bot-login";
 import { useActiveForgeGhHost, useActiveGhHost } from "@/lib/git/host";
 import type { PrThreadOut, Reaction, RepoLabel } from "@/lib/git/types";
+import { useCommonText } from "@/lib/i18n/use-common-text";
 import { CommentEditor } from "./CommentEditor";
 import { ReactionBar } from "./ReactionBar";
 import type { MentionSource } from "./useMentionCandidates";
@@ -71,6 +72,7 @@ export function AuthorAvatar({
    *  GitHub, and a graceful fall-through to the initial elsewhere. */
   avatarUrl?: string;
 }) {
+  const tx = useCommonText();
   const host = useActiveGhHost();
   const ghHost = useActiveForgeGhHost();
   if (!login) return null;
@@ -79,8 +81,8 @@ export function AuthorAvatar({
       variant="ghost"
       size="icon-xs"
       onClick={() => openUrl(`https://${host}/${login}`)}
-      title={`@${login} on ${host}`}
-      aria-label={`@${login} on ${host}`}
+      title={tx("@{{login}} on {{host}}", { login, host })}
+      aria-label={tx("@{{login}} on {{host}}", { login, host })}
       className="shrink-0 rounded-full hover:opacity-80 cursor-pointer"
     >
       <ForgeUserAvatar login={login} avatarUrl={avatarUrl} ghHost={ghHost} />
@@ -153,6 +155,7 @@ export function Thread({
    *  surfaces whose forge autolinks the completed reference pass one. */
   mentions?: MentionSource;
 }) {
+  const tx = useCommonText();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -166,19 +169,19 @@ export function Thread({
           avatarUrl={thread.authorAvatarUrl}
         />
         <span className="font-medium">
-          {thread.author ? displayLogin(thread.author) : "unknown"}
+          {thread.author ? displayLogin(thread.author) : tx("unknown")}
         </span>
         {thread.state && (
-          <Badge variant="secondary">{thread.state.toLowerCase()}</Badge>
+          <Badge variant="secondary">{tx(thread.state.toLowerCase())}</Badge>
         )}
         <span className="text-muted-foreground">
           {thread.date && <RelativeTime date={thread.date} />}
         </span>
         {minimized && (
           <span className="text-[11px] text-muted-foreground italic">
-            hidden
+            {tx("hidden")}
             {thread.minimizedReason
-              ? ` · ${formatReason(thread.minimizedReason)}`
+              ? ` · ${tx(formatReason(thread.minimizedReason))}`
               : ""}
           </span>
         )}
@@ -191,7 +194,7 @@ export function Thread({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Comment actions"
+                    aria-label={tx("Comment actions")}
                     className="text-muted-foreground hover:text-foreground data-popup-open:text-foreground"
                   />
                 }
@@ -201,22 +204,22 @@ export function Thread({
               <DropdownMenuContent align="end" className="min-w-44">
                 {thread.url && (
                   <DropdownMenuItem
-                    onClick={() => copyText(thread.url, "Link copied")}
+                    onClick={() => copyText(thread.url, tx("Link copied"))}
                   >
-                    Copy link
+                    {tx("Copy link")}
                   </DropdownMenuItem>
                 )}
                 {onQuote && (
                   <DropdownMenuItem onClick={onQuote}>
-                    Quote reply
+                    {tx("Quote reply")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
                   onClick={() =>
-                    copyText(copyMarkdown ?? thread.body, "Markdown copied")
+                    copyText(copyMarkdown ?? thread.body, tx("Markdown copied"))
                   }
                 >
-                  Copy markdown
+                  {tx("Copy markdown")}
                 </DropdownMenuItem>
                 {onSaveEdit && (
                   <DropdownMenuItem
@@ -225,7 +228,7 @@ export function Thread({
                       setEditing(true);
                     }}
                   >
-                    Edit
+                    {tx("Edit")}
                   </DropdownMenuItem>
                 )}
                 {onUnhide && minimized && (
@@ -233,7 +236,7 @@ export function Thread({
                     disabled={!!disabledReason}
                     onClick={onUnhide}
                   >
-                    Unhide{disabledSuffix}
+                    {tx("Unhide")}{disabledSuffix}
                   </DropdownMenuItem>
                 )}
                 {onHide && !minimized && (
@@ -245,7 +248,7 @@ export function Thread({
                       disabled={!!disabledReason}
                       className="data-disabled:opacity-50"
                     >
-                      Hide…{disabledSuffix}
+                      {tx("Hide…")}{disabledSuffix}
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       {HIDE_REASONS.map(([label, classifier]) => (
@@ -253,7 +256,7 @@ export function Thread({
                           key={classifier}
                           onClick={() => onHide(classifier)}
                         >
-                          {label}
+                          {tx(label)}
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuSubContent>
@@ -261,7 +264,7 @@ export function Thread({
                 )}
                 {onDelete && (
                   <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                    Delete
+                    {tx("Delete")}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -271,7 +274,7 @@ export function Thread({
       </p>
       {editing ? (
         <CommentEditor
-          ariaLabel="Edit comment"
+          ariaLabel={tx("Edit comment")}
           value={draft}
           onChange={setDraft}
           canSubmit={
@@ -294,7 +297,7 @@ export function Thread({
           onClick={() => setExpanded(true)}
           className="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
-          Show hidden comment
+          {tx("Show hidden comment")}
         </button>
       ) : (
         <>
@@ -304,7 +307,7 @@ export function Thread({
               onClick={() => setExpanded(false)}
               className="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
-              Hide comment
+              {tx("Hide comment")}
             </button>
           )}
           {thread.body.trim() &&

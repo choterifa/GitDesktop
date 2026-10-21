@@ -49,6 +49,7 @@ import {
   valueKey,
   type WritableFieldDef,
 } from "./ProjectFieldControls";
+import { useProjectsText } from "./use-projects-text";
 
 const NOTHING_DRAFTED_REASON = "Nothing to apply yet";
 
@@ -195,6 +196,7 @@ export function BoardBulkFieldsDialog({
     clears: string[],
   ) => Promise<boolean>;
 }) {
+  const tx = useProjectsText();
   const [draft, setDraft] = useState<BulkDraft>({});
   const titleId = useId();
   // Every open starts fresh at "Leave as is" everywhere: this dialog stays mounted
@@ -220,21 +222,29 @@ export function BoardBulkFieldsDialog({
         draft[def.id] !== undefined &&
         draft[def.id] !== INVALID_DRAFT,
     );
-  const fields = `${drafted} ${drafted === 1 ? "field" : "fields"}`;
+  const fields = `${drafted} ${tx(drafted === 1 ? "field" : "fields")}`;
   const draftStatus = (() => {
     switch (true) {
       case drafted === 0:
-        return "No changes drafted";
+        return tx("No changes drafted");
       case issueRowsNarrow:
-        return `${fields} will be written; issue fields skip ${noun}s you can't set them on`;
+        return tx("{{fields}} will be written; issue fields skip {{count}} {{noun}}", {
+          fields,
+          count: cards.length - issueCards.length,
+          noun: tx(noun === "card" ? "cards" : "rows"),
+        });
       default:
-        return `${fields} will be written to every eligible ${noun}`;
+        return tx("{{fields}} will be written to every eligible {{noun}}", {
+          fields,
+          noun: tx(eligibleCount === 1 ? noun : noun === "card" ? "cards" : "rows"),
+        });
     }
   })();
   // Ranked: the board-wide hold outranks the draft's own emptiness, since a
   // sign-in that can't write at all is the more useful thing to say.
   const applyHeld =
-    heldReason ?? (drafted === 0 ? NOTHING_DRAFTED_REASON : undefined);
+    heldReason ??
+    (drafted === 0 ? tx(NOTHING_DRAFTED_REASON) : undefined);
 
   async function apply() {
     // Belt-and-braces with the button's own `disabled`, which is derived at render:
@@ -273,12 +283,15 @@ export function BoardBulkFieldsDialog({
       >
         <DialogHeader>
           <DialogTitle id={titleId}>
-            Edit fields on {eligibleCount}{" "}
-            {eligibleCount === 1 ? noun : `${noun}s`}
+            {tx("Edit fields on {{count}} {{noun}}", {
+              count: eligibleCount,
+              noun: tx(eligibleCount === 1 ? noun : noun === "card" ? "cards" : "rows"),
+            })}
           </DialogTitle>
           <DialogDescription>
-            Every field starts at <strong>Leave as is</strong>. Only the rows
-            you change are written, and nothing is sent until you apply.
+            {tx("Every field starts at {{keep}}. Only the rows you change are written, and nothing is sent until you apply.", {
+              keep: tx("Leave as is"),
+            })}
           </DialogDescription>
         </DialogHeader>
         {/* The dialog's ONE scroll region: every row renders at natural height, so
@@ -289,7 +302,7 @@ export function BoardBulkFieldsDialog({
           className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 outline-none"
         >
           {defsPending && (
-            <p className="py-1 text-muted-foreground">{defsPendingReason}</p>
+            <p className="py-1 text-muted-foreground">{tx(defsPendingReason)}</p>
           )}
           {defsError !== null && (
             <div className="py-1">
@@ -303,13 +316,13 @@ export function BoardBulkFieldsDialog({
                 className="mt-1.5"
                 onClick={onRetryDefs}
               >
-                Retry
+                {tx("Retry")}
               </Button>
             </div>
           )}
           {!defsPending && defsError === null && writable.length === 0 && (
             <p className="py-1 text-muted-foreground">
-              This board defines no fields you can change here.
+              {tx("This board defines no fields you can change here.")}
             </p>
           )}
           {writable.map((def) => {
@@ -322,7 +335,10 @@ export function BoardBulkFieldsDialog({
                 hint={fieldHint(rowCards, def)}
                 reach={
                   issueRow && rowCards.length < cards.length
-                    ? `Issues only: ${rowCards.length} of ${cardCount(cards.length, noun)}`
+                    ? tx("Issues only: {{count}} of {{total}}", {
+                        count: rowCards.length,
+                        total: cardCount(cards.length, noun),
+                      })
                     : undefined
                 }
                 entry={draft[def.id]}
@@ -333,9 +349,11 @@ export function BoardBulkFieldsDialog({
                 // editor: that hold exists because a single-line control would
                 // LOAD the value and flatten it, and "Set to" never loads one — it
                 // replaces the value wholesale with what the user typed.
-                lockedReason={
-                  heldReason ?? issueFieldRowReason(def, rowCards.length, noun)
-                }
+                lockedReason={(() => {
+                  const reason =
+                    heldReason ?? issueFieldRowReason(def, rowCards.length, noun);
+                  return reason === undefined ? undefined : tx(reason);
+                })()}
                 onChange={(entry) => setRow(def.id, entry)}
               />
             );
@@ -345,7 +363,7 @@ export function BoardBulkFieldsDialog({
               empty-state line above would be a lie. */}
           {defsTruncated && (
             <p className="text-[11px] text-muted-foreground">
-              Some of this board's fields aren't shown.
+              {tx("Some of this board's fields aren't shown.")}
             </p>
           )}
         </div>
@@ -359,7 +377,7 @@ export function BoardBulkFieldsDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {tx("Cancel")}
           </Button>
           <DisabledReasonButton
             type="button"
@@ -368,7 +386,7 @@ export function BoardBulkFieldsDialog({
             reason={applyHeld}
             onClick={() => void apply()}
           >
-            Apply
+            {tx("Apply")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -378,11 +396,12 @@ export function BoardBulkFieldsDialog({
 
 /** What the selection holds for a field right now, as the row's own quiet line. */
 function HintLine({ def, hint }: { def: WritableFieldDef; hint: FieldHint }) {
+  const tx = useProjectsText();
   if (hint.kind === "mixed")
-    return <span className="text-muted-foreground">(mixed)</span>;
+    return <span className="text-muted-foreground">({tx("mixed")})</span>;
   const value = hint.value;
   if (value === undefined)
-    return <span className="text-muted-foreground">Not set</span>;
+    return <span className="text-muted-foreground">{tx("Not set")}</span>;
   switch (value.kind) {
     case "singleSelect":
       return <OptionValue name={value.name} color={value.color} />;
@@ -431,14 +450,14 @@ function HintLine({ def, hint }: { def: WritableFieldDef; hint: FieldHint }) {
       return (
         <span className="flex min-w-0 items-center gap-1">
           <span className="min-w-0 truncate">{lines[0]}</span>
-          <span className="shrink-0 text-muted-foreground">(multi-line)</span>
+          <span className="shrink-0 text-muted-foreground">({tx("multi-line")})</span>
         </span>
       );
     }
     // A kind this build has no compact form for says nothing rather than guessing;
     // `def` is what names the row above it either way.
     default:
-      return <span className="text-muted-foreground">Set on {def.name}</span>;
+      return <span className="text-muted-foreground">{tx("Set on {{name}}", { name: def.name })}</span>;
   }
 }
 
@@ -464,6 +483,7 @@ function BulkFieldRow({
   lockedReason?: string;
   onChange: (entry: RowDraft | undefined) => void;
 }) {
+  const tx = useProjectsText();
   const mode = rowMode(entry);
   const modeLabelId = useId();
   const reachId = useId();
@@ -477,7 +497,7 @@ function BulkFieldRow({
           {def.name}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
-          <span className="text-muted-foreground">Now:</span>
+          <span className="text-muted-foreground">{tx("Now:")}</span>
           <HintLine def={def} hint={hint} />
         </span>
       </div>
@@ -506,15 +526,15 @@ function BulkFieldRow({
       >
         <label className={MODE_ROW_CLASS}>
           <Radio value="keep" disabled={!!lockedReason} />
-          Leave as is
+          {tx("Leave as is")}
         </label>
         <label className={MODE_ROW_CLASS}>
           <Radio value="set" disabled={!!lockedReason} />
-          Set to
+          {tx("Set to")}
         </label>
         <label className={MODE_ROW_CLASS}>
           <Radio value="clear" disabled={!!lockedReason} />
-          Clear
+          {tx("Clear")}
         </label>
       </RadioGroup>
       {mode === "set" && (

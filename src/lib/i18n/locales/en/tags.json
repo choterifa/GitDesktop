@@ -1,0 +1,180 @@
+{
+  "badges": {
+    "latest": "Latest",
+    "prerelease": "Pre-release",
+    "draft": "Draft"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "save": "Save",
+    "view": "View"
+  },
+  "probe": {
+    "checking": "Checking whether {{action}} is available…",
+    "unreachable": "Can't {{action}} right now: the provider isn't ready.",
+    "actions": {
+      "publishRelease": "publish a release",
+      "manageRelease": "manage this release",
+      "publishTagRelease": "publish a release for this tag"
+    }
+  },
+  "panel": {
+    "signInGitLabCli": "Sign in to GitLab CLI to manage releases.",
+    "installGitLabCli": "Install and connect GitLab CLI to manage releases.",
+    "connectForge": "Connect a forge to manage releases.",
+    "title": "Tags & releases",
+    "new": "New",
+    "newRelease": "New release",
+    "noCommitToTag": "There is no current commit to tag.",
+    "newTagOnCurrentCommit": "Create a new tag on the current commit",
+    "filterTags": "Filter tags and releases…",
+    "noTagsMatch": "No tags or releases match.",
+    "noTagsYet": "No tags or releases yet.",
+    "releaseLabel": "Release",
+    "tagLabel": "Tag",
+    "newTag": "Create a tag",
+    "newTagDescriptionBeforeHash": "Creates a lightweight tag on the current commit",
+    "newTagDescriptionAfterHash": "Push it or create a release from its detail view.",
+    "createTag": "Create tag"
+  },
+  "access": {
+    "requiresWrite": "You need write access to {{repo}} to manage releases.",
+    "thisRepository": "this repository"
+  },
+  "states": {
+    "offlineUnavailable": "You're offline — this will be available once you're back online.",
+    "applying": "Applying this change…",
+    "deletingAsset": "Deleting this release asset…",
+    "generating": "Generating…",
+    "generatedNotesPending": "Wait for the generated notes to finish",
+    "aiDraftPending": "Wait for the AI draft to finish",
+    "generatePending": "Wait for the release notes generation to finish"
+  },
+  "detail": {
+    "signInGitLabManage": "Sign in to GitLab CLI to load this release.",
+    "installGitLabManage": "Install and connect GitLab CLI to load this release.",
+    "connectForgeManage": "Connect a forge to load this release.",
+    "loadingTagRelease": "Loading the release for this tag…",
+    "signInGitLabPublish": "Sign in to GitLab CLI to publish a release.",
+    "installGitLabPublish": "Install and connect GitLab CLI to publish a release.",
+    "connectForgePublish": "Connect a forge to publish a release.",
+    "publish": "Publish release",
+    "edit": "Edit release",
+    "released": "Released",
+    "noReleaseNotes": "No release notes.",
+    "assetCount_one": "{{count}} asset",
+    "assetCount_other": "{{count}} assets",
+    "upload": "Upload asset",
+    "noAssets": "No release assets.",
+    "downloadAsset": "Download {{name}}",
+    "deleteAsset": "Delete {{name}}",
+    "openAsset": "Open {{name}}",
+    "editRelease": "Edit release",
+    "updatesTagOn": "Updates tag {{tag}} on {{provider}}.",
+    "titlePlaceholder": "Release title",
+    "releaseNotes": "Release notes",
+    "notesPlaceholder": "Write release notes…",
+    "latestRelease": "Set as the latest release",
+    "latestDraftExplanation": "This draft will become the latest release when published.",
+    "updateUpdaterManifest": "Update the updater manifest",
+    "updaterManifestExplanation": "Also update latest.json with these release notes.",
+    "createRelease": "Create release",
+    "annotated": "Annotated",
+    "noTagDescription": "No description for this tag.",
+    "checkout": "Check out",
+    "pushTag": "Push tag",
+    "deleteTag": "Delete tag"
+  },
+  "confirm": {
+    "deleteAsset": {
+      "title": "Delete {{name}}?",
+      "binaryBody": "This release asset will be permanently deleted.",
+      "linkBody": "This asset link will be permanently deleted."
+    },
+    "deleteRelease": {
+      "title": "Delete release {{name}}?",
+      "description": "Removes the {{provider}} release. This cannot be undone.",
+      "cleanupTagBefore": "Also delete the",
+      "cleanupTagAfter": "tag"
+    },
+    "deleteTag": {
+      "title": "Delete tag {{name}}?",
+      "description": "Deletes the local tag. This cannot be undone.",
+      "remoteBeforeOrigin": "Also delete it from"
+    }
+  },
+  "toasts": {
+    "tagCreated": "Created tag {{name}}.",
+    "assetUploaded": "Release asset uploaded.",
+    "assetDownloaded": "Downloaded {{name}}.",
+    "assetDeleted": "Release asset deleted.",
+    "tagPushed": "Pushed tag {{name}}.",
+    "tagDeleted": "Deleted tag {{name}}.",
+    "releasePublished": "Release published.",
+    "releaseUpdated": "Release updated.",
+    "releaseDeleted": "Release deleted.",
+    "notesReadyTitle": "Release notes ready",
+    "notesReadyDescription": "They're waiting in the dialog.",
+    "notesDiscardedOnSwitch": "Those notes were for {{name}} — they were discarded when you switched tags.",
+    "notesNoLongerAvailable": "Those notes for {{name}} are no longer available.",
+    "draftSaved": "Draft saved",
+    "released": "Released {{name}}"
+  },
+  "errors": {
+    "generateNotesFailed": "Couldn't generate notes — try again.",
+    "offlineManifestNotUploaded": "Release updated, but the updater manifest wasn't uploaded because you're offline.",
+    "manifestNotUploadedAfterSwitch": "Release updated, but the updater manifest wasn't uploaded after the repository {{action}} ({{away}}).",
+    "closedRepository": "was closed",
+    "switchedRepositories": "changed",
+    "releaseUpdatedManifestMayBeMissing": "Release updated, but its updater manifest may be missing."
+  },
+  "create": {
+    "summarizeWithAiHint": "Summarize with AI{{hint}}",
+    "enableAiInSettings": "Enable AI in Settings first.",
+    "releaseTitle": "Release {{name}}",
+    "newRelease": "New release",
+    "description": "Publishes a {{provider}} release. A new tag is created from the target on publish.",
+    "tag": "Tag",
+    "noMatchingTags": "No matching tags.",
+    "createNewTagPrefix": "Create new tag",
+    "createNewTagSuffix": "on release",
+    "target": "Target",
+    "titleOptional": "Title (optional)",
+    "releaseTitlePlaceholder": "Release title",
+    "releaseNotes": "Release notes",
+    "previousTag": "Previous tag",
+    "automatic": "Automatic",
+    "previousTagNotFound": "This isn't an existing tag, so generated notes will ignore it and use the default range.",
+    "notesPlaceholder": "What's changed… (or generate notes above)",
+    "generateNotes": "Generate notes",
+    "fromGitHubNotes": "From GitHub (commits & PRs)",
+    "summarizeWithAi": "Summarize with AI",
+    "setLatest": "Set as the latest release",
+    "saveDraft": "Save draft",
+    "publishRelease": "Publish release",
+    "chooseTarget": "Choose a target",
+    "filterBranches": "Filter branches…",
+    "filterRecentCommits": "Filter recent commits…",
+    "branches": "Branches",
+    "recentCommits": "Recent commits",
+    "noMatches": "No matches."
+  },
+  "validation": {
+    "empty": "Enter a tag name",
+    "spaces": "Tag names can't contain spaces",
+    "startsDash": "Tag names can't start with \"-\"",
+    "endsDot": "Tag names can't end with \".\"",
+    "startsSlash": "Tag names can't start with \"/\"",
+    "endsSlash": "Tag names can't end with \"/\"",
+    "doubleSlash": "Tag names can't contain \"//\"",
+    "startsDot": "Tag names can't start with \".\"",
+    "partStartsDot": "The tag name part \"{{part}}\" can't start with \".\"",
+    "endsLock": "Tag names can't end with \".lock\"",
+    "partEndsLock": "The tag name part \"{{part}}\" can't end with \".lock\"",
+    "doubleDot": "Tag names can't contain \"..\"",
+    "atBrace": "Tag names can't contain \"@{\"",
+    "controlCharacters": "Tag names can't contain control characters",
+    "forbiddenCharacter": "Tag names can't contain \"{{character}}\""
+  }
+}

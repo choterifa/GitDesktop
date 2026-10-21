@@ -1,6 +1,7 @@
 import { GitMergeIcon, GitPullRequestIcon } from "@phosphor-icons/react";
 import { PR_AUDIT_LABEL, PR_AUDIT_TONE, type PrAudit } from "@/lib/pulls/audit";
 import { cn } from "@/lib/utils";
+import { useSessionText } from "./use-session-text";
 
 /**
  * A compact pull-request state chip for the agent audit — **PR open** / **PR
@@ -10,6 +11,7 @@ import { cn } from "@/lib/utils";
  * visible wherever you act on the session.
  */
 export function PrAuditChip({ audit }: { audit: PrAudit }) {
+  const tx = useSessionText();
   const Icon = audit.state === "merged" ? GitMergeIcon : GitPullRequestIcon;
   return (
     <span
@@ -19,12 +21,12 @@ export function PrAuditChip({ audit }: { audit: PrAudit }) {
       )}
       title={
         audit.label === "local"
-          ? "Local pull request"
-          : `Pull request ${audit.label}`
+          ? tx("Local pull request")
+          : tx("Pull request {{label}}", { label: audit.label })
       }
     >
       <Icon weight="bold" className="size-3" />
-      {PR_AUDIT_LABEL[audit.state]}
+      {tx(PR_AUDIT_LABEL[audit.state])}
     </span>
   );
 }

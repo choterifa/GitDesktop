@@ -8,6 +8,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ForgeUserAvatar } from "@/components/forge-user-avatar";
 import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,6 @@ import { presentError } from "@/lib/error-summary";
 import type { IssueStateFilter } from "@/lib/git/api";
 import {
   forgeFeatureReady,
-  forgeProbeReason,
   forgeProbeState,
   repoKeys,
   useForgeStatus,
@@ -43,7 +43,6 @@ import {
   usePrefetchIssue,
 } from "@/lib/git/queries";
 import {
-  type ForgeProvider,
   providerLabel,
   remoteListFilterKey,
 } from "@/lib/git/types";
@@ -73,28 +72,19 @@ import { CreateJiraIssueDialog } from "./CreateJiraIssueDialog";
 import { CreateLocalIssueDialog } from "./CreateLocalIssueDialog";
 import { RepoJiraDialog } from "./RepoJiraDialog";
 
-/** Where the "New" menu's forge item creates the issue. An unrecognized or
- *  absent provider routes through gh, so GitHub is the fallback (mirrors
- *  `providerLabel`). */
-const NEW_ISSUE_LABEL: Record<ForgeProvider, string> = {
-  github: "Issue on GitHub…",
-  gitlab: "Issue on GitLab…",
-  bitbucket: "Issue on Bitbucket…",
-};
-
 /** Bitbucket has retired its native issue tracker (deleted platform-wide
  *  2026-08-20); issues moved to Jira. When the repo has no Jira link yet, invite
  *  the user to link one — that's the only issue story for a Bitbucket repo. */
 function BitbucketLinkJiraCta({ onLink }: { onLink: () => void }) {
+  const { t } = useTranslation("issues");
   return (
     <div className="space-y-2.5 px-3 py-4 text-xs text-muted-foreground">
       <p>
-        Bitbucket has retired its native issue tracker — link a Jira project to
-        browse its issues here.
+        {t("panel.bitbucketRetiredTracker")}
       </p>
       <Button size="sm" className="cursor-pointer" onClick={onLink}>
         <KanbanIcon data-icon="inline-start" />
-        Link your Jira project
+        {t("panel.linkJiraProject")}
       </Button>
     </div>
   );
@@ -116,6 +106,7 @@ function JiraStatusChip({ issue }: { issue: JiraIssueInfo }) {
 }
 
 export function IssuesPanel({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation("issues");
   const gh = useForgeStatus(repoPath);
   const provider = gh.data?.provider;
   const isGitLab = provider === "gitlab";
@@ -129,7 +120,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   const providerName = providerLabel(provider);
   // When browsing the parent, the remote section header names the parent slug.
   const remoteLabel =
-    lens === "upstream" ? (upstreamSlug ?? "Upstream") : providerName;
+    lens === "upstream" ? (upstreamSlug ?? t("panel.upstream")) : providerName;
   // Issue *reads* are provider-neutral (the panel-level `issues` flag); issue
   // *creation* follows its own per-action write flag — ready GitHub AND GitLab
   // repos both offer the create dialog (which hides GitHub-only fields per
@@ -141,7 +132,9 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   const implemented = gh.data?.implemented;
   const canFilterMine = forgeFeatureReady(gh.data, "listFilterMine");
   const probe = forgeProbeState(gh);
-  const scopeProbeReason = useScopeProbeReason(repoPath);
+  const scopeProbeReason = useScopeProbeReason(repoPath)
+    ? t("panel.checkingHost")
+    : null;
   const canFilterAuthor = forgeFeatureReady(gh.data, "listFilterAuthor");
   // Borrowed from the label-editing flag: a provider with no issue labels has
   // nothing for the forge to filter by — the pick runs client-side there.
@@ -204,17 +197,19 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
       case canOpenGhCreate:
         return undefined;
       case probe !== null:
-        return forgeProbeReason(probe, "open an issue");
+        return probe === "checking"
+          ? t("panel.checkingHost")
+          : t("panel.hostUnreachable", { action: t("panel.openIssueAction") });
       case isBitbucket:
-        return "Bitbucket has retired its native issue tracker — link a Jira project to track issues.";
+        return t("panel.bitbucketLinkJiraReason");
       case isGitLab && Boolean(gh.data?.installed):
-        return "Sign in to GitLab (glab auth login) to open issues here.";
+        return t("panel.signInGitLab", { command: "glab auth login" });
       case isGitLab:
-        return "Install the GitLab CLI (glab) to open issues here.";
+        return t("panel.installGitLabCli", { command: "glab" });
       case issuesDisabled:
-        return "Issues are disabled on this repository — enable them in the repository settings on GitHub.";
+        return t("panel.issuesDisabledCreateReason");
       default:
-        return "Connect this repository to GitHub to open an issue.";
+        return t("panel.connectGitHubCreateReason");
     }
   })();
   const onStateFilter = (s: IssueStateFilter) => {
@@ -421,10 +416,17 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   // connected yet.
   const mineReason = (() => {
     if (canFilterMine) return null;
-    if (probe !== null) return forgeProbeReason(probe, "filter by assignee");
+    if (probe !== null)
+      return probe === "checking"
+        ? t("panel.checkingHost")
+        : t("panel.hostUnreachable", {
+            action: t("panel.filterByAssigneeAction"),
+          });
     if (implemented && !implemented.listFilterMine)
-      return `${providerName} issues have no assignees to filter by`;
-    return `Connect this repository to ${providerName} to filter by assignee`;
+      return t("panel.providerHasNoAssignees", { provider: providerName });
+    return t("panel.connectProviderToFilterAssignee", {
+      provider: providerName,
+    });
   })();
   // Same shape as mineReason above, and the order matters: the provider claim is
   // only made where `implemented` actually refutes the axis, so a status that
@@ -434,12 +436,24 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   // silently empty the local section under a zero badge.
   const authorReason = (() => {
     if (canFilterAuthor) return null;
-    if (probe !== null) return forgeProbeReason(probe, "filter by author");
+    if (probe !== null)
+      return probe === "checking"
+        ? t("panel.checkingHost")
+        : t("panel.hostUnreachable", {
+            action: t("panel.filterByAuthorAction"),
+          });
     if (implemented && !implemented.listFilterAuthor)
-      return `${providerName} can't filter issues by author here`;
-    return `Connect this repository to ${providerName} to filter by author`;
+      return t("panel.providerCannotFilterAuthor", { provider: providerName });
+    return t("panel.connectProviderToFilterAuthor", {
+      provider: providerName,
+    });
   })();
-  const axisCap = isGitLab ? gitlabAxisCap(providerName) : undefined;
+  const axisCap = isGitLab
+    ? {
+        ...gitlabAxisCap(providerName),
+        reason: t("panel.axisCap", { provider: providerName, max: 6 }),
+      }
+    : undefined;
 
   // The Bitbucket remote (host) section never has issues — its tracker is
   // retired. Unlinked, it invites linking a Jira project; linked, the Jira
@@ -449,7 +463,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
   const bitbucketNotReadySlot = isBitbucket ? (
     link ? (
       <p className="px-3 py-2 text-[11px] text-muted-foreground">
-        Issues for this repository live in Jira, below.
+        {t("panel.repositoryIssuesLiveInJira")}
       </p>
     ) : (
       <BitbucketLinkJiraCta onLink={() => setJiraOpen(true)} />
@@ -473,23 +487,27 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
             onPreset={listFilter.setPreset}
             canFilterMine={canFilterMine}
             canGroupByReview={false}
-            disabledReason={listFilter.prefsReason}
+            disabledReason={
+              listFilter.prefsReady
+                ? null
+                : t("panel.loadingSavedFilters")
+            }
             probeReason={scopeProbeReason}
           />
         }
         lensControl={<RepoLensSwitcher repoPath={repoPath} />}
         newMenu={{
-          ghLabel: NEW_ISSUE_LABEL[provider ?? "github"],
+          ghLabel: t("panel.issueOnProvider", { provider: providerName }),
           // Issues disabled on the repo (a fork's default) also blocks creation, even
           // when the forge is otherwise ready — gate it with the reason so "New" isn't
           // a button that can only fail.
           ghDisabled: !canCreateGh || issuesDisabled,
           ghReason: ghCreateReason,
           onGh: () => setCreateOpen(true),
-          localLabel: "Local issue…",
+          localLabel: t("panel.localIssueMenu"),
           onLocal: () => setCreateLocalOpen(true),
           jiraLabel: canCreateJira
-            ? `Jira issue in ${link?.projectKey}…`
+            ? t("panel.jiraIssueInProject", { projectKey: link?.projectKey })
             : undefined,
           onJira: canCreateJira ? () => setCreateJiraOpen(true) : undefined,
         }}
@@ -505,14 +523,18 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
             labelCount={labelCount}
             authorReason={authorReason}
             axisCap={axisCap}
-            disabledReason={listFilter.prefsReason}
+            disabledReason={
+              listFilter.prefsReady
+                ? null
+                : t("panel.loadingSavedFilters")
+            }
             mine={{
-              label: "Mine",
+              label: t("panel.mine"),
               disabledReason: mineReason,
               rows: [
                 {
                   key: "assigned",
-                  label: "Assigned to me",
+                  label: t("panel.assignedToMe"),
                   checked: listFilter.assignedToMe,
                   onToggle: listFilter.setAssignedToMe,
                 },
@@ -529,8 +551,8 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
           <Button
             variant="outline"
             size="icon-sm"
-            aria-label="Refresh issues"
-            title="Refresh issues"
+            aria-label={t("panel.refreshIssues")}
+            title={t("panel.refreshIssues")}
             aria-busy={refreshing}
             onClick={refreshIssueList}
           >
@@ -557,8 +579,8 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
               </span>
             </p>
             <p className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground">
-              local · <RelativeTime date={issue.createdAt} />
-              {issue.archived ? " · archived" : ""}
+              {t("panel.localLabel")} · <RelativeTime date={issue.createdAt} />
+              {issue.archived ? ` · ${t("panel.archived")}` : ""}
             </p>
           </>
         )}
@@ -578,10 +600,9 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
         remoteErrorSlot={
           issuesDisabled ? (
             <div className="space-y-1 px-3 py-4 text-xs text-muted-foreground">
-              <p>Issues are disabled on this repository.</p>
+              <p>{t("panel.issuesDisabled")}</p>
               <p className="text-[11px]">
-                Forks start with issues turned off — enable them in the
-                repository settings on GitHub.
+                {t("panel.forksStartWithIssuesOff")}
               </p>
               {/* This disabled state only ever renders for the origin (fork) lens by
                 construction; when the repo is a GitHub fork, offer browsing the
@@ -589,8 +610,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
               {lensGate && lens === "origin" && (
                 <div className="space-y-1.5 pt-1.5">
                   <p className="text-[11px]">
-                    Your fork has issues disabled — switch to Upstream to browse
-                    the parent repository's issues.
+                    {t("panel.forkIssuesDisabledSwitchUpstream")}
                   </p>
                   <Button
                     variant="outline"
@@ -598,14 +618,14 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                     className="cursor-pointer"
                     onClick={() => setLens("upstream")}
                   >
-                    Switch to upstream
+                    {t("panel.switchToUpstream")}
                   </Button>
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-2 px-3 py-4 text-xs text-muted-foreground">
-              <p>Couldn't load issues.</p>
+              <p>{t("panel.issuesLoadFailed")}</p>
               {/* The filter refusals this panel can provoke — a fan-out too wide
                   for the provider, a rejected author/label term, an advanced search
                   the host doesn't offer — are PERMANENT, and each already carries
@@ -624,7 +644,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                   className="cursor-pointer"
                   onClick={() => issueList.refetch()}
                 >
-                  Retry
+                  {t("shared.retry")}
                 </Button>
               )}
             </div>
@@ -681,8 +701,8 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
           </>
         )}
         remoteSkeletonRows={3}
-        localNoun="issues"
-        remoteNoun="issues"
+        localNoun={t("panel.issuesNoun")}
+        remoteNoun={t("panel.issuesNoun")}
         jira={
           link
             ? {
@@ -697,10 +717,12 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                         `https://${link.siteHost}/browse/${link.projectKey}`,
                       ).catch(toastError)
                     }
-                    title={`Open ${link.projectKey} in Jira`}
+                    title={t("panel.openProjectInJira", {
+                      projectKey: link.projectKey,
+                    })}
                   >
                     <ArrowSquareOutIcon data-icon="inline-start" />
-                    View in Jira
+                    {t("panel.viewInJira")}
                   </Button>
                 ),
                 pending: jiraIssues.isPending,
@@ -710,8 +732,9 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                 errorSlot: (
                   <div className="space-y-2 px-3 py-4 text-xs text-muted-foreground">
                     <p>
-                      Couldn't load {link.projectKey} — your Jira credential may
-                      have expired.
+                      {t("panel.jiraLoadFailed", {
+                        projectKey: link.projectKey,
+                      })}
                     </p>
                     <Button
                       variant="outline"
@@ -719,7 +742,7 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                       className="cursor-pointer"
                       onClick={() => setJiraOpen(true)}
                     >
-                      Reconnect
+                      {t("panel.reconnect")}
                     </Button>
                   </div>
                 ),
@@ -743,8 +766,10 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                       {issue.storyPoints != null && (
                         <span
                           className="w-fit whitespace-nowrap border px-1 py-px text-[10px] text-muted-foreground"
-                          title="Story points"
-                          aria-label={`${formatStoryPoints(issue.storyPoints)} story points`}
+                          title={t("panel.storyPoints")}
+                          aria-label={t("panel.storyPointsValue", {
+                            points: formatStoryPoints(issue.storyPoints),
+                          })}
                         >
                           {formatStoryPoints(issue.storyPoints)}
                         </span>
@@ -776,7 +801,10 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
                   </>
                 ),
                 skeletonRows: 3,
-                emptyLabel: `No ${stateFilter} issues in ${link.projectKey} — switch the filter or view the project in Jira.`,
+                emptyLabel: t("panel.noJiraIssuesForFilter", {
+                  state: t(`panel.state.${stateFilter}`),
+                  projectKey: link.projectKey,
+                }),
               }
             : undefined
         }
@@ -788,11 +816,13 @@ export function IssuesPanel({ repoPath }: { repoPath: string }) {
           link ? (
             <button
               type="button"
-              aria-label={`Reconnect ${link.projectKey}`}
+              aria-label={t("panel.reconnectProject", {
+                projectKey: link.projectKey,
+              })}
               onClick={() => setJiraOpen(true)}
               className={DEGRADED_ACTION_CLASS}
             >
-              Reconnect
+              {t("panel.reconnect")}
             </button>
           ) : undefined
         }

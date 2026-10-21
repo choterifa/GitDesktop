@@ -42,6 +42,7 @@ import {
   type SwapFocusRef,
   useConfirmSwapFocus,
 } from "./parts";
+import { useRepoSettingsText } from "./use-repo-settings-text";
 
 const bbSchedulesKey = (repo: string) => ["repo", repo, "bb-schedules"];
 
@@ -59,6 +60,7 @@ export function BitbucketSchedulesSection({
   repoPath: string;
   open: boolean;
 }) {
+  const tx = useRepoSettingsText();
   const config = useBbPipelinesConfig(repoPath, open);
   const setEnabled = useBbSetPipelinesEnabled(repoPath);
   const enabled = config.data?.enabled ?? false;
@@ -104,7 +106,7 @@ export function BitbucketSchedulesSection({
   async function handleEnablePipelines() {
     try {
       await setEnabled.mutateAsync(true);
-      toast.success("Pipelines enabled");
+      toast.success(tx("Pipelines enabled"));
     } catch (e) {
       toastError(e);
     }
@@ -121,7 +123,7 @@ export function BitbucketSchedulesSection({
   async function handleRemove(uuid: string) {
     try {
       await remove.mutateAsync(uuid);
-      toast.success("Schedule deleted");
+      toast.success(tx("Schedule deleted"));
       setConfirming(null);
     } catch (e) {
       toastError(e);
@@ -164,7 +166,7 @@ export function BitbucketSchedulesSection({
       <div data-confirm-section className="min-w-0 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            Run a pipeline on a branch automatically, on a cron schedule.
+            {tx("Run a pipeline on a branch automatically, on a cron schedule.")}
           </p>
           <Button
             ref={swapFocus(NEW_FORM_SWAP_KEY)}
@@ -173,7 +175,7 @@ export function BitbucketSchedulesSection({
             onClick={() => setCreating(true)}
           >
             <PlusIcon data-icon="inline-start" />
-            Add schedule
+            {tx("Add schedule")}
           </Button>
         </div>
 
@@ -181,12 +183,12 @@ export function BitbucketSchedulesSection({
           query={schedules}
           rowCount={schedules.data?.length ?? 0}
           noun="schedules"
-          loadFailed="Couldn't load schedules."
+          loadFailed={tx("Couldn't load schedules.")}
           extraPaused={config.isPaused}
-          emptyLabel="No schedules yet — a schedule runs a branch's pipeline on a recurring cron."
+          emptyLabel={tx("No schedules yet — a schedule runs a branch's pipeline on a recurring cron.")}
           skeletonClassName="h-12 w-full"
-          errorTitle="Couldn't load schedules."
-          errorHint="If this is a permissions error, managing schedules needs admin on this repository."
+          errorTitle={tx("Couldn't load schedules.")}
+          errorHint={tx("If this is a permissions error, managing schedules needs admin on this repository.")}
         >
           {schedules.data?.map((s) => (
             <ScheduleRow
@@ -233,16 +235,20 @@ function ScheduleRow({
   onCancel: () => void;
   onRemove: () => void;
 }) {
+  const tx = useRepoSettingsText();
   // A just-created row carries a synthetic `pending:` uuid until the reconcile
   // refetch swaps in the server's real one; a toggle/delete against a fake uuid
   // would 404, so both controls stay disabled while it's syncing.
   const syncing = schedule.uuid.startsWith("pending:");
   const online = useOnline();
-  const deleteLabel = `Delete schedule for ${schedule.refName} (${schedule.cronPattern})`;
+  const deleteLabel = tx("Delete schedule for {{branch}} ({{cron}})", {
+    branch: schedule.refName,
+    cron: schedule.cronPattern,
+  });
   const toggleHeld = (() => {
     switch (true) {
       case syncing:
-        return "Syncing with Bitbucket…";
+        return tx("Syncing with Bitbucket…");
       case !online:
         return OFFLINE_WRITE_REASON;
       default:
@@ -267,12 +273,15 @@ function ScheduleRow({
         heldReason={toggleHeld}
         saving={toggling}
         onCheckedChange={onToggle}
-        aria-label={`Schedule enabled for ${schedule.refName} (${schedule.cronPattern})`}
+        aria-label={tx("Schedule enabled for {{branch}} ({{cron}})", {
+          branch: schedule.refName,
+          cron: schedule.cronPattern,
+        })}
       />
       {confirming ? (
         <InlineConfirm
-          prompt="Delete?"
-          actLabel="Delete"
+          prompt={tx("Delete?")}
+          actLabel={tx("Delete")}
           pending={pending}
           heldReason={online ? undefined : OFFLINE_WRITE_REASON}
           swapFocusRef={swapFocusRef}
@@ -286,10 +295,10 @@ function ScheduleRow({
           variant="ghost"
           className="text-muted-foreground"
           disabled
-          reason="Syncing with Bitbucket…"
+          reason={tx("Syncing with Bitbucket…")}
           aria-label={deleteLabel}
         >
-          Delete
+          {tx("Delete")}
         </DisabledReasonButton>
       ) : (
         <Button
@@ -300,7 +309,7 @@ function ScheduleRow({
           onClick={onConfirm}
           aria-label={deleteLabel}
         >
-          Delete
+          {tx("Delete")}
         </Button>
       )}
     </div>
@@ -323,6 +332,7 @@ function ScheduleForm({
   swapFocusRef: SwapFocusRef;
   onDone: () => void;
 }) {
+  const tx = useRepoSettingsText();
   const create = useBbCreateSchedule(repoPath);
   const online = useOnline();
   const [refName, setRefName] = useState(branches[0] ?? "");
@@ -333,9 +343,9 @@ function ScheduleForm({
     refName.length > 0 && cronValid && !create.isPending && online;
   const offlineReason = online ? undefined : OFFLINE_WRITE_REASON;
   const warning = !refName
-    ? "Pick a branch."
+    ? tx("Pick a branch.")
     : !cronValid
-      ? "Enter a Quartz cron pattern."
+      ? tx("Enter a Quartz cron pattern.")
       : null;
 
   async function submit() {
@@ -354,7 +364,7 @@ function ScheduleForm({
       await create.mutateAsync({ refName, cronPattern, enabled: true });
       onPatch(created);
       onReconcile();
-      toast.success("Schedule added");
+      toast.success(tx("Schedule added"));
       onDone();
     } catch (e) {
       toastError(e);
@@ -365,7 +375,7 @@ function ScheduleForm({
     <div className="min-w-0 space-y-3">
       <div className="space-y-3 rounded-md border p-3">
         <div className="space-y-1.5">
-          <Label htmlFor="bb-schedule-branch">Branch</Label>
+          <Label htmlFor="bb-schedule-branch">{tx("Branch")}</Label>
           <Select
             items={Object.fromEntries(branches.map((b) => [b, b]))}
             value={refName}
@@ -375,7 +385,7 @@ function ScheduleForm({
           >
             <SelectTrigger id="bb-schedule-branch" className="w-full">
               <SelectValue
-                placeholder="Select a branch"
+                placeholder={tx("Select a branch")}
                 onMouseEnter={clipTitleFromText}
               />
             </SelectTrigger>
@@ -389,7 +399,7 @@ function ScheduleForm({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="bb-schedule-cron">Cron pattern</Label>
+          <Label htmlFor="bb-schedule-cron">{tx("Cron pattern")}</Label>
           {/* The form's first keyed node, so opening it lands here: the branch
               comes preselected, and the cron is what needs typing. */}
           <Input
@@ -403,7 +413,7 @@ function ScheduleForm({
             className="font-mono"
           />
           <p className="text-[11px] text-muted-foreground">
-            Quartz cron format.
+            {tx("Quartz cron format.")}
           </p>
         </div>
         {warning && <p className="text-[11px] text-warning">{warning}</p>}
@@ -414,7 +424,7 @@ function ScheduleForm({
             size="sm"
             onClick={onDone}
           >
-            Cancel
+            {tx("Cancel")}
           </Button>
           <DisabledReasonButton
             ref={swapFocusRef}
@@ -428,7 +438,7 @@ function ScheduleForm({
             onClick={submit}
           >
             {create.isPending && <Spinner data-icon="inline-start" />}
-            Add
+            {tx("Add")}
           </DisabledReasonButton>
         </div>
       </div>

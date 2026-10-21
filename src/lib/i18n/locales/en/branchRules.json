@@ -1,0 +1,62 @@
+{
+  "title": "Branch rules",
+  "description": "Local guardrails GitDesktop enforces in this repository. They help prevent accidents on any repo; GitHub's own protection still applies on push. Patterns are globs: * within one segment, ** across segments, and {a,b} for alternatives.",
+  "scope": {
+    "personal": "Personal",
+    "shared": "Shared with repository",
+    "sharedSavedLead": "Saved to",
+    "sharedSavedTail": "and committed — everyone with the repo gets them. They combine with each person's personal rules.",
+    "personalSaved": "Stored on this machine only. Your personal rules combine with the repo's shared rules."
+  },
+  "naming": {
+    "title": "New branch names",
+    "requirePattern": "Require new branches to match a pattern",
+    "pattern": "Pattern",
+    "hint": "Hint (shown when rejected)",
+    "tryName": "Try a name",
+    "matches": "matches",
+    "rejected": "rejected"
+  },
+  "protection": {
+    "title": "Protected branches",
+    "importTitle": "Import GitHub's branch protection rules",
+    "import": "Import from GitHub",
+    "empty": "No protected branches. Add one to guard matching branches against deletion, force-pushes, and unwanted merge types.",
+    "blockDeletion": "Block deletion",
+    "blockForcePush": "Block force-push",
+    "requirePullRequest": "Require pull request",
+    "allowedMerges": "Allowed merges into this branch",
+    "viaPullRequest": "via pull request"
+  },
+  "promotion": {
+    "title": "Promotion branches",
+    "empty": "No promotion branches. Add a pattern such as staging or release/* to mark pull requests from that branch as promotions. GitDesktop won't offer to update them from their base.",
+    "patternLabel": "Promotion branch pattern {{number}}",
+    "removeLabel": "Remove promotion branch {{pattern}}"
+  },
+  "mergeMethod": {
+    "merge": "Merge commit",
+    "squash": "Squash",
+    "rebase": "Rebase"
+  },
+  "add": "Add",
+  "remove": "Remove",
+  "cancel": "Cancel",
+  "import": {
+    "none": "No branch protection rules found on GitHub (reading them needs repo-admin access).",
+    "success_one": "Imported {{count}} rule from GitHub — review and save",
+    "success_other": "Imported {{count}} rules from GitHub — review and save"
+  },
+  "saved": {
+    "shared": "Saved to .gitdesktop/branch-rules.json — commit it to share with your team",
+    "personal": "Branch rules saved"
+  },
+  "save": {
+    "loadError": "Couldn't load branch rules",
+    "loading": "Loading branch rules…",
+    "noChanges": "No changes to save",
+    "saving": "Saving…",
+    "shared": "Save to repository",
+    "personal": "Save changes"
+  }
+}

@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import {
   isPullWouldDrop,
   isStalePullDecision,
-  PULL_DECISION_STALE_MESSAGE,
+  pullDecisionStaleMessage,
 } from "@/lib/error-summary";
 import type {
   PullDecision,
@@ -14,7 +14,7 @@ import { usePullRebaseDecided } from "@/lib/git/queries";
 import { useUiStore } from "@/lib/stores/ui";
 import { promotionBlocksCheckout } from "@/lib/stores/worktree-removal";
 import { toastError } from "@/lib/toast";
-import { PROMOTION_BLOCKS_CHECKOUT } from "./checkout-copy";
+import { promotionBlocksCheckoutCopy } from "./checkout-copy";
 import {
   PULL_DECISION_COPY,
   PullRebaseDropDialog,
@@ -75,7 +75,7 @@ export function usePullDropGuard(
    *  feature exists to handle. */
   function handleRecoveryError(e: unknown): boolean {
     if (isStalePullDecision(e)) {
-      toast(PULL_DECISION_STALE_MESSAGE);
+      toast(pullDecisionStaleMessage());
       return true;
     }
     return handleError(e);
@@ -95,7 +95,7 @@ export function usePullDropGuard(
       return;
     }
     if (promotionBlocksCheckout(repoPath)) {
-      toast.info(PROMOTION_BLOCKS_CHECKOUT);
+      toast.info(promotionBlocksCheckoutCopy());
       setAsked(null);
       return;
     }
@@ -126,7 +126,7 @@ export function usePullDropGuard(
       toast.success("Pulled with rebase", { description: outcome });
     } catch (e) {
       if (isStalePullDecision(e)) {
-        toast(PULL_DECISION_STALE_MESSAGE);
+        toast(pullDecisionStaleMessage());
       } else if (!recovery.handleError(e, retry)) {
         toastError(e);
       }

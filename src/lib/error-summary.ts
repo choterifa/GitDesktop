@@ -1,5 +1,10 @@
 import type { DroppedCommit, PullWouldDrop } from "@/lib/git/api";
+import { i18n } from "@/lib/i18n";
 import { type AppError, errorMessage, isAppError } from "@/lib/tauri/invoke";
+
+function errorText(key: string, values?: Record<string, string>): string {
+  return i18n.t(key, { ns: "errors", ...values });
+}
 
 /** A humanized error, split into what a toast shows (a calm one-liner) and what
  *  the Details dialog shows (the full raw text). Pure — derived from the thrown
@@ -19,29 +24,9 @@ export interface ErrorPresentation {
 }
 
 /** Human labels for every AppError kind (mirrors the union in tauri/invoke.ts). */
-const KIND_LABELS: Record<AppError["kind"], string> = {
-  git: "Git error",
-  conflict: "Merge conflict",
-  pullRebaseWouldDrop: "Pull blocked",
-  busy: "Operation in progress",
-  branchHeld: "Branch in use",
-  pushUpstreamNameMismatch: "Push blocked",
-  notARepo: "Not a Git repository",
-  gitNotFound: "Git not found",
-  ghNotFound: "GitHub CLI not found",
-  gh: "GitHub error",
-  issuesDisabled: "Issues disabled",
-  glabNotFound: "GitLab CLI not found",
-  glab: "GitLab error",
-  bitbucketNotConfigured: "Bitbucket not configured",
-  bitbucket: "Bitbucket error",
-  jira: "Jira error",
-  keyring: "Credential storage error",
-  invalidArgument: "Invalid input",
-  command: "Command failed",
-  io: "I/O error",
-  timeout: "Timed out",
-};
+function kindLabel(kind: AppError["kind"]): string {
+  return errorText(`kind.${kind}`);
+}
 
 /** The lowercase lead a kind's Rust `#[error]` attribute writes ahead of its
  *  detail (pinned by `display_leads_match_the_frontend_mirror` in
@@ -310,28 +295,28 @@ const PUSH_REJECTION_SUMMARIES: readonly (readonly [RegExp, string])[] = [
   // `--force-if-includes` to reject the retry with the reason below.
   [
     /^[ \t]*! \[rejected\][^\n]*\(stale info\)/m,
-    "Force push blocked — the remote moved since your last fetch. Fetch and review the new commits, then bring them into your branch before pushing.",
+    "summary.forcePushStale",
   ],
   // `--force-if-includes` refused: the remote tip was fetched but never merged
   // or rebased into this branch, so pushing would drop it.
   [
     /^[ \t]*! \[rejected\][^\n]*\(remote ref updated since checkout\)/m,
-    "Force push blocked — the remote has commits your branch hasn't incorporated. Pull them in, then push again.",
+    "summary.forcePushRemoteUpdated",
   ],
 ];
 
 /** The humanized line for a blocked force push, or null when the text carries
  *  no mapped rejection reason. */
 function pushRejectionSummary(text: string): string | null {
-  return PUSH_REJECTION_SUMMARIES.find(([m]) => m.test(text))?.[1] ?? null;
+  const key = PUSH_REJECTION_SUMMARIES.find(([m]) => m.test(text))?.[1];
+  return key ? errorText(key) : null;
 }
 
 /** The read-only/archived-repository summary, shared by every sideband shape that
  *  means the same thing in different words — GitHub and Gitea say "read-only"
  *  outright; GitLab's archived-project refusal (below) does not, so it gets its
  *  own pattern pointed at the same text rather than a guessed generic regex. */
-const READ_ONLY_REPOSITORY_SUMMARY =
-  "The remote reports this repository as read-only (usually a mirror or an archived repository), so different credentials won't change the answer. If it mirrors another repository, push there instead.";
+const READ_ONLY_REPOSITORY_SUMMARY = "summary.remoteReadOnly";
 
 /** Transport and sideband refusals — the remote answering the connection rather
  *  than rejecting a ref, so they are deliberately separate from the per-ref
@@ -367,15 +352,15 @@ const REMOTE_ACCESS_SUMMARIES: readonly (readonly [RegExp, string])[] = [
   ],
   [
     /^fatal: could not read (?:Username|Password) for /m,
-    "No credentials are stored for this remote, and GitDesktop never lets Git prompt for them. Add them to your Git credential helper, then try again.",
+    "summary.remoteCredentialsMissing",
   ],
   [
     /^fatal: Authentication failed for /m,
-    "The remote rejected the credentials it was given. Update them in your Git credential helper, then try again.",
+    "summary.remoteAuthFailed",
   ],
   [
     /^fatal: unable to access '[^'\n]*': The requested URL returned error: 403/m,
-    "The remote recognizes the account but it lacks permission for this operation on this repository. Ask an owner for access, or check that the credentials in use belong to the account you expect.",
+    "summary.remoteForbidden",
   ],
   // Anchored on ssh's `user@host: Permission denied (` line, not git's shared
   // `fatal: Could not read from remote repository.` tail: that tail follows every
@@ -387,14 +372,15 @@ const REMOTE_ACCESS_SUMMARIES: readonly (readonly [RegExp, string])[] = [
   // Details keeps them.
   [
     /^\S+@\S+: Permission denied \((?=[^)\n]*publickey)/m,
-    "The remote refused the SSH connection because no key it accepts was offered. Add or load an SSH key with access to this remote, then try again.",
+    "summary.remoteSshKeyRefused",
   ],
 ];
 
 /** The humanized line for a remote refusing access, or null when the text
  *  carries none of the mapped shapes. */
 function remoteAccessSummary(text: string): string | null {
-  return REMOTE_ACCESS_SUMMARIES.find(([m]) => m.test(text))?.[1] ?? null;
+  const key = REMOTE_ACCESS_SUMMARIES.find(([m]) => m.test(text))?.[1];
+  return key ? errorText(key) : null;
 }
 
 /** Windows MAX_PATH refusals. git prints its reason as the TAIL of a diagnostic
@@ -408,13 +394,14 @@ const LONG_PATH_MARKERS = [/: Filename too long\s*$/m];
 /** The app's own git calls already pass `-c core.longpaths=true` (git/runner.rs),
  *  so a path this long fails only where that flag can't reach — hence the remedy
  *  is aimed at the user's other tools rather than at GitDesktop. */
-const LONG_PATH_SUMMARY =
-  "Paths in this repository are longer than Windows allows by default. GitDesktop's own Git commands handle them; other tools need Windows long paths and git config --global core.longpaths true.";
+const LONG_PATH_SUMMARY = "summary.windowsLongPath";
 
 /** The humanized line for a path-length refusal, or null when the text carries
  *  none. */
 function longPathSummary(text: string): string | null {
-  return LONG_PATH_MARKERS.some((m) => m.test(text)) ? LONG_PATH_SUMMARY : null;
+  return LONG_PATH_MARKERS.some((m) => m.test(text))
+    ? errorText(LONG_PATH_SUMMARY)
+    : null;
 }
 
 /** GitHub's secret push protection refusing a push (block measured verbatim,
@@ -432,14 +419,13 @@ const PUSH_PROTECTION_MARKERS = [
 /** GitHub refuses the ref update, so the commits never land and the cheap
  *  remedy — rewriting them — is still open. Saying that is the point: a user
  *  who reads this as a transient failure retries past it. */
-const PUSH_PROTECTION_SUMMARY =
-  "GitHub blocked this push because it detected a likely secret, so the commits were not added to the repository. Remove the secret from the commits and push again, or if it is a false positive, open the unblock link GitHub printed in the details.";
+const PUSH_PROTECTION_SUMMARY = "summary.secretPushBlocked";
 
 /** The humanized line for a push blocked by secret push protection, or null when
  *  the text carries no such block. */
 function pushProtectionSummary(text: string): string | null {
   return PUSH_PROTECTION_MARKERS.some((m) => m.test(text))
-    ? PUSH_PROTECTION_SUMMARY
+    ? errorText(PUSH_PROTECTION_SUMMARY)
     : null;
 }
 
@@ -608,9 +594,7 @@ function networkSummary(
   const transport =
     phrases.some((p) => hasStandaloneWord(scan, p)) ||
     (kind === "gh" && GH_OUTAGE_STATUS.test(text));
-  return transport
-    ? `Couldn't reach ${host} — check your network connection.`
-    : null;
+  return transport ? errorText("summary.networkUnreachable", { host }) : null;
 }
 
 /** Measured subset of forge/session.rs NETWORKISH, GH_NETWORKISH_EXTRA and
@@ -716,7 +700,9 @@ const PULL_DECISION_STALE_MARKER = "PULL_DECISION_STALE";
 /** What to tell the user when a decision outlived the state it was made about.
  *  Every SHA the answer pinned is gone, so the remedy is a fresh pull rather
  *  than a retry — shared so the direct and stash-retry paths cannot drift. */
-export const PULL_DECISION_STALE_MESSAGE = "The branch moved — pull again.";
+export function pullDecisionStaleMessage(): string {
+  return errorText("summary.pullDecisionStale");
+}
 
 /** Whether `e` is a decided pull refused because the branch moved underneath it.
  *  Reads the raw message: Rust prefixes the marker onto an ordinary `command`
@@ -763,25 +749,17 @@ const MERGE_VERDICT = /^Automatic merge failed/;
  *  `local_pr_finish_squash_all_ours_is_a_known_no_op`), so no banner Continue
  *  exists to point at — and committing is how a plain merge finishes anyway. */
 function conflictSummary(text: string): string {
-  const paused = (op: string, finish: string) =>
-    `${op} paused — resolve the conflicts, then ${finish}.`;
   const lines = text.split(/\r\n|[\n\r]/);
   for (const line of lines) {
     if (SUBJECT_ECHO_LINE.test(line)) continue;
     const op = OP_ADVICE.exec(line)?.[1];
-    if (op) {
-      const name =
-        op === "cherry-pick"
-          ? "Cherry-pick"
-          : op.charAt(0).toUpperCase() + op.slice(1);
-      return paused(name, "continue");
-    }
+    if (op) return errorText(`conflict.${op}`);
   }
   // Advice first: it is the stronger signal, and only its absence leaves the
   // merge verdict as the sole name for the paused operation.
   if (lines.some((line) => MERGE_VERDICT.test(line)))
-    return paused("Merge", "commit");
-  return paused("Operation", "continue");
+    return errorText("conflict.merge");
+  return errorText("conflict.unknown");
 }
 
 /** What a paused operation is called and how the user finishes it, keyed by the
@@ -791,22 +769,21 @@ function conflictSummary(text: string): string {
  *  pop and apply keep the entry (measured, git 2.51.1), while `stash-restore`
  *  recovers a DANGLING stash that is already off the list — promising a kept
  *  entry there would send the user looking for one that isn't coming back. */
-const CONFLICT_SUMMARIES: Record<string, string> = {
-  merge: "Merge paused — resolve the conflicts, then commit.",
-  rebase: "Rebase paused — resolve the conflicts, then continue.",
-  "cherry-pick": "Cherry-pick paused — resolve the conflicts, then continue.",
-  revert: "Revert paused — resolve the conflicts, then continue.",
-  "stash-pop": "Stash pop hit conflicts — resolve them; your stash was kept.",
-  "stash-apply":
-    "Stash apply hit conflicts — resolve them; your stash was kept.",
-  "stash-restore":
-    "Restore hit conflicts — resolve them; the recovered changes are in your working tree.",
-};
+const CONFLICT_SUMMARY_KEYS = new Set([
+  "merge",
+  "rebase",
+  "cherry-pick",
+  "revert",
+  "stash-pop",
+  "stash-apply",
+  "stash-restore",
+]);
 
-/** Mirrors `conflictSummary`'s own unknown-operation line, so an `op` the Rust
- *  layer adds ahead of a table entry still reads as a paused operation. */
-const UNKNOWN_CONFLICT_SUMMARY =
-  "Operation paused — resolve the conflicts, then continue.";
+function structuredConflictSummary(op: string): string {
+  return errorText(
+    `conflict.${CONFLICT_SUMMARY_KEYS.has(op) ? op : "unknown"}`,
+  );
+}
 
 /** Count of non-empty lines in a string. */
 function nonEmptyLineCount(text: string): number {
@@ -823,7 +800,7 @@ function nonEmptyLineCount(text: string): number {
  */
 export function presentError(e: unknown): ErrorPresentation {
   if (isAppError(e)) {
-    const label = KIND_LABELS[e.kind];
+    const label = kindLabel(e.kind);
     // Keyed on the kind rather than on `isPullWouldDrop`, so a payload too
     // malformed to open the decision dialog still gets the one human sentence
     // Rust already wrote for it instead of falling through to raw git output.
@@ -855,7 +832,7 @@ export function presentError(e: unknown): ErrorPresentation {
       const report = (e.report ?? "").trim();
       return {
         label,
-        summary: CONFLICT_SUMMARIES[e.op] ?? UNKNOWN_CONFLICT_SUMMARY,
+        summary: structuredConflictSummary(e.op),
         fullText: report || (e.message ?? ""),
         long: report !== "",
       };
@@ -907,7 +884,7 @@ export function presentError(e: unknown): ErrorPresentation {
   }
 
   const message = e instanceof Error ? e.message : String(e);
-  const summary = firstMeaningfulLine(message) || "Unexpected error";
+  const summary = firstMeaningfulLine(message) || errorText("unexpected");
   const long = nonEmptyLineCount(message) > 1 || message.length > 140;
   return { label: null, summary, fullText: message, long };
 }

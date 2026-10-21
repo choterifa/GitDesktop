@@ -56,6 +56,7 @@ import {
   stampSent,
   type TouchedEdit,
 } from "./touched-draft";
+import { repoSettingsText as tr } from "./use-repo-settings-text";
 
 /** Dependabot / dependency-graph options GitHub exposes to NO repo-level API —
  *  they're web-UI-only. (Version updates is handled by the dependabot.yml
@@ -183,7 +184,7 @@ export function SecuritySection({
   return (
     <RemoteFormSection
       query={security}
-      noun="security settings"
+      noun={tr("security settings")}
       skeleton={
         <div className="min-w-0 space-y-3">
           <Skeleton className="h-12 w-full" />
@@ -191,8 +192,10 @@ export function SecuritySection({
           <Skeleton className="h-12 w-full" />
         </div>
       }
-      errorTitle="Couldn't load security."
-      errorHint="If this is a permissions error, these settings need repo-admin access."
+      errorTitle={tr("Couldn't load security.")}
+      errorHint={tr(
+        "If this is a permissions error, these settings need repo-admin access.",
+      )}
     >
       {(status) => (
         <div className="min-w-0 space-y-4">
@@ -251,7 +254,7 @@ function DependabotVersionUpdates({
   async function handleRemove() {
     try {
       await del.mutateAsync(undefined);
-      toast.success("Removed .github/dependabot.yml — commit it");
+      toast.success(tr("Removed .github/dependabot.yml — commit it"));
       setConfirmingRemove(false);
     } catch (e) {
       toastError(e);
@@ -261,7 +264,7 @@ function DependabotVersionUpdates({
   async function handleCreate(content: string) {
     try {
       await set.mutateAsync(content);
-      toast.success("Wrote .github/dependabot.yml — commit it to enable");
+      toast.success(tr("Wrote .github/dependabot.yml — commit it to enable"));
       setDialogOpen(false);
     } catch (e) {
       toastError(e);
@@ -277,7 +280,9 @@ function DependabotVersionUpdates({
     <div data-confirm-section className="border-t pt-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium">Dependabot version updates</p>
+          <p className="text-xs font-medium">
+            {tr("Dependabot version updates")}
+          </p>
           <p className="text-[11px] text-muted-foreground">
             {exists
               ? "Configured in .github/dependabot.yml."
@@ -288,7 +293,7 @@ function DependabotVersionUpdates({
           confirmingRemove ? (
             <div className="flex shrink-0 items-center gap-2">
               <InlineConfirm
-                actLabel="Remove"
+                actLabel={tr("Remove")}
                 pending={del.isPending}
                 swapFocusRef={swapFocus()}
                 onCancel={() => setConfirmingRemove(false)}
@@ -302,9 +307,9 @@ function DependabotVersionUpdates({
               size="sm"
               className="shrink-0"
               onClick={() => setConfirmingRemove(true)}
-              aria-label="Remove Dependabot version updates"
+              aria-label={tr("Remove Dependabot version updates")}
             >
-              Remove
+              {tr("Remove")}
             </Button>
           )
         ) : (
@@ -316,7 +321,7 @@ function DependabotVersionUpdates({
             className="shrink-0"
             onClick={() => setDialogOpen(true)}
           >
-            Set up…
+            {tr("Set up…")}
           </Button>
         )}
       </div>
@@ -366,11 +371,11 @@ function DependabotDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent finalFocus={finalFocus}>
         <DialogHeader>
-          <DialogTitle>Set up version updates</DialogTitle>
+          <DialogTitle>{tr("Set up version updates")}</DialogTitle>
           <DialogDescription>
-            Pick the package ecosystems to keep up to date. This writes
-            <span className="font-mono"> .github/dependabot.yml</span> to your
-            working tree for you to commit.
+            {tr("Pick the package ecosystems to keep up to date. This writes")}
+            <span className="font-mono"> {tr(".github/dependabot.yml")}</span>{" "}
+            {tr("to your\r\n            working tree for you to commit.")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-2">
@@ -390,13 +395,13 @@ function DependabotDialog({
                   })
                 }
               />
-              {e.label}
+              {tr(e.label)}
             </label>
           ))}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="dependabot-interval" className="text-xs">
-            Check for updates
+            {tr("Check for updates")}
           </Label>
           <Select value={interval} onValueChange={(v) => v && setInterval(v)}>
             <SelectTrigger id="dependabot-interval" className="w-40">
@@ -413,7 +418,7 @@ function DependabotDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tr("Cancel")}
           </Button>
           {/* No offline rung: dependabot.yml is a local working-tree write. */}
           <DisabledReasonButton
@@ -424,7 +429,7 @@ function DependabotDialog({
             }
           >
             {pending && <Spinner data-icon="inline-start" />}
-            Create dependabot.yml
+            {tr("Create dependabot.yml")}
           </DisabledReasonButton>
         </DialogFooter>
       </DialogContent>
@@ -438,9 +443,12 @@ function MoreOnGitHub({ repoPath, open }: { repoPath: string; open: boolean }) {
   const url = settings.data?.htmlUrl;
   if (!url) return null;
   return (
-    <LabeledGroup label="Only on GitHub" className="space-y-2 border-t pt-3">
+    <LabeledGroup
+      label={tr("Only on GitHub")}
+      className="space-y-2 border-t pt-3"
+    >
       <p className="text-[11px] text-muted-foreground">
-        GitHub exposes no API for these — manage them in your browser.
+        {tr("GitHub exposes no API for these — manage them in your browser.")}
       </p>
       <ul className="space-y-1">
         {WEB_ONLY_SECURITY.map((label) => (
@@ -450,7 +458,7 @@ function MoreOnGitHub({ repoPath, open }: { repoPath: string; open: boolean }) {
               className="flex cursor-pointer items-center gap-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline"
               onClick={() => openUrl(`${url}/settings/security_analysis`)}
             >
-              {label}
+              {tr(label)}
               <ArrowSquareOutIcon className="size-3 shrink-0" />
             </button>
           </li>
@@ -545,7 +553,7 @@ function SecurityForm({
         changes.map((c) => [c.feature, c.enabled]),
       );
       setPending((p) => stampSent(p, at, sent));
-      toast.success("Security settings saved");
+      toast.success(tr("Security settings saved"));
     } catch (e) {
       toastError(e);
     }
@@ -558,7 +566,9 @@ function SecurityForm({
         const parent = FEATURES.find((p) => p.key === f.dependsOn);
         const blocked = parent !== undefined && !draft[parent.key];
         const blockedReason = blocked
-          ? `Available once ${parent.label} is on.`
+          ? tr("Available once {{feature}} is on.", {
+              feature: tr(parent.label),
+            })
           : undefined;
         return (
           <label
@@ -569,8 +579,8 @@ function SecurityForm({
             title={heldSwitchReason(blockedReason, apply.isPending)}
           >
             <div className="min-w-0">
-              <p className="text-xs font-medium">{f.label}</p>
-              <p className="text-[11px] text-muted-foreground">{f.desc}</p>
+              <p className="text-xs font-medium">{tr(f.label)}</p>
+              <p className="text-[11px] text-muted-foreground">{tr(f.desc)}</p>
             </div>
             <HeldSwitch
               checked={draft[f.key]}
@@ -585,9 +595,9 @@ function SecurityForm({
 
       {status.isPrivate && (
         <p className="pt-1 text-[11px] text-muted-foreground">
-          On private repositories, secret and code scanning require GitHub
-          Advanced Security (and may use paid seats). Dependabot alerts,
-          security updates, and private vulnerability reporting are free.
+          {tr(
+            "On private repositories, secret and code scanning require GitHub\r\n          Advanced Security (and may use paid seats). Dependabot alerts,\r\n          security updates, and private vulnerability reporting are free.",
+          )}
         </p>
       )}
 
@@ -599,7 +609,7 @@ function SecurityForm({
           disabled={discardHeldReason !== undefined}
           reason={discardHeldReason}
         >
-          Discard
+          {tr("Discard")}
         </DisabledReasonButton>
         <DisabledReasonButton
           size="sm"
@@ -608,7 +618,7 @@ function SecurityForm({
           reason={saveHeldReason}
         >
           {apply.isPending && <Spinner data-icon="inline-start" />}
-          Save changes
+          {tr("Save changes")}
         </DisabledReasonButton>
       </div>
     </div>
